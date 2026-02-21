@@ -1,61 +1,104 @@
-"""
+﻿"""
 setup.py
 
-Interactive setup wizard for Orion.
-Walks the user through configuring all required credentials and tests connectivity.
-
-Run with: python scripts/setup.py
-
+Interactive multi-provider setup wizard for Orion.
+Configures Telegram, AI providers, connectivity tests, and database settings.
 Part of Orion - Persistent AI Companion System.
 """
 
+from __future__ import annotations
+
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+import requests
+from dotenv import load_dotenv
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from dotenv import load_dotenv
+from engines.auth.manager import get_auth_manager
 
 ENV_PATH = project_root / ".env"
+load_dotenv(ENV_PATH)
+
+PROVIDER_MENU = {
+    "1": "anthropic",
+    "2": "openai",
+    "3": "gemini",
+    "4": "openrouter",
+    "5": "groq",
+    "6": "mistral",
+    "7": "ollama",
+    "8": "skip",
+}
+
+PROVIDER_LABELS = {
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "gemini": "Gemini",
+    "openrouter": "OpenRouter",
+    "groq": "Groq",
+    "mistral": "Mistral",
+    "ollama": "Ollama",
+}
+
+DEFAULT_VALUES = {
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "llama3.2",
+    "DATABASE_URL": "sqlite:///orion.db",
+    "DEFAULT_USER_ID": "owner",
+    "DEFAULT_ENGINE": "anthropic",
+    "PERMISSIONS_CONFIG": "permissions/permissions.yaml",
+    "LOG_LEVEL": "INFO",
+}
 
 
 def print_header() -> None:
-    """Print the Orion Setup Wizard header."""
+    """Print setup wizard header."""
     print()
     print("=" * 60)
-    print("   ORION SETUP WIZARD")
+    print("Orion Setup")
     print("=" * 60)
     print()
 
 
-def prompt_input(
-    label: str, default: str = "", required: bool = False, hint: str = ""
-) -> str:
+def load_existing_env() -> dict[str, str]:
+    """Load existing .env key/value pairs if file exists."""
+    if not ENV_PATH.exists():
+        return {}
+
+    existing: dict[str, str] = {}
+    for raw_line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        existing[key.strip()] = value.strip()
+    return existing
+
+
+def prompt_input(label: str, default: str = "", required: bool = False) -> str:
     """
-    Prompt user for input with optional default and hint.
+    Prompt user input with optional default.
 
     Args:
-        label: The prompt label.
-        default: Default value if user presses Enter.
-        required: If True, re-prompt until a value is provided.
-        hint: Optional hint text shown after the prompt.
+        label: Prompt label.
+        default: Default value if user enters empty.
+        required: If True, re-prompt until non-empty.
 
     Returns:
-        The user input string.
+        User input value.
     """
-    prompt_text = f"  {label}"
-    if default:
-        prompt_text += f" [{default}]"
-    prompt_text += ": "
-
-    if hint:
-        print(f"    {hint}")
+    suffix = f" [{default}]" if default else ""
+    prompt = f"{label}{suffix}: "
 
     while True:
         try:
-            value = input(prompt_text).strip()
+            value = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             print("\nSetup cancelled.")
             sys.exit(0)
@@ -66,415 +109,598 @@ def prompt_input(
             return default
         if not required:
             return ""
-        print("    This value is required. Please enter a value.")
+        print("This field is required.")
 
 
 def prompt_yes_no(label: str, default: bool = False) -> bool:
     """
-    Prompt user for yes/no confirmation.
+    Prompt user for yes/no decision.
 
     Args:
-        label: The prompt label.
-        default: Default value if user presses Enter.
+        label: Prompt label.
+        default: Default boolean value.
 
     Returns:
         True for yes, False for no.
     """
-    default_str = "Y/n" if default else "y/N"
-    prompt_text = f"  {label} [{default_str}]: "
-
+    marker = "Y/n" if default else "y/N"
     try:
-        value = input(prompt_text).strip().lower()
+        value = input(f"{label} [{marker}]: ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print("\nSetup cancelled.")
         sys.exit(0)
 
     if not value:
         return default
-    return value in ("y", "yes", "true", "1")
+    return value in {"y", "yes", "1", "true"}
 
 
-def load_existing_env() -> dict:
+def parse_multi_selection(raw: str) -> list[str]:
     """
-    Load existing .env values if the file exists.
-
-    Returns:
-        Dict of existing environment variables.
-    """
-    if not ENV_PATH.exists():
-        return {}
-
-    existing = {}
-    with open(ENV_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, value = line.partition("=")
-                existing[key.strip()] = value.strip()
-
-    return existing
-
-
-def write_env(values: dict, existing: dict) -> None:
-    """
-    Write values to .env file, preserving existing values unless overwritten.
+    Parse multi-select provider input into ordered provider names.
 
     Args:
-        values: New values to write.
-        existing: Existing values from .env file.
-    """
-    merged = existing.copy()
+        raw: Input like "1 3 5" or "1,3,5".
 
-    for key, value in values.items():
-        if value:
-            merged[key] = value
+    Returns:
+        Ordered list of provider keys.
+    """
+    normalized = raw.replace(",", " ")
+    items = [item.strip() for item in normalized.split() if item.strip()]
+
+    selected: list[str] = []
+    for item in items:
+        provider = PROVIDER_MENU.get(item)
+        if provider and provider not in selected:
+            selected.append(provider)
+    return selected
+
+
+def merge_updates(
+    existing: dict[str, str],
+    updates: dict[str, str],
+) -> dict[str, str]:
+    """
+    Merge updates into existing env values safely.
+
+    Existing non-empty values are not overwritten unless user confirms.
+
+    Args:
+        existing: Existing env values.
+        updates: New values gathered by wizard.
+
+    Returns:
+        Merged env dictionary.
+    """
+    merged = dict(existing)
+
+    for key, new_value in updates.items():
+        if new_value is None:
+            continue
+
+        new_value = str(new_value).strip()
+        if not new_value:
+            continue
+
+        current = merged.get(key, "").strip()
+        if current and current != new_value:
+            should_replace = prompt_yes_no(
+                f"{key} already has a value. Replace it?",
+                default=False,
+            )
+            if not should_replace:
+                continue
+
+        merged[key] = new_value
+
+    return merged
+
+
+def write_env(values: dict[str, str]) -> None:
+    """
+    Write .env file in sectioned format while preserving extra keys.
+
+    Args:
+        values: Final env mapping.
+    """
+    section_keys = {
+        "Telegram": ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"],
+        "Provider Keys": [
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "GROQ_API_KEY",
+            "MISTRAL_API_KEY",
+        ],
+        "Ollama": ["OLLAMA_BASE_URL", "OLLAMA_MODEL"],
+        "Database": ["DATABASE_URL"],
+        "General": [
+            "DEFAULT_USER_ID",
+            "DEFAULT_ENGINE",
+            "PERMISSIONS_CONFIG",
+            "LOG_LEVEL",
+        ],
+    }
+
+    known_keys = {key for keys in section_keys.values() for key in keys}
 
     lines = [
         "# ============================================",
         "# Orion - Environment Variables",
         "# ============================================",
-        "# Generated by setup.py",
+        "# Generated by scripts/setup.py",
         "# ============================================",
         "",
     ]
 
-    sections = {
-        "Anthropic - API Key": ["ANTHROPIC_API_KEY"],
-        "OpenAI - Optional": ["OPENAI_API_KEY"],
-        "Google Gemini - Optional": ["GEMINI_API_KEY"],
-        "Telegram - Required for delivery": ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"],
-        "Database": ["DATABASE_URL"],
-        "User Config": ["DEFAULT_USER_ID"],
-        "Ollama - Local Free": ["OLLAMA_BASE_URL"],
-        "Voice": ["WHISPER_MODEL", "TTS_ENGINE"],
-        "Vision": ["VISION_ENGINE", "VISION_MODE"],
-        "Config": ["DEFAULT_ENGINE", "LOG_LEVEL", "PERMISSIONS_CONFIG"],
-    }
-
-    for section_title, keys in sections.items():
-        lines.append(f"# {section_title}")
+    for section, keys in section_keys.items():
+        lines.append(f"# {section}")
         for key in keys:
-            value = merged.get(key, "")
-            lines.append(f"{key}={value}")
+            lines.append(f"{key}={values.get(key, '')}")
         lines.append("")
 
-    with open(ENV_PATH, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    extras = sorted(k for k in values.keys() if k not in known_keys)
+    if extras:
+        lines.append("# Preserved Values")
+        for key in extras:
+            lines.append(f"{key}={values.get(key, '')}")
+        lines.append("")
 
-    print(f"\n  Configuration saved to: {ENV_PATH}")
+    ENV_PATH.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\nSaved configuration: {ENV_PATH}")
 
 
-def test_claude(api_key: str) -> tuple[bool, str]:
-    """
-    Test Claude API connectivity.
+def configure_telegram(existing: dict[str, str], updates: dict[str, str]) -> None:
+    """Run setup step for required Telegram delivery config."""
+    print("Step 1 - Telegram (required for delivery)")
 
-    Args:
-        api_key: Anthropic API key.
+    token_default = existing.get("TELEGRAM_BOT_TOKEN", "")
+    updates["TELEGRAM_BOT_TOKEN"] = prompt_input(
+        "TELEGRAM_BOT_TOKEN",
+        default=token_default,
+        required=not bool(token_default),
+    )
 
-    Returns:
-        Tuple of (success, message).
-    """
+    print("Find TELEGRAM_CHAT_ID by sending a message to @userinfobot on Telegram.")
+    chat_default = existing.get("TELEGRAM_CHAT_ID", "")
+    updates["TELEGRAM_CHAT_ID"] = prompt_input(
+        "TELEGRAM_CHAT_ID",
+        default=chat_default,
+        required=not bool(chat_default),
+    )
+
+    print()
+
+
+def choose_providers() -> list[str]:
+    """Run setup step for provider multi-selection."""
+    print("Step 2 - Choose AI providers (multiple allowed)")
+    print("[1] Anthropic (Claude) - API key from console.anthropic.com")
+    print("[2] OpenAI/Codex - API key OR login with subscription")
+    print("[3] Google Gemini - API key OR OAuth login")
+    print("[4] OpenRouter - one API key for many models (openrouter.ai/keys)")
+    print("[5] Groq - fast free API key (console.groq.com)")
+    print("[6] Mistral - API key (console.mistral.ai)")
+    print("[7] Ollama - local models, no API key")
+    print("[8] Skip - configure later")
+
+    while True:
+        raw = prompt_input("Select providers (example: 1 3 5 or 1,3,5)")
+        selected = parse_multi_selection(raw)
+        if not selected:
+            print("No valid selection detected. Try again.")
+            continue
+
+        if "skip" in selected and len(selected) > 1:
+            selected = [provider for provider in selected if provider != "skip"]
+
+        return selected
+
+
+def configure_openai(
+    existing: dict[str, str],
+    updates: dict[str, str],
+    auth_manager,
+) -> None:
+    """Configure OpenAI via API key or OAuth login."""
+    print("\nOpenAI setup")
+    print("[1] Enter API key")
+    print("[2] Login with ChatGPT/Codex subscription")
+
+    choice = prompt_input("Choose OpenAI auth mode", default="1")
+    if choice.strip() == "2":
+        success = auth_manager.login_provider("openai")
+        if success:
+            print("OpenAI OAuth login successful.")
+        else:
+            print("OpenAI OAuth login failed. You can configure API key later.")
+        return
+
+    default_key = existing.get("OPENAI_API_KEY", "")
+    updates["OPENAI_API_KEY"] = prompt_input(
+        "OPENAI_API_KEY",
+        default=default_key,
+        required=not bool(default_key),
+    )
+
+
+def configure_gemini(
+    existing: dict[str, str],
+    updates: dict[str, str],
+    auth_manager,
+) -> None:
+    """Configure Gemini via API key or OAuth login."""
+    print("\nGemini setup")
+    print("[1] Enter API key (free)")
+    print("[2] Login with Google account (OAuth)")
+
+    choice = prompt_input("Choose Gemini auth mode", default="1")
+    if choice.strip() == "2":
+        success = auth_manager.login_provider("gemini")
+        if success:
+            print("Gemini OAuth login successful.")
+        else:
+            print("Gemini OAuth login failed. You can configure API key later.")
+        return
+
+    default_key = existing.get("GEMINI_API_KEY", "")
+    updates["GEMINI_API_KEY"] = prompt_input(
+        "GEMINI_API_KEY",
+        default=default_key,
+        required=not bool(default_key),
+    )
+
+
+def configure_ollama(existing: dict[str, str], updates: dict[str, str]) -> None:
+    """Configure local Ollama provider settings."""
+    print("\nOllama setup")
+
+    ollama_path = shutil.which("ollama")
+    if not ollama_path:
+        print("Ollama was not found in PATH.")
+        print("Install command (Windows): winget install Ollama.Ollama")
+        updates["OLLAMA_BASE_URL"] = existing.get(
+            "OLLAMA_BASE_URL", DEFAULT_VALUES["OLLAMA_BASE_URL"]
+        )
+        updates["OLLAMA_MODEL"] = existing.get(
+            "OLLAMA_MODEL", DEFAULT_VALUES["OLLAMA_MODEL"]
+        )
+        return
+
+    print(f"Detected ollama: {ollama_path}")
+
+    try:
+        listed = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+        output = (listed.stdout or "").strip()
+        if output:
+            print("Installed Ollama models:")
+            print(output)
+        else:
+            print("No local models listed yet.")
+    except Exception as exc:
+        print(f"Could not run 'ollama list': {exc}")
+
+    default_model = existing.get("OLLAMA_MODEL", DEFAULT_VALUES["OLLAMA_MODEL"])
+    updates["OLLAMA_MODEL"] = prompt_input("Preferred Ollama model", default=default_model)
+    updates["OLLAMA_BASE_URL"] = existing.get(
+        "OLLAMA_BASE_URL", DEFAULT_VALUES["OLLAMA_BASE_URL"]
+    )
+
+
+def configure_selected_providers(
+    selected: list[str],
+    existing: dict[str, str],
+    updates: dict[str, str],
+    auth_manager,
+) -> None:
+    """Collect credentials for each selected provider."""
+    if selected == ["skip"]:
+        print("Provider setup skipped.")
+        print()
+        return
+
+    for provider in selected:
+        if provider == "anthropic":
+            updates["ANTHROPIC_API_KEY"] = prompt_input(
+                "ANTHROPIC_API_KEY",
+                default=existing.get("ANTHROPIC_API_KEY", ""),
+                required=not bool(existing.get("ANTHROPIC_API_KEY", "")),
+            )
+        elif provider == "openai":
+            configure_openai(existing, updates, auth_manager)
+        elif provider == "gemini":
+            configure_gemini(existing, updates, auth_manager)
+        elif provider == "openrouter":
+            updates["OPENROUTER_API_KEY"] = prompt_input(
+                "OPENROUTER_API_KEY",
+                default=existing.get("OPENROUTER_API_KEY", ""),
+                required=not bool(existing.get("OPENROUTER_API_KEY", "")),
+            )
+        elif provider == "groq":
+            updates["GROQ_API_KEY"] = prompt_input(
+                "GROQ_API_KEY",
+                default=existing.get("GROQ_API_KEY", ""),
+                required=not bool(existing.get("GROQ_API_KEY", "")),
+            )
+        elif provider == "mistral":
+            updates["MISTRAL_API_KEY"] = prompt_input(
+                "MISTRAL_API_KEY",
+                default=existing.get("MISTRAL_API_KEY", ""),
+                required=not bool(existing.get("MISTRAL_API_KEY", "")),
+            )
+        elif provider == "ollama":
+            configure_ollama(existing, updates)
+
+
+def test_anthropic(api_key: str) -> tuple[bool, str]:
+    """Test Anthropic API connectivity."""
     try:
         import anthropic
 
         client = anthropic.Anthropic(api_key=api_key)
         client.models.list()
-        return True, "OK"
-    except ImportError:
-        return False, "FAILED - anthropic package not installed"
+        return True, "claude-opus-4-6"
     except Exception as exc:
-        return False, f"FAILED - {exc}"
+        return False, str(exc)
 
 
-def test_openai(api_key: str) -> tuple[bool, str]:
-    """
-    Test OpenAI API connectivity.
+def test_openai(auth_manager) -> tuple[bool, str]:
+    """Test OpenAI connectivity using available auth mode."""
+    token = auth_manager.get_token("openai")
+    if not token:
+        return False, "no credentials"
 
-    Args:
-        api_key: OpenAI API key.
-
-    Returns:
-        Tuple of (success, message).
-    """
     try:
-        import openai
+        if token.startswith("Bearer "):
+            response = requests.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": token},
+                timeout=15,
+            )
+            if response.ok:
+                return True, "gpt-5.2"
+            return False, response.text
 
-        client = openai.OpenAI(api_key=api_key)
+        from openai import OpenAI
+
+        client = OpenAI(api_key=token)
         client.models.list()
-        return True, "OK"
-    except ImportError:
-        return False, "FAILED - openai package not installed"
+        return True, "gpt-5.2"
     except Exception as exc:
-        return False, f"FAILED - {exc}"
+        return False, str(exc)
 
 
-def test_gemini(api_key: str) -> tuple[bool, str]:
-    """
-    Test Gemini API connectivity.
+def test_gemini(auth_manager) -> tuple[bool, str]:
+    """Test Gemini connectivity using available auth mode."""
+    token = auth_manager.get_token("gemini")
+    if not token:
+        return False, "no credentials"
 
-    Args:
-        api_key: Google Gemini API key.
-
-    Returns:
-        Tuple of (success, message).
-    """
     try:
+        if token.startswith("Bearer "):
+            response = requests.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                headers={"Authorization": token},
+                timeout=15,
+            )
+            if response.ok:
+                return True, "gemini-3.1-pro"
+            return False, response.text
+
         import google.generativeai as genai
 
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=token)
         list(genai.list_models())
-        return True, "OK"
-    except ImportError:
-        return False, "FAILED - google-generativeai package not installed"
+        return True, "gemini-3.1-pro"
     except Exception as exc:
-        return False, f"FAILED - {exc}"
+        return False, str(exc)
 
 
-def test_telegram(bot_token: str) -> tuple[bool, str]:
+def test_openrouter(api_key: str) -> tuple[bool, str]:
+    """Test OpenRouter API connectivity."""
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            default_headers={
+                "HTTP-Referer": "https://github.com/maxvyquincy9393/orion",
+            },
+        )
+        client.models.list()
+        return True, "openrouter/auto"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def test_groq(api_key: str) -> tuple[bool, str]:
+    """Test Groq API connectivity."""
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=api_key)
+        client.models.list()
+        return True, "llama-3.3-70b-versatile"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def test_mistral(api_key: str) -> tuple[bool, str]:
+    """Test Mistral API connectivity with a minimal models endpoint call."""
+    try:
+        response = requests.get(
+            "https://api.mistral.ai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+        if response.ok:
+            return True, "mistral-large"
+        return False, response.text
+    except Exception as exc:
+        return False, str(exc)
+
+
+def test_ollama(base_url: str) -> tuple[bool, str]:
+    """Test Ollama local connectivity."""
+    try:
+        response = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=10)
+        if response.ok:
+            return True, "auto-detect"
+        return False, response.text
+    except Exception as exc:
+        return False, str(exc)
+
+
+def run_connectivity_tests(final_env: dict[str, str], auth_manager) -> dict[str, bool]:
     """
-    Test Telegram Bot API connectivity.
+    Run connectivity tests for configured providers.
 
     Args:
-        bot_token: Telegram bot token.
+        final_env: Final merged env values.
+        auth_manager: Shared AuthManager.
 
     Returns:
-        Tuple of (success, message).
+        Dict of provider -> readiness status.
     """
-    try:
-        import requests
+    print("Step 3 - Connectivity tests")
 
-        url = f"https://api.telegram.org/bot{bot_token}/getMe"
-        response = requests.get(url, timeout=10)
-        data = response.json()
+    results: dict[str, tuple[bool, str]] = {}
 
-        if data.get("ok"):
-            bot_info = data.get("result", {})
-            username = bot_info.get("username", "unknown")
-            return True, f"OK - @{username}"
-        return False, f"FAILED - {data.get('description', 'unknown error')}"
-    except ImportError:
-        return False, "FAILED - requests package not installed"
-    except Exception as exc:
-        return False, f"FAILED - {exc}"
+    if final_env.get("ANTHROPIC_API_KEY"):
+        results["anthropic"] = test_anthropic(final_env["ANTHROPIC_API_KEY"])
 
+    if auth_manager.get_token("openai"):
+        results["openai"] = test_openai(auth_manager)
 
-def run_connectivity_tests(values: dict) -> None:
-    """
-    Run connectivity tests for all provided credentials.
+    if auth_manager.get_token("gemini"):
+        results["gemini"] = test_gemini(auth_manager)
 
-    Args:
-        values: Dict of configured values.
-    """
-    print("\n" + "-" * 60)
-    print("  CONNECTIVITY TESTS")
+    if final_env.get("OPENROUTER_API_KEY"):
+        results["openrouter"] = test_openrouter(final_env["OPENROUTER_API_KEY"])
+
+    if final_env.get("GROQ_API_KEY"):
+        results["groq"] = test_groq(final_env["GROQ_API_KEY"])
+
+    if final_env.get("MISTRAL_API_KEY"):
+        results["mistral"] = test_mistral(final_env["MISTRAL_API_KEY"])
+
+    ollama_url = final_env.get("OLLAMA_BASE_URL", DEFAULT_VALUES["OLLAMA_BASE_URL"])
+    ollama_ok, ollama_msg = test_ollama(ollama_url)
+    if final_env.get("OLLAMA_MODEL") or ollama_ok:
+        results["ollama"] = (ollama_ok, ollama_msg)
+
+    if not results:
+        print("No configured providers found for connectivity tests.")
+        print()
+        return {}
+
+    print()
+    readiness: dict[str, bool] = {}
+    for provider, (ok, msg) in results.items():
+        label = PROVIDER_LABELS.get(provider, provider)
+        if ok:
+            print(f"{label}: OK ({msg})")
+        else:
+            print(f"{label}: FAILED: {msg}")
+        readiness[provider] = ok
+
+    print("\nSummary")
     print("-" * 60)
+    for provider in sorted(readiness.keys()):
+        status = "READY" if readiness[provider] else "FAILED"
+        print(f"{provider:12} {status}")
+    print()
 
-    results = {
-        "claude": {"tested": False, "success": False, "message": ""},
-        "openai": {"tested": False, "success": False, "message": ""},
-        "gemini": {"tested": False, "success": False, "message": ""},
-        "telegram": {"tested": False, "success": False, "message": ""},
-    }
-
-    if values.get("ANTHROPIC_API_KEY"):
-        print("\n  Testing Claude (Anthropic)...")
-        success, message = test_claude(values["ANTHROPIC_API_KEY"])
-        results["claude"] = {"tested": True, "success": success, "message": message}
-        status = "[OK]" if success else "[FAILED]"
-        print(f"    {status} {message}")
-
-    if values.get("OPENAI_API_KEY"):
-        print("\n  Testing OpenAI...")
-        success, message = test_openai(values["OPENAI_API_KEY"])
-        results["openai"] = {"tested": True, "success": success, "message": message}
-        status = "[OK]" if success else "[FAILED]"
-        print(f"    {status} {message}")
-
-    if values.get("GEMINI_API_KEY"):
-        print("\n  Testing Gemini...")
-        success, message = test_gemini(values["GEMINI_API_KEY"])
-        results["gemini"] = {"tested": True, "success": success, "message": message}
-        status = "[OK]" if success else "[FAILED]"
-        print(f"    {status} {message}")
-
-    if values.get("TELEGRAM_BOT_TOKEN"):
-        print("\n  Testing Telegram...")
-        success, message = test_telegram(values["TELEGRAM_BOT_TOKEN"])
-        results["telegram"] = {"tested": True, "success": success, "message": message}
-        status = "[OK]" if success else "[FAILED]"
-        print(f"    {status} {message}")
+    return readiness
 
 
-def print_summary(values: dict) -> None:
-    """
-    Print configuration summary.
+def configure_database(existing: dict[str, str], updates: dict[str, str]) -> None:
+    """Run setup step for database configuration."""
+    print("Step 4 - Database")
+    print("[1] SQLite (quick start, local)")
+    print("[2] PostgreSQL (production)")
 
-    Args:
-        values: Dict of configured values.
-    """
-    print("\n" + "=" * 60)
-    print("   CONFIGURATION SUMMARY")
-    print("=" * 60)
+    current = existing.get("DATABASE_URL", DEFAULT_VALUES["DATABASE_URL"])
+    choice = prompt_input("Choose database", default="1")
 
-    services = {
-        "Claude": values.get("ANTHROPIC_API_KEY", ""),
-        "OpenAI": values.get("OPENAI_API_KEY", ""),
-        "Gemini": values.get("GEMINI_API_KEY", ""),
-        "Telegram": values.get("TELEGRAM_BOT_TOKEN", ""),
-    }
+    if choice.strip() == "2":
+        updates["DATABASE_URL"] = prompt_input(
+            "PostgreSQL connection string",
+            default=current if current.startswith("postgresql") else "",
+            required=True,
+        )
+    else:
+        updates["DATABASE_URL"] = "sqlite:///orion.db"
 
-    print("\n  Services configured:")
-    for service, key in services.items():
-        status = "ready" if key else "skipped"
-        print(f"    {service:12} [{status}]")
+    print()
 
-    db_url = values.get("DATABASE_URL", "sqlite:///orion.db")
-    print(f"\n  Database: {db_url}")
-    print(f"  Default User ID: {values.get('DEFAULT_USER_ID', 'owner')}")
 
-    print("\n" + "-" * 60)
-    print("  NEXT STEPS")
-    print("-" * 60)
-    print("\n  1. Run: python scripts/first_run.py")
-    print("     (Tests database, engines, and daemon)")
-    print("\n  2. Run: python main.py")
-    print("     (Start Orion chat loop)")
-    print("\n" + "=" * 60)
+def print_final_summary(readiness: dict[str, bool]) -> None:
+    """Print final setup summary and next steps."""
+    print("Step 5 - Final summary")
+
+    ready = sorted([provider for provider, ok in readiness.items() if ok])
+    failed = sorted([provider for provider, ok in readiness.items() if not ok])
+
+    if ready:
+        print("Providers ready:")
+        for provider in ready:
+            print(f"- {provider}")
+    else:
+        print("No providers are fully ready yet.")
+
+    if failed:
+        print("Providers with failed connectivity:")
+        for provider in failed:
+            print(f"- {provider}")
+
+    print()
+    print("Run python scripts/first_run.py to test")
+    print("Run python main.py to start Orion")
+
+
+def apply_defaults(existing: dict[str, str], updates: dict[str, str]) -> None:
+    """Fill baseline defaults for config keys not explicitly updated."""
+    for key, value in DEFAULT_VALUES.items():
+        if key not in updates:
+            updates[key] = existing.get(key, value)
 
 
 def main() -> None:
-    """
-    Run the interactive setup wizard.
-
-    Steps:
-        1. Print header
-        2. Collect credentials from user
-        3. Write to .env file
-        4. Run connectivity tests
-        5. Print summary
-    """
+    """Run the Orion multi-provider setup wizard."""
     print_header()
 
     existing = load_existing_env()
+    updates: dict[str, str] = {}
+    auth_manager = get_auth_manager()
 
-    if existing:
-        print("  Found existing .env file. Values will be preserved unless changed.\n")
+    configure_telegram(existing, updates)
 
-    print("  Required credentials:")
-    print("-" * 60)
+    selected = choose_providers()
+    configure_selected_providers(selected, existing, updates, auth_manager)
 
-    values = {}
+    apply_defaults(existing, updates)
 
-    print("\n  --- Anthropic Claude (Required) ---")
-    print("  Claude is the primary reasoning engine for Orion.")
-    existing_key = existing.get("ANTHROPIC_API_KEY", "")
-    if existing_key:
-        print(f"  Existing key found: {existing_key[:8]}...{existing_key[-4:]}")
-        if not prompt_yes_no("Change it?", default=False):
-            values["ANTHROPIC_API_KEY"] = existing_key
-        else:
-            values["ANTHROPIC_API_KEY"] = prompt_input(
-                "ANTHROPIC_API_KEY", required=True
-            )
-    else:
-        values["ANTHROPIC_API_KEY"] = prompt_input("ANTHROPIC_API_KEY", required=True)
+    merged = merge_updates(existing, updates)
+    write_env(merged)
 
-    print("\n  --- Telegram (Required for delivery) ---")
-    print("  Telegram is used for proactive messages and confirmations.")
+    readiness = run_connectivity_tests(merged, auth_manager)
 
-    existing_token = existing.get("TELEGRAM_BOT_TOKEN", "")
-    if existing_token:
-        print(f"  Existing token found: {existing_token[:8]}...{existing_token[-4:]}")
-        if not prompt_yes_no("Change it?", default=False):
-            values["TELEGRAM_BOT_TOKEN"] = existing_token
-        else:
-            values["TELEGRAM_BOT_TOKEN"] = prompt_input(
-                "TELEGRAM_BOT_TOKEN", required=True
-            )
-    else:
-        values["TELEGRAM_BOT_TOKEN"] = prompt_input("TELEGRAM_BOT_TOKEN", required=True)
+    configure_database(merged, updates)
 
-    print("\n  How to get your TELEGRAM_CHAT_ID:")
-    print("    1. Open Telegram and search for @userinfobot")
-    print("    2. Start a conversation with it")
-    print("    3. It will reply with your chat ID")
+    apply_defaults(merged, updates)
+    merged = merge_updates(merged, updates)
+    write_env(merged)
 
-    existing_chat_id = existing.get("TELEGRAM_CHAT_ID", "")
-    if existing_chat_id:
-        print(f"  Existing chat ID found: {existing_chat_id}")
-        if not prompt_yes_no("Change it?", default=False):
-            values["TELEGRAM_CHAT_ID"] = existing_chat_id
-        else:
-            values["TELEGRAM_CHAT_ID"] = prompt_input("TELEGRAM_CHAT_ID", required=True)
-    else:
-        values["TELEGRAM_CHAT_ID"] = prompt_input("TELEGRAM_CHAT_ID", required=True)
-
-    print("\n  --- Optional API Keys ---")
-    print("  Press Enter to skip any of these.\n")
-
-    existing_openai = existing.get("OPENAI_API_KEY", "")
-    if existing_openai:
-        print(f"  OPENAI_API_KEY: {existing_openai[:8]}...{existing_openai[-4:]}")
-        if prompt_yes_no("Change it?", default=False):
-            values["OPENAI_API_KEY"] = prompt_input("OPENAI_API_KEY")
-        else:
-            values["OPENAI_API_KEY"] = existing_openai
-    else:
-        values["OPENAI_API_KEY"] = prompt_input("OPENAI_API_KEY (optional)")
-
-    existing_gemini = existing.get("GEMINI_API_KEY", "")
-    if existing_gemini:
-        print(f"  GEMINI_API_KEY: {existing_gemini[:8]}...{existing_gemini[-4:]}")
-        if prompt_yes_no("Change it?", default=False):
-            values["GEMINI_API_KEY"] = prompt_input("GEMINI_API_KEY")
-        else:
-            values["GEMINI_API_KEY"] = existing_gemini
-    else:
-        values["GEMINI_API_KEY"] = prompt_input("GEMINI_API_KEY (optional)")
-
-    print("\n  --- Database Configuration ---")
-
-    existing_db = existing.get("DATABASE_URL", "")
-    default_db = existing_db or "sqlite:///orion.db"
-
-    print("  SQLite (default) - Quick local start, no setup required.")
-    print("  PostgreSQL - Recommended for production.")
-    print()
-
-    if existing_db:
-        print(f"  Existing DATABASE_URL: {existing_db}")
-        if not prompt_yes_no("Change it?", default=False):
-            values["DATABASE_URL"] = existing_db
-        else:
-            values["DATABASE_URL"] = prompt_input("DATABASE_URL", default=default_db)
-    else:
-        values["DATABASE_URL"] = prompt_input("DATABASE_URL", default=default_db)
-
-    print("\n  --- User Configuration ---")
-
-    existing_user = existing.get("DEFAULT_USER_ID", "owner")
-    values["DEFAULT_USER_ID"] = prompt_input("DEFAULT_USER_ID", default=existing_user)
-
-    values["DEFAULT_ENGINE"] = "claude"
-    values["OLLAMA_BASE_URL"] = existing.get(
-        "OLLAMA_BASE_URL", "http://localhost:11434"
-    )
-    values["WHISPER_MODEL"] = existing.get("WHISPER_MODEL", "base")
-    values["TTS_ENGINE"] = existing.get("TTS_ENGINE", "coqui")
-    values["VISION_ENGINE"] = existing.get("VISION_ENGINE", "gemini")
-    values["VISION_MODE"] = existing.get("VISION_MODE", "passive")
-    values["LOG_LEVEL"] = existing.get("LOG_LEVEL", "INFO")
-    values["PERMISSIONS_CONFIG"] = existing.get(
-        "PERMISSIONS_CONFIG", "permissions/permissions.yaml"
-    )
-
-    write_env(values, existing)
-
-    run_connectivity_tests(values)
-
-    print_summary(values)
+    print_final_summary(readiness)
 
 
 if __name__ == "__main__":
