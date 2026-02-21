@@ -1,81 +1,109 @@
 import { tool } from "ai"
 import { z } from "zod"
-import * as fs from "fs"
-import * as path from "path"
 import { execa } from "execa"
-import { sandbox, PermissionAction } from "../permissions/sandbox"
-import config from "../config"
+import fs from "fs/promises"
 
-const BLOCKED_COMMANDS = ["rm -rf", "format", "del /", "mkfs", "dd if=", "> /dev/sd"]
+import { memory } from "../memory/store.js"
+import { createLogger } from "../logger.js"
 
-async function duckDuckGoSearch(query: string, maxResults: number): Promise<string> {
-  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
-  try {
-    const response = await fetch(searchUrl)
-    const html = await response.text()
-    const results: string[] = []
-    const regex = /<a[^>]*class="result__a"[^>]*>([^<]+)<\/a>/g
-    let match
-    let count = 0
-    while ((match = regex.exec(html)) !== null && count < maxResults) {
-      results.push(`${count + 1}. ${match[1].trim()}`)
-      count++
-    }
-    if (results.length === 0) {
-      return "No search results found."
-    }
-    return `Search results for: ${query}\n\n${results.join("\n")}`
-  } catch (err) {
-    return `Search failed: ${err}`
-  }
+const logger = createLogger("tools")
+
+const BLOCKED_COMMANDS = [
+  "rm -rf",
+  "del /f",
+  "format",
+  "mkfs",
+  "shutdown",
+  "reboot",
+  ":(){:|:&};:",
+  "dd if=",
+]
+
+function stripHtml(input: string): string {
+  return input.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim()
+}
+
+function decodeHtml(input: string): string {
+  return input
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
 }
 
 export const searchTool = tool({
-  description: "Search the web for information",
+  description: "Search the web for current information",
   parameters: z.object({
     query: z.string(),
     maxResults: z.number().default(5),
   }),
   execute: async ({ query, maxResults }) => {
-    return await duckDuckGoSearch(query, maxResults)
+    try {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+      const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } })
+      const html = await res.text()
+
+      const results: Array<{ title: string; url: string; snippet: string }> = []
+      const linkRegex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+      const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>|<div[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/div>/g
+
+      const snippets: string[] = []
+      let snippetMatch
+      while ((snippetMatch = snippetRegex.exec(html)) !== null) {
+        const raw = snippetMatch[1] || snippetMatch[2] || ""
+        snippets.push(decodeHtml(stripHtml(raw)))
+      }
+
+      let match
+      let count = 0
+      while ((match = linkRegex.exec(html)) !== null && count < maxResults) {
+        const href = decodeHtml(match[1])
+        const title = decodeHtml(stripHtml(match[2]))
+        const snippet = snippets[count] ?? ""
+        results.push({ title, url: href, snippet })
+        count += 1
+      }
+
+      if (!results.length) {
+        return "Search unavailable."
+      }
+
+      return results
+        .map((item) => `${item.title}\n${item.url}\n${item.snippet}\n---`)
+        .join("\n")
+    } catch (err) {
+      logger.error("search failed", err)
+      return "Search unavailable."
+    }
   },
 })
 
 export const memoryQueryTool = tool({
-  description: "Search Orion memory for past information",
+  description: "Search Orion memory for past conversations",
   parameters: z.object({
     query: z.string(),
-    userId: z.string(),
+    userId: z.string().default("owner"),
   }),
   execute: async ({ query, userId }) => {
-    try {
-      const dbPath = path.resolve(".orion/memory.db")
-      if (!fs.existsSync(dbPath)) {
-        return "No memory database found."
-      }
-      return `Memory search for '${query}' (user: ${userId}): Feature requires database integration.`
-    } catch (err) {
-      return `Memory query failed: ${err}`
+    const results = await memory.search(userId, query)
+    if (!results.length) {
+      return "No relevant memories found."
     }
+    return results.map((r) => r.content).join("\n---\n")
   },
 })
 
 export const fileReadTool = tool({
-  description: "Read a file from the filesystem",
+  description: "Read a file",
   parameters: z.object({
     path: z.string(),
   }),
-  execute: async ({ path: filePath }) => {
-    const allowed = await sandbox.check(PermissionAction.FILE_READ, config.DEFAULT_USER_ID)
-    if (!allowed) {
-      return "[Permission Denied] File read is not allowed."
-    }
-
+  execute: async ({ path }) => {
     try {
-      const content = await fs.promises.readFile(filePath, "utf-8")
-      return `Contents of ${filePath}:\n\n${content}`
+      return await fs.readFile(path, "utf-8")
     } catch (err) {
-      return `[Error] Failed to read file: ${err}`
+      return `Error reading file: ${String(err)}`
     }
   },
 })
@@ -86,21 +114,29 @@ export const fileWriteTool = tool({
     path: z.string(),
     content: z.string(),
   }),
-  execute: async ({ path: filePath, content }) => {
-    const allowed = await sandbox.checkWithConfirm(
-      PermissionAction.FILE_WRITE,
-      config.DEFAULT_USER_ID,
-      `Write to file: ${filePath}`
-    )
-    if (!allowed) {
-      return "[Permission Denied] File write was not confirmed."
-    }
-
+  execute: async ({ path, content }) => {
     try {
-      await fs.promises.writeFile(filePath, content, "utf-8")
-      return `Successfully wrote to ${filePath}`
+      await fs.writeFile(path, content, "utf-8")
+      return `Written to ${path}`
     } catch (err) {
-      return `[Error] Failed to write file: ${err}`
+      return `Error writing file: ${String(err)}`
+    }
+  },
+})
+
+export const fileListTool = tool({
+  description: "List files in a directory",
+  parameters: z.object({
+    path: z.string(),
+  }),
+  execute: async ({ path }) => {
+    try {
+      const entries = await fs.readdir(path, { withFileTypes: true })
+      return entries
+        .map((entry) => `${entry.isDirectory() ? "[DIR]" : "[FILE]"} ${entry.name}`)
+        .join("\n")
+    } catch (err) {
+      return `Error listing dir: ${String(err)}`
     }
   },
 })
@@ -111,39 +147,20 @@ export const terminalTool = tool({
     command: z.string(),
   }),
   execute: async ({ command }) => {
-    const isBlocked = BLOCKED_COMMANDS.some((blocked) =>
-      command.toLowerCase().includes(blocked.toLowerCase())
+    const blocked = BLOCKED_COMMANDS.find((blockedCmd) =>
+      command.toLowerCase().includes(blockedCmd),
     )
-    if (isBlocked) {
-      return "[Error] Command blocked for safety reasons."
-    }
-
-    const allowed = await sandbox.checkWithConfirm(
-      PermissionAction.TERMINAL_RUN,
-      config.DEFAULT_USER_ID,
-      `Run command: ${command}`
-    )
-    if (!allowed) {
-      return "[Permission Denied] Terminal command was not confirmed."
+    if (blocked) {
+      return `Command blocked: contains "${blocked}"`
     }
 
     try {
-      const result = await execa(command, {
-        shell: true,
-        timeout: 30000,
-        reject: false,
+      const { stdout, stderr } = await execa("sh", ["-c", command], {
+        timeout: 30_000,
       })
-      const output = []
-      if (result.stdout) {
-        output.push(`STDOUT:\n${result.stdout}`)
-      }
-      if (result.stderr) {
-        output.push(`STDERR:\n${result.stderr}`)
-      }
-      output.push(`Exit code: ${result.exitCode}`)
-      return output.join("\n\n")
+      return [stdout, stderr].filter(Boolean).join("\n")
     } catch (err) {
-      return `[Error] Command failed: ${err}`
+      return `Command failed: ${String(err)}`
     }
   },
 })
@@ -154,54 +171,34 @@ export const calendarTool = tool({
     action: z.enum(["get", "add"]),
     title: z.string().optional(),
     date: z.string().optional(),
+    time: z.string().optional(),
   }),
-  execute: async ({ action, title, date }) => {
-    const calendarPath = path.resolve(".orion/calendar.ics")
+  execute: async ({ action, title, date, time }) => {
+    const icsPath = ".orion/calendar.ics"
 
     if (action === "get") {
-      const allowed = await sandbox.check(PermissionAction.CALENDAR_READ, config.DEFAULT_USER_ID)
-      if (!allowed) {
-        return "[Permission Denied] Calendar read is not allowed."
-      }
-
       try {
-        if (!fs.existsSync(calendarPath)) {
-          return "No calendar events found."
-        }
-        const content = await fs.promises.readFile(calendarPath, "utf-8")
-        return `Calendar events:\n${content}`
-      } catch (err) {
-        return `[Error] Failed to read calendar: ${err}`
+        return await fs.readFile(icsPath, "utf-8")
+      } catch {
+        return "No calendar found."
       }
     }
 
-    if (action === "add") {
-      const allowed = await sandbox.checkWithConfirm(
-        PermissionAction.CALENDAR_WRITE,
-        config.DEFAULT_USER_ID,
-        `Add calendar event: ${title} on ${date}`
-      )
-      if (!allowed) {
-        return "[Permission Denied] Calendar write was not confirmed."
-      }
+    const start = date
+      ? time
+        ? `${date}T${time}`
+        : date
+      : new Date().toISOString()
 
-      try {
-        const event = `BEGIN:VEVENT\nDTSTART:${date}\nSUMMARY:${title}\nEND:VEVENT\n`
-        if (fs.existsSync(calendarPath)) {
-          const existing = await fs.promises.readFile(calendarPath, "utf-8")
-          const updated = existing.replace("END:VCALENDAR", `${event}END:VCALENDAR`)
-          await fs.promises.writeFile(calendarPath, updated)
-        } else {
-          const newCal = `BEGIN:VCALENDAR\nVERSION:2.0\n${event}END:VCALENDAR`
-          await fs.promises.writeFile(calendarPath, newCal)
-        }
-        return `Added event: ${title} on ${date}`
-      } catch (err) {
-        return `[Error] Failed to add event: ${err}`
-      }
-    }
+    const event = [
+      "BEGIN:VEVENT",
+      `SUMMARY:${title ?? "Untitled"}`,
+      `DTSTART:${start}`,
+      "END:VEVENT",
+    ].join("\n")
 
-    return "[Error] Unknown calendar action."
+    await fs.appendFile(icsPath, `\n${event}`)
+    return `Event added: ${title ?? "Untitled"}`
   },
 })
 
@@ -210,6 +207,7 @@ export const orionTools = {
   memoryQueryTool,
   fileReadTool,
   fileWriteTool,
+  fileListTool,
   terminalTool,
   calendarTool,
 }
