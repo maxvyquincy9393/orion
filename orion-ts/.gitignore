@@ -4,3 +4,4 @@ dist/
 logs/
 .prisma/
 prisma/*.db
+.orion/
