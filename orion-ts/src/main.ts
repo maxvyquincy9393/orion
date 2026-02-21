@@ -4,6 +4,7 @@ import { stdin as input, stdout as output } from "node:process"
 import config from "./config.js"
 import { prisma, saveMessage } from "./database/index.js"
 import { orchestrator } from "./engines/orchestrator.js"
+import { responseCritic } from "./core/critic.js"
 import { createLogger } from "./logger.js"
 import { memory } from "./memory/store.js"
 import { gateway } from "./gateway/server.js"
@@ -122,8 +123,17 @@ async function start(): Promise<void> {
           prompt: systemContext ? `${systemContext}\n\nUser: ${safeText}` : safeText,
           context: messages,
         })
+        const critiqued = await responseCritic.critiqueAndRefine(safeText, response, 2)
+        const finalResponse = critiqued.finalResponse
 
-        const scanResult = outputScanner.scan(response)
+        if (critiqued.refined) {
+          log.debug("cli response refined", {
+            score: critiqued.critique.score,
+            iterations: critiqued.iterations,
+          })
+        }
+
+        const scanResult = outputScanner.scan(finalResponse)
         if (!scanResult.safe) {
           log.warn("Assistant output sanitized", {
             userId,
@@ -139,7 +149,7 @@ async function start(): Promise<void> {
           level: 0,
           security: {
             outputIssues: scanResult.issues,
-            sanitized: safeResponse !== response,
+            sanitized: safeResponse !== finalResponse,
           },
         })
         await memory.save(userId, safeResponse, {

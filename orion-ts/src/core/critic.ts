@@ -151,6 +151,10 @@ export class ResponseCritic {
   }
 
   async critique(query: string, response: string): Promise<CritiqueResult> {
+    if (response.trim().length < MIN_CRITIQUE_RESPONSE_LENGTH) {
+      return this.createPassResult()
+    }
+
     try {
       const prompt = CRITIC_PROMPT
         .replace("{response}", response.slice(0, MAX_RESPONSE_CHARS))
