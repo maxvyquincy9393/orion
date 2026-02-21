@@ -169,6 +169,53 @@ model MemoryNodeFTS {
   @@ignore // Virtual table, managed via raw SQL
 }
 
+/**
+ * Usage Event for LLM observability (OC-11)
+ *
+ * Tracks all LLM API calls with:
+ * - Token counts (prompt, completion, total)
+ * - Cost estimation
+ * - Latency metrics
+ * - Success/failure rates
+ * - Request metadata
+ *
+ * Uses ring buffer in UsageTracker for high-throughput scenarios.
+ */
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String?
+
+  // Provider and model
+  provider String
+  model    String
+
+  // Token counts
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+
+  // Cost estimation (USD)
+  estimatedCostUsd Float
+
+  // Performance metrics
+  latencyMs Int
+
+  // Request metadata
+  requestType String // chat, embedding, function_calling, tool_use
+  success     Boolean
+  errorType   String?
+
+  // Timestamps
+  timestamp DateTime
+  createdAt DateTime @default(now())
+
+  // Indexes for efficient queries
+  @@index([userId, timestamp])
+  @@index([provider, model])
+  @@index([timestamp])
+}
+
 model CausalNode {
   id        String   @id @default(cuid())
   userId    String

@@ -1,3 +1,14 @@
+/**
+ * Gateway Server with Observability (OC-11)
+ *
+ * Enhanced with:
+ * - Usage tracking via UsageTracker
+ * - /api/usage/summary endpoint
+ * - Request instrumentation
+ *
+ * Based on: Portkey/Maxim/Braintrust observability patterns
+ */
+
 import crypto from "node:crypto"
 
 import Fastify from "fastify"
@@ -19,6 +30,7 @@ import { hookPipeline } from "../hooks/pipeline.js"
 import { outputScanner } from "../security/output-scanner.js"
 import { personaEngine } from "../core/persona.js"
 import { buildSystemPrompt } from "../core/system-prompt-builder.js"
+import { usageTracker } from "../observability/usage-tracker.js"
 import {
   authenticateWebSocket,
   getAuthFailure,
@@ -106,6 +118,49 @@ export class GatewayServer {
           return { response }
         },
       )
+
+      // Usage summary endpoint (OC-11)
+      app.get<{
+        Querystring: { userId?: string; days?: string }
+      }>("/api/usage/summary", async (req) => {
+        const userId = req.query.userId ?? config.DEFAULT_USER_ID
+        const days = Math.min(30, Math.max(1, parseInt(req.query.days ?? "7", 10)))
+
+        const endDate = new Date()
+        const startDate = new Date()
+        startDate.setDate(startDate.getDate() - days)
+
+        const summary = await usageTracker.getUserSummary(userId, startDate, endDate)
+
+        return {
+          userId,
+          period: { start: startDate, end: endDate, days },
+          summary,
+        }
+      })
+
+      // Global usage summary (admin only - simplified auth)
+      app.get<{
+        Querystring: { days?: string; adminToken?: string }
+      }>("/api/usage/global", async (req) => {
+        // Simple admin check - in production use proper auth
+        if (req.query.adminToken !== process.env.ADMIN_TOKEN) {
+          return { error: "Unauthorized" }
+        }
+
+        const days = Math.min(30, Math.max(1, parseInt(req.query.days ?? "7", 10)))
+
+        const endDate = new Date()
+        const startDate = new Date()
+        startDate.setDate(startDate.getDate() - days)
+
+        const summary = await usageTracker.getGlobalSummary(startDate, endDate)
+
+        return {
+          period: { start: startDate, end: endDate, days },
+          summary,
+        }
+      })
     })
   }
 
@@ -213,11 +268,46 @@ export class GatewayServer {
       extraContext: personaSystemPrompt,
     })
 
-    const generatedResponse = await orchestrator.generate("reasoning", {
-      prompt: systemContext ? `${systemContext}\n\nUser: ${modelInput}` : modelInput,
-      context: messages,
-      systemPrompt,
-    })
+    // Track LLM usage with timing (OC-11)
+    const startTime = Date.now()
+    let generatedResponse: string
+    let usageSuccess = true
+    let errorType: string | undefined
+    let responseLength = 0
+
+    try {
+      generatedResponse = await orchestrator.generate("reasoning", {
+        prompt: systemContext ? `${systemContext}\n\nUser: ${modelInput}` : modelInput,
+        context: messages,
+        systemPrompt,
+      })
+      responseLength = generatedResponse.length
+    } catch (error) {
+      usageSuccess = false
+      errorType = error instanceof Error ? error.name : "unknown"
+      throw error
+    } finally {
+      const latencyMs = Date.now() - startTime
+
+      // Estimate token counts (in production, get actual counts from provider)
+      // Rough estimate: 1 token ≈ 4 characters
+      const promptTokens = Math.ceil(((systemPrompt?.length ?? 0) + modelInput.length) / 4)
+      const completionTokens = Math.ceil(responseLength / 4)
+
+      // Track usage asynchronously (don't block response)
+      void usageTracker.recordUsage({
+        userId,
+        provider: "groq", // TODO: Get actual provider from orchestrator
+        model: "llama-3.3-70b-versatile", // TODO: Get actual model
+        promptTokens,
+        completionTokens,
+        latencyMs,
+        requestType: "chat",
+        success: usageSuccess,
+        errorType,
+        timestamp: new Date(),
+      }).catch((err) => logger.warn("Failed to track usage", err))
+    }
 
     const postMessage = await hookPipeline.run("post_message", {
       userId,
