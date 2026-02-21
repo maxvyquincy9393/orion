@@ -1,6 +1,7 @@
-﻿import { prisma } from "../database/index.js"
+import { prisma } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
+import { identityManager } from "../core/identity.js"
 
 const log = createLogger("memory.profiler")
 
@@ -41,6 +42,41 @@ function clamp(value: number, min = 0, max = 1): number {
 
 function normalizeFactKey(raw: string): string {
   return raw.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "")
+}
+
+function mapFactKeyToUserProfileKey(key: string): string {
+  const normalized = normalizeFactKey(key)
+
+  if (["name", "full_name", "nickname", "preferred_name"].includes(normalized)) {
+    return "name"
+  }
+
+  if (normalized.includes("language")) {
+    return "language"
+  }
+
+  if (normalized.includes("timezone") || normalized === "tz") {
+    return "timezone"
+  }
+
+  if (normalized.includes("formality") || normalized.includes("tone")) {
+    return "formality"
+  }
+
+  if (
+    normalized.includes("technical")
+    || normalized.includes("expertise")
+    || normalized.includes("experience_level")
+    || normalized.includes("skill_level")
+  ) {
+    return "technical_level"
+  }
+
+  if (normalized.includes("response_length") || normalized.includes("verbosity")) {
+    return "response_length_preference"
+  }
+
+  return normalized
 }
 
 function parseJsonPayload(raw: string): ExtractionPayload | null {
@@ -226,6 +262,18 @@ export class UserProfiler {
           topics: JSON.parse(JSON.stringify(topics)),
         },
       })
+
+      const profileUpdates: Record<string, string> = {}
+      for (const fact of mergedFacts) {
+        if (fact.confidence < 0.7 || !fact.value.trim()) {
+          continue
+        }
+        profileUpdates[mapFactKeyToUserProfileKey(fact.key)] = fact.value.trim()
+      }
+
+      if (Object.keys(profileUpdates).length > 0) {
+        await identityManager.updateUserProfile(profileUpdates)
+      }
 
       log.debug("profile updated", {
         userId,

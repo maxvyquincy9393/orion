@@ -1,3 +1,5 @@
+import fs from "node:fs/promises"
+import path from "node:path"
 import readline from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 
@@ -13,7 +15,7 @@ import { gateway } from "./gateway/server.js"
 import { channelManager } from "./channels/manager.js"
 import { daemon } from "./background/daemon.js"
 import { agentRunner } from "./agents/runner.js"
-import { skillManager } from "./skills/manager.js"
+import { skillLoader } from "./skills/loader.js"
 import { sessionStore } from "./sessions/session-store.js"
 import { causalGraph } from "./memory/causal-graph.js"
 import { profiler } from "./memory/profiler.js"
@@ -22,13 +24,14 @@ import { filterPromptWithAffordance } from "./security/prompt-filter.js"
 import { outputScanner } from "./security/output-scanner.js"
 import { eventBus } from "./core/event-bus.js"
 import { buildSystemPrompt } from "./core/system-prompt-builder.js"
-import { getBootstrapLoader } from "./core/bootstrap.js"
+import { identityManager } from "./core/identity.js"
 
 const log = createLogger("main")
 
 const mode = process.argv.includes("--mode")
   ? process.argv[process.argv.indexOf("--mode") + 1]
   : "text"
+const workspaceDir = process.env.ORION_WORKSPACE ?? path.resolve(process.cwd(), "workspace")
 
 interface PendingMemRLFeedback {
   memoryIds: string[]
@@ -58,8 +61,16 @@ function initializeEventHandlers(): void {
   })
 }
 
+async function ensureWorkspaceStructure(): Promise<void> {
+  await fs.mkdir(workspaceDir, { recursive: true })
+  await fs.mkdir(path.join(workspaceDir, "skills"), { recursive: true })
+  await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true })
+}
+
 async function start(): Promise<void> {
   log.info("starting orion-ts")
+
+  await ensureWorkspaceStructure()
 
   await prisma
     .$connect()
@@ -68,7 +79,8 @@ async function start(): Promise<void> {
 
   await memory.init()
   await orchestrator.init()
-  await skillManager.init()
+  await skillLoader.buildSnapshot()
+  skillLoader.startWatching({ enabled: true, debounceMs: 1_500 })
   await pluginLoader.loadAllFromDefaultDir()
   void agentRunner
   initializeEventHandlers()
@@ -140,7 +152,6 @@ async function start(): Promise<void> {
     })
 
     const userId = config.DEFAULT_USER_ID
-    const bootstrapLoader = getBootstrapLoader()
 
     while (true) {
       try {
@@ -236,12 +247,16 @@ async function start(): Promise<void> {
           )
         }
 
-        const systemPrompt = await buildSystemPrompt({
+        const baseSystemPrompt = await buildSystemPrompt({
           sessionMode: "dm",
           includeSkills: true,
           includeSafety: true,
           extraContext: personaSystemPrompt,
         })
+        const identityContext = await identityManager.buildIdentityContext({ isDM: true })
+        const systemPrompt = identityContext
+          ? `${identityContext}\n\n${baseSystemPrompt}`
+          : baseSystemPrompt
 
         const response = await orchestrator.generate("reasoning", {
           prompt: systemContext ? `${systemContext}\n\nUser: ${safeText}` : safeText,
@@ -252,19 +267,6 @@ async function start(): Promise<void> {
         const { facts, opinions } = await profiler.extractFromMessage(userId, safeText, "user")
         if (facts.length > 0 || opinions.length > 0) {
           await profiler.updateProfile(userId, facts, opinions)
-        }
-
-        if (facts.length > 0) {
-          const updates: Record<string, string> = {}
-          for (const fact of facts) {
-            if (fact.key && fact.value) {
-              updates[fact.key] = fact.value
-            }
-          }
-
-          if (Object.keys(updates).length > 0) {
-            await bootstrapLoader.updateUserMd(updates)
-          }
         }
 
         const provisionalReward = memrlUpdater.estimateRewardFromContext(null, response.length)
