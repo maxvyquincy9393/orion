@@ -1,0 +1,4 @@
+# database/migrations/
+# Alembic migration files will be generated here.
+# Run `alembic init database/migrations` to set up Alembic.
+# Then use `alembic revision --autogenerate` to create migrations.

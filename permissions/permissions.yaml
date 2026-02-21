@@ -1,0 +1,79 @@
+# ============================================
+# Orion — Permissions Configuration
+# ============================================
+# Defines what each AI engine and module is allowed to do.
+# Part of Orion — Persistent AI Companion System.
+# ============================================
+
+permissions:
+  engines:
+    openai:
+      allowed_tasks:
+        - reasoning
+        - code
+        - multimodal
+      max_tokens: 8000
+      rate_limit_per_minute: 60
+      can_access_memory: true
+      can_send_messages: false
+
+    claude:
+      allowed_tasks:
+        - reasoning
+        - code
+      max_tokens: 8000
+      rate_limit_per_minute: 40
+      can_access_memory: true
+      can_send_messages: false
+
+    gemini:
+      allowed_tasks:
+        - multimodal
+        - fast
+      max_tokens: 4000
+      rate_limit_per_minute: 60
+      can_access_memory: true
+      can_send_messages: false
+
+    local:
+      allowed_tasks:
+        - fast
+      max_tokens: 2000
+      rate_limit_per_minute: 0  # No limit — local
+      can_access_memory: true
+      can_send_messages: false
+
+  modules:
+    background:
+      can_initiate_contact: true
+      can_read_memory: true
+      can_write_memory: true
+      can_send_messages: true
+      max_proactive_messages_per_hour: 5
+
+    delivery:
+      can_send_telegram: true
+      can_send_whatsapp: true
+      can_send_discord: true
+      can_use_voice: true
+
+    memory:
+      can_read: true
+      can_write: true
+      can_compress: true
+      can_delete: false  # Safety: never auto-delete memory
+
+    rag:
+      can_embed: true
+      can_query: true
+      can_delete_embeddings: false
+
+  users:
+    owner:
+      full_access: true
+      can_modify_permissions: true
+      delivery_channels:
+        - telegram
+        - whatsapp
+        - discord
+        - voice
