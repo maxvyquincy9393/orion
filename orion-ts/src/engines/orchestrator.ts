@@ -10,8 +10,8 @@ import type { Engine, GenerateOptions, TaskType } from "./types.js"
 const log = createLogger("engines.orchestrator")
 
 const PRIORITY_MAP: Record<TaskType, string[]> = {
-  reasoning: ["anthropic", "openai", "gemini", "groq", "ollama"],
-  code: ["openai", "anthropic", "groq", "gemini", "ollama"],
+  reasoning: ["gemini", "groq", "anthropic", "openai", "ollama"],
+  code: ["groq", "gemini", "anthropic", "openai", "ollama"],
   fast: ["groq", "gemini", "ollama", "openai", "anthropic"],
   multimodal: ["gemini", "openai", "anthropic"],
   local: ["ollama"],
