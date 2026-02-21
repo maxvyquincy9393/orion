@@ -281,16 +281,16 @@ export class BootstrapLoader extends EventEmitter {
   }
 }
 
-let bootstrapLoader: BootstrapLoader | null = null
+let singletonBootstrapLoader: BootstrapLoader | null = null
 
 export function getBootstrapLoader(): BootstrapLoader {
-  if (bootstrapLoader) {
-    return bootstrapLoader
+  if (singletonBootstrapLoader) {
+    return singletonBootstrapLoader
   }
 
   const workspaceDir = process.env.ORION_WORKSPACE ?? path.resolve(process.cwd(), "workspace")
-  bootstrapLoader = new BootstrapLoader(workspaceDir)
-  return bootstrapLoader
+  singletonBootstrapLoader = new BootstrapLoader(workspaceDir)
+  return singletonBootstrapLoader
 }
 
 export const bootstrapLoader = getBootstrapLoader()
