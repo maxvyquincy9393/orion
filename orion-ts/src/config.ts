@@ -49,6 +49,9 @@ const ConfigSchema = z.object({
   VOICE_ENABLED: boolFromEnv.default(false),
   VISION_ENABLED: boolFromEnv.default(false),
   PYTHON_PATH: z.string().default("python"),
+  GATEWAY_PORT: intFromEnv.default(18789),
+  GATEWAY_HOST: z.string().default("127.0.0.1"),
+  AUTO_START_GATEWAY: boolFromEnv.default(false),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
