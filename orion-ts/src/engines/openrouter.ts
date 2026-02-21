@@ -45,7 +45,7 @@ export class OpenRouterEngine implements Engine {
       const result = await generateText({
         model: openrouter(options.model ?? this.defaultModel),
         prompt: buildPrompt(options),
-        maxTokens: options.maxTokens,
+        maxOutputTokens: options.maxTokens,
         temperature: options.temperature,
       })
       return result.text
