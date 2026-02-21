@@ -1,0 +1,91 @@
+﻿import { createLogger } from "../logger.js"
+import { anthropicEngine } from "./anthropic.js"
+import { geminiEngine } from "./gemini.js"
+import { groqEngine } from "./groq.js"
+import { ollamaEngine } from "./ollama.js"
+import { openAIEngine } from "./openai.js"
+import { openRouterEngine } from "./openrouter.js"
+import type { Engine, GenerateOptions, TaskType } from "./types.js"
+
+const log = createLogger("engines.orchestrator")
+
+const PRIORITY_MAP: Record<TaskType, string[]> = {
+  reasoning: ["anthropic", "openai", "gemini", "groq", "ollama"],
+  code: ["openai", "anthropic", "groq", "gemini", "ollama"],
+  fast: ["groq", "gemini", "ollama", "openai", "anthropic"],
+  multimodal: ["gemini", "openai", "anthropic"],
+  local: ["ollama"],
+}
+
+export class Orchestrator {
+  private readonly engines = new Map<string, Engine>()
+
+  async init(): Promise<void> {
+    this.engines.clear()
+
+    const candidates: Engine[] = [
+      anthropicEngine,
+      openAIEngine,
+      geminiEngine,
+      groqEngine,
+      openRouterEngine,
+      ollamaEngine,
+    ]
+
+    for (const engine of candidates) {
+      try {
+        const available = await Promise.resolve(engine.isAvailable())
+        if (available) {
+          this.engines.set(engine.name, engine)
+          log.info("engine ready", { engine: engine.name, provider: engine.provider })
+        } else {
+          log.info("engine unavailable", {
+            engine: engine.name,
+            provider: engine.provider,
+          })
+        }
+      } catch (error) {
+        log.warn("engine availability check failed", {
+          engine: engine.name,
+          error,
+        })
+      }
+    }
+  }
+
+  getAvailableEngines(): string[] {
+    return [...this.engines.keys()]
+  }
+
+  route(task: TaskType): Engine {
+    const priorities = PRIORITY_MAP[task]
+
+    for (const engineName of priorities) {
+      const engine = this.engines.get(engineName)
+      if (engine) {
+        return engine
+      }
+    }
+
+    throw new Error(
+      `No engine available for task '${task}'. Configure at least one provider and re-run setup.`,
+    )
+  }
+
+  async generate(task: TaskType, options: GenerateOptions): Promise<string> {
+    const startedAt = Date.now()
+    const engine = this.route(task)
+    const output = await engine.generate(options)
+    const elapsedMs = Date.now() - startedAt
+
+    log.info("task handled", {
+      task,
+      engine: engine.name,
+      latencyMs: elapsedMs,
+    })
+
+    return output
+  }
+}
+
+export const orchestrator = new Orchestrator()
