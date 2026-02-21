@@ -244,15 +244,105 @@ All failures are expected — no credentials set up yet. Architecture is sound.
 Phase 1 COMPLETE.
 
 ### Phase 2 — Proactive Engine
-- [ ] Background daemon process
-- [ ] Trigger detection system
-- [ ] Thread state manager
-- [ ] Telegram delivery
-- [ ] Autonomous browser agent (Playwright + browser-use)
-- [ ] Free search (DuckDuckGo + SearXNG)
-- [ ] System control: file, terminal, calendar
-- [ ] Permission confirmation flow
-- [ ] LangGraph tools: search, browse, file, calendar
+- [x] Background daemon process (background/process.py - OrionDaemon class)
+- [x] Trigger detection system (background/triggers.py - TriggerEngine, TriggerType enum)
+- [x] Thread state manager (background/thread_manager.py - open_thread, update_state, get_pending_threads, should_follow_up)
+- [x] Telegram delivery (delivery/messenger.py - send, send_with_confirm, get_latest_reply, set_webhook)
+- [x] Autonomous browser agent (browser/agent.py - BrowserAgent with search_and_summarize, research, navigate_and_extract)
+- [x] Free search (browser/search.py - DuckDuckGo HTML scrape + SearXNG fallback, no API key needed)
+- [x] System control: file, terminal, calendar (system/file_ops.py, system/terminal.py, system/calendar_ops.py)
+- [x] Permission confirmation flow (all system/browser actions call sandbox.check() and sandbox.request_confirm())
+- [x] LangGraph tools: search, browse, file, calendar (agents/tools.py - 10 tools registered)
+
+Phase 2 COMPLETE.
+
+**Phase 2 Implementation Details:**
+
+**delivery/messenger.py:**
+- send() - Telegram Bot API message sending
+- send_with_confirm() - Send + poll for yes/no reply
+- get_latest_reply() - Poll for new messages
+- set_webhook() - Production webhook setup
+- Logs to logs/delivery.log
+
+**background/triggers.py:**
+- TriggerType enum: TIME_BASED, SCHEDULE, PATTERN, INACTIVITY, KEYWORD
+- Trigger dataclass with id, type, condition, message_template, last_fired, enabled
+- TriggerEngine class with load_triggers(), evaluate(), get_fired_triggers(), build_message(), mark_fired()
+- Default triggers.yaml: morning check-in (8am), inactivity (4 hours), end of day summary (6pm)
+- Logs to logs/triggers.log
+
+**background/thread_manager.py:**
+- open_thread(user_id, trigger) - Creates Thread record, returns thread_id
+- update_state(thread_id, state) - Updates Thread.state (open/waiting/resolved)
+- get_pending_threads(user_id) - Returns all non-resolved threads
+- should_follow_up(thread_id) - True if waiting > 1 hour
+- Logs to logs/threads.log
+
+**background/process.py:**
+- OrionDaemon class with start(), stop(), _loop()
+- Runs every 60 seconds in separate thread
+- Builds context: current time, day, last message time, pending threads
+- Calls trigger_engine.get_fired_triggers()
+- For each trigger: checks sandbox permission, opens thread, sends message
+- Checks pending threads for follow-ups
+- Respects quiet_hours (22:00 - 08:00 by default)
+- Logs to logs/daemon.log
+
+**browser/search.py:**
+- search(query, max_results) - DuckDuckGo HTML scrape, SearXNG fallback
+- _duckduckgo_search() - No API key, pure HTML scraping
+- _searxng_search() - Self-hosted search backend
+- search_images(), search_news() helper functions
+- Logs to logs/browser.log
+
+**browser/playwright_client.py:**
+- PlaywrightClient class with async context manager support
+- navigate(url) - Return page text content
+- screenshot(url) - Return PNG bytes
+- extract_links(url) - Return all href links
+- extract_content(url, selector) - Scoped text extraction
+- click(), fill(), wait_for_selector() for interaction
+- All actions check BROWSER_NAVIGATE permission
+- Logs to logs/browser.log
+
+**browser/agent.py:**
+- BrowserAgent class
+- search_and_summarize(query) - Search, visit top 3, summarize via LLM
+- research(topic, depth=2) - Multi-level research with link following
+- navigate_and_extract(url, goal) - Goal-oriented extraction
+- All actions check sandbox permission
+- Logs to logs/browser.log
+
+**system/file_ops.py:**
+- read_file(path) - Returns file contents
+- write_file(path, content) - Writes content
+- delete_file(path) - Deletes file
+- list_dir(path) - Lists directory
+- create_dir(path), copy_file(src, dst), file_exists(), get_file_info()
+- Every function calls sandbox.check() with FILE_READ/FILE_WRITE/FILE_DELETE
+
+**system/terminal.py:**
+- run(command, timeout) - Returns stdout, stderr, exit_code
+- run_safe(command) - Always checks blocked_commands list
+- run_background(command) - Returns process ID
+- BLOCKED_COMMANDS list: rm -rf, sudo, format, etc.
+- Calls sandbox.check(TERMINAL_RUN) with request_confirm()
+
+**system/calendar_ops.py:**
+- get_events(date) - Returns events from local .ics or Google Calendar API
+- add_event(title, date, time, duration) - Adds event
+- get_upcoming_events(days=7) - Next N days
+- Checks CALENDAR_READ/CALENDAR_WRITE permissions
+- Supports both local .ics file and Google Calendar API
+
+**agents/tools.py:**
+- 10 LangChain Tool instances for LangGraph integration:
+  - search_tool, browse_tool, file_read_tool, file_write_tool, file_list_tool
+  - calendar_tool, calendar_add_tool, terminal_tool
+  - research_tool, memory_query_tool
+- get_all_tools() - Returns all tools
+- register_tools_with_graph() - Registers with LangGraph agent
 
 ### Phase 3 — Vision + Intelligence
 - [ ] Live camera capture (OpenCV)
@@ -302,7 +392,7 @@ Established during sessions — all AI assistants must follow:
 2. Say: **"Read SKILL.md and docs/session-log.md then continue Orion"**
 3. Claude will know exactly where we are and what to do next
 
-Current state: Phase 1 complete. Phase 2 is next — background daemon, Telegram delivery, autonomous browser, system control.
+Current state: Phase 2 complete. Phase 3 is next - live camera capture, vision engine, voice pipeline.
 
 ---
 
