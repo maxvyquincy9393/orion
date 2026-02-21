@@ -244,6 +244,7 @@ async function start(): Promise<void> {
           context: messages,
           systemPrompt,
         })
+        const provisionalReward = memrlUpdater.estimateRewardFromContext(null, response.length)
         const critiqued = await responseCritic.critiqueAndRefine(safeText, response, 2)
         const finalResponse = critiqued.finalResponse
 
@@ -295,6 +296,14 @@ async function start(): Promise<void> {
           },
         })
         sessionStore.addMessage(userId, "cli", { role: "assistant", content: safeResponse, timestamp: assistantTimestamp })
+
+        pendingFeedback = retrievedMemoryIds.length > 0
+          ? {
+            memoryIds: retrievedMemoryIds,
+            previousResponseLength: response.length,
+            provisionalReward,
+          }
+          : null
       } catch (error) {
         if (error instanceof Error) {
           const lowered = error.message.toLowerCase()

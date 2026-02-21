@@ -40,6 +40,7 @@ export interface SearchResult {
 export interface BuildContextResult {
   systemContext: string
   messages: Array<{ role: "user" | "assistant"; content: string }>
+  retrievedMemoryIds: string[]
 }
 
 function hashToVector(text: string): number[] {
@@ -352,7 +353,12 @@ export class MemoryStore {
     limit = 10
   ): Promise<BuildContextResult> {
     try {
-      const fused = await hiMeS.buildFusedContext(userId, query)
+      const retrievalLimit = Math.max(3, Math.min(8, Math.floor(limit / 2)))
+      const [fused, adaptiveMemories] = await Promise.all([
+        hiMeS.buildFusedContext(userId, query),
+        this.search(userId, query, retrievalLimit),
+      ])
+
       const systemBlocks: string[] = []
       const contextMessages: Array<{ role: "user" | "assistant"; content: string }> = []
 
@@ -362,6 +368,14 @@ export class MemoryStore {
           continue
         }
         contextMessages.push(item)
+      }
+
+      if (adaptiveMemories.length > 0) {
+        const memoryBlock = [
+          "[Adaptive Memories]",
+          ...adaptiveMemories.map((item, index) => `${index + 1}. ${item.content}`),
+        ].join("\n")
+        systemBlocks.push(memoryBlock)
       }
 
       if (contextMessages.length > limit) {
@@ -374,11 +388,12 @@ export class MemoryStore {
       }))
       const validated = validateMemoryEntries(validationInput)
       const systemContext = validated.clean.map((item) => item.content).join("\n\n")
+      const retrievedMemoryIds = Array.from(new Set(adaptiveMemories.map((item) => item.id)))
 
-      return { systemContext, messages: contextMessages }
+      return { systemContext, messages: contextMessages, retrievedMemoryIds }
     } catch (error) {
       log.error("buildContext failed", error)
-      return { systemContext: "", messages: [] }
+      return { systemContext: "", messages: [], retrievedMemoryIds: [] }
     }
   }
 
