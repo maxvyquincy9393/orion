@@ -35,21 +35,24 @@ export class LineChannel implements BaseChannel {
 
     try {
       const rendered = markdownProcessor.process(message, "line")
-      const response = await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.LINE_CHANNEL_TOKEN}`,
-        },
-        body: JSON.stringify({
-          to: userId,
-          messages: [{ type: "text", text: rendered.slice(0, 4000) }],
-        }),
-      })
+      const chunks = splitMessage(rendered, 3000)
+      for (const chunk of chunks) {
+        const response = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.LINE_CHANNEL_TOKEN}`,
+          },
+          body: JSON.stringify({
+            to: userId,
+            messages: [{ type: "text", text: chunk }],
+          }),
+        })
 
-      if (!response.ok) {
-        log.warn("LINE send failed", { status: response.status, userId })
-        return false
+        if (!response.ok) {
+          log.warn("LINE send failed", { status: response.status, userId })
+          return false
+        }
       }
 
       return true

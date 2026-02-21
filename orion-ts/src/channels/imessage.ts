@@ -37,22 +37,25 @@ export class IMessageChannel implements BaseChannel {
     try {
       const rendered = markdownProcessor.process(message, "imessage")
       const endpoint = `${config.BLUEBUBBLES_URL.replace(/\/$/, "")}/api/v1/message/send`
+      const chunks = splitMessage(rendered, 3000)
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.BLUEBUBBLES_PASSWORD}`,
-        },
-        body: JSON.stringify({
-          chatGuid: userId,
-          message: rendered,
-        }),
-      })
+      for (const chunk of chunks) {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.BLUEBUBBLES_PASSWORD}`,
+          },
+          body: JSON.stringify({
+            chatGuid: userId,
+            message: chunk,
+          }),
+        })
 
-      if (!response.ok) {
-        log.warn("iMessage send failed", { status: response.status })
-        return false
+        if (!response.ok) {
+          log.warn("iMessage send failed", { status: response.status })
+          return false
+        }
       }
 
       return true

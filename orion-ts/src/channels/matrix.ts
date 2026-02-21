@@ -39,24 +39,28 @@ export class MatrixChannel implements BaseChannel {
     try {
       const rendered = markdownProcessor.process(message, "matrix")
       const roomId = userId || config.MATRIX_ROOM_ID
-      const txnId = crypto.randomUUID()
-      const endpoint = `${config.MATRIX_HOMESERVER}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`
+      const chunks = splitMessage(rendered, 3000)
 
-      const response = await fetch(endpoint, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.MATRIX_ACCESS_TOKEN}`,
-        },
-        body: JSON.stringify({
-          msgtype: "m.text",
-          body: rendered,
-        }),
-      })
+      for (const chunk of chunks) {
+        const txnId = crypto.randomUUID()
+        const endpoint = `${config.MATRIX_HOMESERVER}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`
 
-      if (!response.ok) {
-        log.warn("Matrix send failed", { status: response.status, roomId })
-        return false
+        const response = await fetch(endpoint, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.MATRIX_ACCESS_TOKEN}`,
+          },
+          body: JSON.stringify({
+            msgtype: "m.text",
+            body: chunk,
+          }),
+        })
+
+        if (!response.ok) {
+          log.warn("Matrix send failed", { status: response.status, roomId })
+          return false
+        }
       }
 
       return true

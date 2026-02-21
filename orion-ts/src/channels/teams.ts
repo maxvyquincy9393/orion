@@ -42,22 +42,25 @@ export class TeamsChannel implements BaseChannel {
 
       const rendered = markdownProcessor.process(message, "teams")
       const endpoint = `${config.TEAMS_SERVICE_URL.replace(/\/$/, "")}/v3/conversations/${encodeURIComponent(userId)}/activities`
+      const chunks = splitMessage(rendered, 3000)
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          type: "message",
-          text: rendered,
-        }),
-      })
+      for (const chunk of chunks) {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            type: "message",
+            text: chunk,
+          }),
+        })
 
-      if (!response.ok) {
-        log.warn("Teams send failed", { status: response.status })
-        return false
+        if (!response.ok) {
+          log.warn("Teams send failed", { status: response.status })
+          return false
+        }
       }
 
       return true
