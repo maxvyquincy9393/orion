@@ -1,13 +1,24 @@
+/**
+ * main.ts — Orion entry point.
+ *
+ * Responsibilities:
+ *   - Parse the `--mode` flag (text | gateway | all)
+ *   - Initialize all subsystems in dependency order
+ *   - Start the appropriate transport layer(s)
+ *
+ * This file should remain thin. All message processing logic lives in
+ * src/core/message-pipeline.ts. Transport-specific concerns (CLI REPL,
+ * WebSocket server) live in their respective modules.
+ */
+
 import fs from "node:fs/promises"
 import path from "node:path"
 import readline from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 
 import config from "./config.js"
-import { prisma, saveMessage } from "./database/index.js"
+import { prisma } from "./database/index.js"
 import { orchestrator } from "./engines/orchestrator.js"
-import { responseCritic } from "./core/critic.js"
-import { personaEngine } from "./core/persona.js"
 import { createLogger } from "./logger.js"
 import { memrlUpdater } from "./memory/memrl.js"
 import { memory } from "./memory/store.js"
@@ -20,10 +31,8 @@ import { sessionStore } from "./sessions/session-store.js"
 import { causalGraph } from "./memory/causal-graph.js"
 import { profiler } from "./memory/profiler.js"
 import { pluginLoader } from "./plugin-sdk/loader.js"
-import { filterPromptWithAffordance } from "./security/prompt-filter.js"
-import { outputScanner } from "./security/output-scanner.js"
 import { eventBus } from "./core/event-bus.js"
-import { buildSystemPrompt } from "./core/system-prompt-builder.js"
+import { processMessage } from "./core/message-pipeline.js"
 
 const log = createLogger("main")
 
@@ -40,6 +49,11 @@ interface PendingMemRLFeedback {
 
 let eventHandlersInitialized = false
 
+/**
+ * Initialize event handlers for cross-module communication via event bus.
+ * This decouples modules that need to trigger actions but shouldn't know
+ * implementation details.
+ */
 function initializeEventHandlers(): void {
   if (eventHandlersInitialized) {
     return
@@ -60,13 +74,28 @@ function initializeEventHandlers(): void {
   })
 }
 
+/**
+ * Ensure workspace directory structure exists.
+ * Creates workspace, skills, and memory subdirectories.
+ */
 async function ensureWorkspaceStructure(): Promise<void> {
   await fs.mkdir(workspaceDir, { recursive: true })
   await fs.mkdir(path.join(workspaceDir, "skills"), { recursive: true })
   await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true })
 }
 
-async function start(): Promise<void> {
+/**
+ * Initialize all Orion subsystems in dependency order.
+ *
+ * Order matters:
+ *   1. Database first (prerequisite for everything)
+ *   2. Memory store (needs DB for metadata, creates LanceDB table)
+ *   3. Orchestrator (validates available LLM engines)
+ *   4. Skills loader (builds snapshot for system prompts)
+ *   5. Plugin loader (extends capabilities)
+ *   6. Event handlers (starts listening for cross-module events)
+ */
+async function initialize(): Promise<void> {
   log.info("starting orion-ts")
 
   await ensureWorkspaceStructure()
@@ -94,6 +123,132 @@ async function start(): Promise<void> {
   console.log("=== Orion TS ===")
   console.log(`Mode: ${mode}`)
   console.log(`Engines: ${available.join(", ") || "none"}`)
+}
+
+/**
+ * Start the CLI REPL for interactive text mode.
+ *
+ * Handles:
+ *   - MemRL feedback loop (reward refinement based on user follow-up)
+ *   - Graceful shutdown (SIGINT, exit commands)
+ *   - Delegates actual message processing to MessagePipeline
+ */
+async function startCLI(): Promise<void> {
+  const rl = readline.createInterface({ input, output })
+  let pendingFeedback: PendingMemRLFeedback | null = null
+
+  const flushPendingFeedback = async () => {
+    if (!pendingFeedback || pendingFeedback.memoryIds.length === 0) {
+      return
+    }
+
+    const fallbackFeedback = {
+      memoryIds: pendingFeedback.memoryIds,
+      taskSuccess: false,
+      reward: pendingFeedback.provisionalReward,
+    }
+    pendingFeedback = null
+
+    try {
+      await memory.provideFeedback(fallbackFeedback)
+    } catch (error) {
+      log.warn("failed to flush memrl feedback", error)
+    }
+  }
+
+  const shutdown = async () => {
+    log.info("shutting down")
+    await flushPendingFeedback()
+    rl.close()
+    if (daemon.isRunning()) {
+      daemon.stop()
+    }
+    await prisma.$disconnect()
+    process.exit(0)
+  }
+
+  process.on("SIGINT", () => {
+    void shutdown()
+  })
+
+  const userId = config.DEFAULT_USER_ID
+
+  while (true) {
+    try {
+      const text = (await rl.question("> ")).trim()
+      if (!text) {
+        continue
+      }
+
+      if (["exit", "quit", "bye"].includes(text.toLowerCase())) {
+        await shutdown()
+      }
+
+      // Process MemRL feedback from previous turn
+      if (pendingFeedback && pendingFeedback.memoryIds.length > 0) {
+        const followupReward = memrlUpdater.estimateRewardFromContext(
+          text,
+          pendingFeedback.previousResponseLength,
+        )
+        const reward = Math.max(pendingFeedback.provisionalReward, followupReward)
+
+        void memory
+          .provideFeedback({
+            memoryIds: pendingFeedback.memoryIds,
+            taskSuccess: reward >= 0.5,
+            reward,
+          })
+          .catch((error) => log.warn("async memrl feedback update failed", error))
+
+        pendingFeedback = null
+      }
+
+      // Dispatch events for listeners (profilers, etc.)
+      eventBus.dispatch("user.message.received", {
+        userId,
+        content: text,
+        channel: "cli",
+        timestamp: Date.now(),
+      })
+
+      // Process message through canonical pipeline
+      const result = await processMessage(userId, text, { channel: "cli" })
+
+      // Display response
+      output.write(`${result.response}\n`)
+
+      // Set up feedback for next turn
+      pendingFeedback = result.retrievedMemoryIds.length > 0
+        ? {
+          memoryIds: result.retrievedMemoryIds,
+          previousResponseLength: result.response.length,
+          provisionalReward: result.provisionalReward,
+        }
+        : null
+    } catch (error) {
+      if (error instanceof Error) {
+        const lowered = error.message.toLowerCase()
+        if (lowered.includes("aborted") || lowered.includes("closed")) {
+          await shutdown()
+        }
+      }
+      log.error("cli loop failed", error)
+    }
+  }
+}
+
+/**
+ * Main entry point. Orchestrates initialization and transport startup.
+ *
+ * Modes:
+ *   - "text"  : CLI REPL only
+ *   - "gateway": HTTP/WebSocket gateway only
+ *   - "all"   : Both CLI and gateway
+ */
+async function start(): Promise<void> {
+  await initialize()
+
+  const available = orchestrator.getAvailableEngines()
 
   if (mode === "gateway" || mode === "all") {
     await channelManager.init()
@@ -113,227 +268,7 @@ async function start(): Promise<void> {
   }
 
   if (mode === "text" || mode === "all") {
-    const rl = readline.createInterface({ input, output })
-    let pendingFeedback: PendingMemRLFeedback | null = null
-
-    const flushPendingFeedback = async () => {
-      if (!pendingFeedback || pendingFeedback.memoryIds.length === 0) {
-        return
-      }
-
-      const fallbackFeedback = {
-        memoryIds: pendingFeedback.memoryIds,
-        taskSuccess: false,
-        reward: pendingFeedback.provisionalReward,
-      }
-      pendingFeedback = null
-
-      try {
-        await memory.provideFeedback(fallbackFeedback)
-      } catch (error) {
-        log.warn("failed to flush memrl feedback", error)
-      }
-    }
-
-    const shutdown = async () => {
-      log.info("shutting down")
-      await flushPendingFeedback()
-      rl.close()
-      if (daemon.isRunning()) {
-        daemon.stop()
-      }
-      await prisma.$disconnect()
-      process.exit(0)
-    }
-
-    process.on("SIGINT", () => {
-      void shutdown()
-    })
-
-    const userId = config.DEFAULT_USER_ID
-
-    while (true) {
-      try {
-        const text = (await rl.question("> ")).trim()
-        if (!text) {
-          continue
-        }
-
-        if (["exit", "quit", "bye"].includes(text.toLowerCase())) {
-          await shutdown()
-        }
-
-        const inputSafety = await filterPromptWithAffordance(text, userId)
-        if (!inputSafety.safe && inputSafety.affordance?.shouldBlock) {
-          output.write("Gue tidak bisa bantu dengan itu.\n")
-          continue
-        }
-
-        const safeText = inputSafety.sanitized
-
-        if (pendingFeedback && pendingFeedback.memoryIds.length > 0) {
-          const followupReward = memrlUpdater.estimateRewardFromContext(
-            safeText,
-            pendingFeedback.previousResponseLength,
-          )
-          const reward = Math.max(pendingFeedback.provisionalReward, followupReward)
-
-          void memory
-            .provideFeedback({
-              memoryIds: pendingFeedback.memoryIds,
-              taskSuccess: reward >= 0.5,
-              reward,
-            })
-            .catch((error) => log.warn("async memrl feedback update failed", error))
-
-          pendingFeedback = null
-        }
-
-        const userTimestamp = Date.now()
-        const userMessageMetadata = {
-          role: "user",
-          category: "event",
-          level: 0,
-          security: {
-            affordance: inputSafety.affordance ?? null,
-            sanitized: safeText !== text,
-          },
-        }
-        const userMemoryMetadata = {
-          role: "user",
-          category: "event",
-          level: 0,
-          channel: "cli",
-        }
-
-        eventBus.dispatch("user.message.received", {
-          userId,
-          content: safeText,
-          channel: "cli",
-          timestamp: userTimestamp,
-        })
-        eventBus.dispatch("memory.save.requested", {
-          userId,
-          content: safeText,
-          metadata: userMemoryMetadata,
-        })
-        eventBus.dispatch("causal.update.requested", { userId, content: safeText })
-
-        const [, { messages, systemContext, retrievedMemoryIds }] = await Promise.all([
-          saveMessage(userId, "user", safeText, "cli", userMessageMetadata),
-          memory.buildContext(userId, safeText),
-        ])
-        sessionStore.addMessage(userId, "cli", { role: "user", content: safeText, timestamp: userTimestamp })
-
-        let personaDynamicContext: string | undefined
-        if (config.PERSONA_ENABLED) {
-          const [profile, profileSummary] = await Promise.all([
-            profiler.getProfile(userId),
-            profiler.formatForContext(userId),
-          ])
-
-          const mood = personaEngine.detectMood(safeText, profile?.currentTopics ?? [])
-          const expertise = personaEngine.detectExpertise(profile, safeText)
-          const topicCategory = personaEngine.detectTopicCategory(safeText)
-          personaDynamicContext = personaEngine.buildDynamicContext(
-            {
-              userMood: mood,
-              userExpertise: expertise,
-              topicCategory,
-              urgency: mood === "stressed",
-            },
-            profileSummary,
-          )
-        }
-
-        const systemPrompt = await buildSystemPrompt({
-          sessionMode: "dm",
-          includeSkills: true,
-          includeSafety: true,
-          extraContext: personaDynamicContext,
-        })
-
-        const response = await orchestrator.generate("reasoning", {
-          prompt: systemContext ? `${systemContext}\n\nUser: ${safeText}` : safeText,
-          context: messages,
-          systemPrompt,
-        })
-
-        const { facts, opinions } = await profiler.extractFromMessage(userId, safeText, "user")
-        if (facts.length > 0 || opinions.length > 0) {
-          await profiler.updateProfile(userId, facts, opinions)
-        }
-
-        const provisionalReward = memrlUpdater.estimateRewardFromContext(null, response.length)
-        const critiqued = await responseCritic.critiqueAndRefine(safeText, response, 2)
-        const finalResponse = critiqued.finalResponse
-
-        if (critiqued.refined) {
-          log.debug("cli response refined", {
-            score: critiqued.critique.score,
-            iterations: critiqued.iterations,
-          })
-        }
-
-        const scanResult = outputScanner.scan(finalResponse)
-        if (!scanResult.safe) {
-          log.warn("Assistant output sanitized", {
-            userId,
-            issues: scanResult.issues,
-          })
-        }
-
-        const safeResponse = scanResult.sanitized
-        output.write(`${safeResponse}\n`)
-
-        const assistantTimestamp = Date.now()
-        const assistantMemoryMetadata = {
-          role: "assistant",
-          category: "summary",
-          level: 0,
-          channel: "cli",
-        }
-
-        eventBus.dispatch("user.message.sent", {
-          userId,
-          content: safeResponse,
-          channel: "cli",
-          timestamp: assistantTimestamp,
-        })
-        eventBus.dispatch("memory.save.requested", {
-          userId,
-          content: safeResponse,
-          metadata: assistantMemoryMetadata,
-        })
-
-        await saveMessage(userId, "assistant", safeResponse, "cli", {
-          role: "assistant",
-          category: "summary",
-          level: 0,
-          security: {
-            outputIssues: scanResult.issues,
-            sanitized: safeResponse !== finalResponse,
-          },
-        })
-        sessionStore.addMessage(userId, "cli", { role: "assistant", content: safeResponse, timestamp: assistantTimestamp })
-
-        pendingFeedback = retrievedMemoryIds.length > 0
-          ? {
-            memoryIds: retrievedMemoryIds,
-            previousResponseLength: response.length,
-            provisionalReward,
-          }
-          : null
-      } catch (error) {
-        if (error instanceof Error) {
-          const lowered = error.message.toLowerCase()
-          if (lowered.includes("aborted") || lowered.includes("closed")) {
-            await shutdown()
-          }
-        }
-        log.error("cli loop failed", error)
-      }
-    }
+    await startCLI()
   }
 }
 
