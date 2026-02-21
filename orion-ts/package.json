@@ -1,0 +1,42 @@
+{
+  "name": "orion",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.30.1",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "build": "tsup src/main.ts --format esm --dts",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.46",
+    "@ai-sdk/google": "^3.0.30",
+    "@ai-sdk/openai": "^3.0.30",
+    "@fastify/static": "^9.0.0",
+    "@fastify/websocket": "^11.2.0",
+    "@lancedb/lancedb": "^0.26.2",
+    "@prisma/client": "^7.4.1",
+    "@slack/bolt": "^4.6.0",
+    "ai": "^6.0.97",
+    "apache-arrow": "^18.1.0",
+    "baileys": "7.0.0-rc.9",
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.3.1",
+    "execa": "^9.6.1",
+    "fastify": "^5.7.4",
+    "grammy": "^1.40.0",
+    "node-cron": "^4.2.1",
+    "p-queue": "^9.1.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "prisma": "^7.4.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
