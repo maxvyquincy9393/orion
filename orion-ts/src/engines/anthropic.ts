@@ -1,4 +1,4 @@
-﻿import { anthropic } from "@ai-sdk/anthropic"
+﻿import { createAnthropic } from "@ai-sdk/anthropic"
 import { generateText } from "ai"
 
 import config from "../config.js"
@@ -6,6 +6,7 @@ import { createLogger } from "../logger.js"
 import type { Engine, GenerateOptions } from "./types.js"
 
 const log = createLogger("engines.anthropic")
+const anthropic = createAnthropic({ apiKey: config.ANTHROPIC_API_KEY })
 
 function buildPrompt(options: GenerateOptions): string {
   const contextText = (options.context ?? [])
@@ -37,7 +38,7 @@ export class AnthropicEngine implements Engine {
       const result = await generateText({
         model: anthropic(options.model ?? this.defaultModel),
         prompt: buildPrompt(options),
-        maxTokens: options.maxTokens,
+        maxOutputTokens: options.maxTokens,
         temperature: options.temperature,
       })
       return result.text
