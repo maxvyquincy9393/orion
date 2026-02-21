@@ -5,43 +5,75 @@ import { createLogger } from "../logger.js"
 
 const log = createLogger("pairing.device-store")
 
-const PAIRING_CODE_EXPIRE_MS = 5 * 60 * 1000
-const TOKEN_BYTES = 32
-const MAX_FAILURES = 5
-const FAILURE_WINDOW_MS = 15 * 60 * 1000
+const PAIRING_CODE_TTL_MS = 5 * 60 * 1000
+const DEVICE_TOKEN_LENGTH_BYTES = 64
+const MAX_AUTH_FAILURES = 5
+const THROTTLE_WINDOW_MS = 15 * 60 * 1000
 
-const failureMap = new Map<string, { count: number; windowStart: number }>()
+const authFailures = new Map<string, { count: number; firstFailAt: number }>()
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex")
 }
 
-function clientId(tokenPrefix: string): string {
-  return tokenPrefix.slice(0, 8)
+function deriveClientId(token: string): string {
+  const trimmed = token.trim()
+  if (trimmed.length >= 8) {
+    return trimmed.slice(0, 8)
+  }
+  return hashToken(trimmed).slice(0, 8)
 }
 
-function isThrottled(id: string): boolean {
-  const entry = failureMap.get(id)
-  if (!entry) {
+function timingSafeHashEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8")
+  const rightBuffer = Buffer.from(right, "utf8")
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    const maxLength = Math.max(leftBuffer.length, rightBuffer.length)
+    const leftPadded = Buffer.alloc(maxLength)
+    const rightPadded = Buffer.alloc(maxLength)
+    leftBuffer.copy(leftPadded)
+    rightBuffer.copy(rightPadded)
+    crypto.timingSafeEqual(leftPadded, rightPadded)
     return false
   }
 
-  if (Date.now() - entry.windowStart > FAILURE_WINDOW_MS) {
-    failureMap.delete(id)
-    return false
-  }
-
-  return entry.count >= MAX_FAILURES
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer)
 }
 
-function recordFailure(id: string): void {
-  const entry = failureMap.get(id)
-  if (!entry || Date.now() - entry.windowStart > FAILURE_WINDOW_MS) {
-    failureMap.set(id, { count: 1, windowStart: Date.now() })
+function getThrottleStatusByClientId(clientId: string): { throttled: boolean; retryAfterSeconds: number } {
+  const failures = authFailures.get(clientId)
+  if (!failures) {
+    return { throttled: false, retryAfterSeconds: 0 }
+  }
+
+  const elapsedMs = Date.now() - failures.firstFailAt
+  if (elapsedMs > THROTTLE_WINDOW_MS) {
+    authFailures.delete(clientId)
+    return { throttled: false, retryAfterSeconds: 0 }
+  }
+
+  if (failures.count < MAX_AUTH_FAILURES) {
+    return { throttled: false, retryAfterSeconds: 0 }
+  }
+
+  return {
+    throttled: true,
+    retryAfterSeconds: Math.max(1, Math.ceil((THROTTLE_WINDOW_MS - elapsedMs) / 1000)),
+  }
+}
+
+function recordFailure(clientId: string): void {
+  const current = authFailures.get(clientId)
+  if (!current || Date.now() - current.firstFailAt > THROTTLE_WINDOW_MS) {
+    authFailures.set(clientId, { count: 1, firstFailAt: Date.now() })
     return
   }
 
-  entry.count += 1
+  authFailures.set(clientId, {
+    ...current,
+    count: current.count + 1,
+  })
 }
 
 export interface AuthResult {
@@ -49,111 +81,175 @@ export interface AuthResult {
   channel: string
 }
 
-export const deviceStore = {
-  async generateCode(userId: string, channel: string): Promise<string> {
-    await prisma.pairingSession.deleteMany({
-      where: { userId, expiresAt: { lt: new Date() } },
+async function generatePairingCode(userId: string, channel: string): Promise<string> {
+  const now = new Date()
+
+  await prisma.pairingSession.deleteMany({
+    where: {
+      OR: [
+        { expiresAt: { lt: now } },
+        { used: true },
+      ],
+    },
+  })
+
+  const code = crypto.randomInt(100000, 1000000).toString()
+  await prisma.pairingSession.create({
+    data: {
+      code,
+      userId,
+      channel,
+      expiresAt: new Date(Date.now() + PAIRING_CODE_TTL_MS),
+      used: false,
+    },
+  })
+
+  log.info("pairing code generated", {
+    userId,
+    channel,
+    expiresInMs: PAIRING_CODE_TTL_MS,
+  })
+
+  return code
+}
+
+async function confirmPairing(code: string, deviceName?: string): Promise<string | null> {
+  const session = await prisma.pairingSession.findUnique({ where: { code } })
+  if (!session) {
+    log.warn("invalid pairing code", { code: `${code.slice(0, 3)}***` })
+    return null
+  }
+
+  if (session.used || session.expiresAt < new Date()) {
+    await prisma.pairingSession.update({
+      where: { code },
+      data: { used: true },
     })
+    log.warn("expired or used pairing code", { code: `${code.slice(0, 3)}***` })
+    return null
+  }
 
-    const code = Math.floor(100000 + Math.random() * 900000).toString()
-    await prisma.pairingSession.create({
-      data: {
-        code,
-        userId,
-        channel,
-        expiresAt: new Date(Date.now() + PAIRING_CODE_EXPIRE_MS),
-      },
-    })
+  await prisma.pairingSession.update({
+    where: { code },
+    data: { used: true },
+  })
 
-    log.info("pairing code generated", { userId, channel })
-    return code
-  },
+  const rawToken = crypto.randomBytes(DEVICE_TOKEN_LENGTH_BYTES).toString("hex")
+  const tokenHash = hashToken(rawToken)
 
-  async confirmPairing(code: string, deviceName?: string): Promise<string | null> {
-    const session = await prisma.pairingSession.findUnique({ where: { code } })
-
-    if (!session || session.used || session.expiresAt < new Date()) {
-      log.warn("invalid or expired pairing code")
-      if (session) {
-        await prisma.pairingSession.update({
-          where: { code },
-          data: { used: true },
-        })
-      }
-      return null
-    }
-
-    await prisma.pairingSession.update({ where: { code }, data: { used: true } })
-
-    const rawToken = crypto.randomBytes(TOKEN_BYTES).toString("hex")
-    const tokenHash = hashToken(rawToken)
-
-    await prisma.deviceToken.create({
-      data: {
-        tokenHash,
-        userId: session.userId,
-        channel: session.channel,
-        deviceName: deviceName ?? "unknown",
-      },
-    })
-
-    log.info("device paired successfully", {
+  await prisma.deviceToken.create({
+    data: {
+      tokenHash,
       userId: session.userId,
       channel: session.channel,
-      deviceName,
+      deviceName: deviceName ?? "unknown",
+      lastUsed: new Date(),
+    },
+  })
+
+  log.info("device paired", {
+    userId: session.userId,
+    channel: session.channel,
+    deviceName: deviceName ?? "unknown",
+  })
+
+  return rawToken
+}
+
+async function validateToken(rawToken: string): Promise<AuthResult | null> {
+  const normalized = rawToken.trim()
+  const clientId = deriveClientId(normalized)
+  const throttleStatus = getThrottleStatusByClientId(clientId)
+
+  if (throttleStatus.throttled) {
+    log.warn("auth request throttled", {
+      clientId,
+      retryAfterSeconds: throttleStatus.retryAfterSeconds,
     })
+    return null
+  }
 
-    return rawToken
-  },
+  const tokenHash = hashToken(normalized)
+  const device = await prisma.deviceToken.findFirst({
+    where: {
+      tokenHash,
+      revokedAt: null,
+    },
+    select: {
+      id: true,
+      tokenHash: true,
+      userId: true,
+      channel: true,
+    },
+  })
 
-  async validate(rawToken: string): Promise<AuthResult | null> {
-    const id = clientId(rawToken)
+  if (!device) {
+    recordFailure(clientId)
+    log.warn("invalid device token", { clientId })
+    return null
+  }
 
-    if (isThrottled(id)) {
-      log.warn("auth throttled", { clientId: id })
-      return null
-    }
-
-    const hash = hashToken(rawToken)
-    const device = await prisma.deviceToken.findFirst({
-      where: { tokenHash: hash, revokedAt: null },
-    })
-
-    if (!device) {
-      recordFailure(id)
-      log.warn("invalid device token", { clientId: id })
-      return null
-    }
-
-    failureMap.delete(id)
-
-    void prisma.deviceToken
-      .update({
-        where: { id: device.id },
-        data: { lastUsed: new Date() },
-      })
-      .catch((error) => log.error("lastUsed update failed", error))
-
-    return { userId: device.userId, channel: device.channel }
-  },
-
-  async revoke(rawToken: string): Promise<void> {
-    const hash = hashToken(rawToken)
+  if (!timingSafeHashEqual(device.tokenHash, tokenHash)) {
+    recordFailure(clientId)
     await prisma.deviceToken.updateMany({
-      where: { tokenHash: hash },
+      where: { id: device.id },
       data: { revokedAt: new Date() },
     })
-  },
+    log.warn("device token mismatch; revoked stale token", { clientId })
+    return null
+  }
 
-  async listDevices(userId: string): Promise<Array<{
-    id: string
-    channel: string
-    deviceName: string
-    lastUsed: Date
-  }>> {
-    return prisma.deviceToken.findMany({
-      where: { userId, revokedAt: null },
-      select: { id: true, channel: true, deviceName: true, lastUsed: true },
-    })
+  authFailures.delete(clientId)
+
+  await prisma.deviceToken.update({
+    where: { id: device.id },
+    data: { lastUsed: new Date() },
+  })
+
+  return {
+    userId: device.userId,
+    channel: device.channel,
+  }
+}
+
+async function revokeToken(rawToken: string): Promise<void> {
+  const tokenHash = hashToken(rawToken)
+  await prisma.deviceToken.updateMany({
+    where: { tokenHash },
+    data: { revokedAt: new Date() },
+  })
+}
+
+async function listDevices(userId: string): Promise<Array<{
+  id: string
+  channel: string
+  deviceName: string
+  lastUsed: Date
+}>> {
+  return prisma.deviceToken.findMany({
+    where: {
+      userId,
+      revokedAt: null,
+    },
+    select: {
+      id: true,
+      channel: true,
+      deviceName: true,
+      lastUsed: true,
+    },
+  })
+}
+
+export const deviceStore = {
+  generatePairingCode,
+  generateCode: generatePairingCode,
+  confirmPairing,
+  validateToken,
+  validate: validateToken,
+  revokeToken,
+  revoke: revokeToken,
+  listDevices,
+  getThrottleStatus(rawToken: string): { throttled: boolean; retryAfterSeconds: number } {
+    return getThrottleStatusByClientId(deriveClientId(rawToken))
   },
 }

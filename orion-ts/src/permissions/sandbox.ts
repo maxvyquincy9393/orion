@@ -2,6 +2,8 @@ import * as fs from "fs"
 import * as path from "path"
 import * as yaml from "js-yaml"
 
+import { isAuthorizedSender, type AccessMode } from "../gateway/auth-middleware.js"
+
 export enum PermissionAction {
   SEND_MESSAGE = "messaging.send",
   PROACTIVE_MESSAGE = "proactive.message",
@@ -49,6 +51,14 @@ type ChannelManager = {
   sendWithConfirm: (userId: string, message: string, action: string) => Promise<boolean>
 }
 
+export interface AuthCheckContext {
+  senderId: string
+  channel: string
+  authenticated: boolean
+  allowlist?: string[] | null
+  mode?: AccessMode
+}
+
 export class PermissionSandbox {
   private config: Record<string, PermissionSection> = {}
   private channelManager: ChannelManager | null = null
@@ -74,7 +84,7 @@ export class PermissionSandbox {
     }
   }
 
-  async check(action: PermissionAction, userId: string): Promise<boolean> {
+  async check(action: PermissionAction, userId: string, authContext?: AuthCheckContext): Promise<boolean> {
     const sectionKey = ACTION_TO_SECTION[action]
     if (!sectionKey) {
       return false
@@ -87,6 +97,24 @@ export class PermissionSandbox {
 
     if (!section.enabled) {
       return false
+    }
+
+    if (authContext) {
+      const mode = authContext.mode ?? "pairing"
+      const allowedSender = isAuthorizedSender(
+        authContext.senderId,
+        authContext.channel,
+        authContext.allowlist ?? null,
+        mode,
+      )
+
+      if (!allowedSender) {
+        return false
+      }
+
+      if (this.isHighRiskAction(action) && !authContext.authenticated) {
+        return false
+      }
     }
 
     if (section.quiet_hours) {
@@ -104,7 +132,8 @@ export class PermissionSandbox {
   async checkWithConfirm(
     action: PermissionAction,
     userId: string,
-    description: string
+    description: string,
+    authContext?: AuthCheckContext,
   ): Promise<boolean> {
     const sectionKey = ACTION_TO_SECTION[action]
     if (!sectionKey) {
@@ -120,12 +149,12 @@ export class PermissionSandbox {
       return false
     }
 
-    const baseAllowed = await this.check(action, userId)
+    const baseAllowed = await this.check(action, userId, authContext)
     if (!baseAllowed) {
       return false
     }
 
-    if (section.require_confirm) {
+    if (section.require_confirm || this.isHighRiskAction(action)) {
       if (!this.channelManager) {
         return false
       }
@@ -149,6 +178,14 @@ export class PermissionSandbox {
 
   getConfig(): Record<string, PermissionSection> {
     return this.config
+  }
+
+  private isHighRiskAction(action: PermissionAction): boolean {
+    return [
+      PermissionAction.FILE_WRITE,
+      PermissionAction.TERMINAL_RUN,
+      PermissionAction.CALENDAR_WRITE,
+    ].includes(action)
   }
 }
 

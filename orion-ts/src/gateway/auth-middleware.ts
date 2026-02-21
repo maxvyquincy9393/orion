@@ -23,7 +23,7 @@ export async function authenticateWebSocket(token: string | null | undefined): P
     return null
   }
 
-  const result = await deviceStore.validate(token)
+  const result = await deviceStore.validateToken(token)
   if (!result) {
     return null
   }
@@ -43,11 +43,9 @@ export function getAuthFailure(token: string | null | undefined): AuthFailure {
     }
   }
 
-  const throttleStatus = (deviceStore as {
-    getThrottleStatus?: (rawToken: string) => { throttled: boolean; retryAfterSeconds: number }
-  }).getThrottleStatus?.(token)
+  const throttleStatus = deviceStore.getThrottleStatus(token)
 
-  if (throttleStatus?.throttled) {
+  if (throttleStatus.throttled) {
     return {
       statusCode: 429,
       message: "Too many failed auth attempts",

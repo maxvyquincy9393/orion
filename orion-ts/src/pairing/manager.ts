@@ -6,9 +6,17 @@ import { deviceStore, type AuthResult } from "./device-store.js"
 const log = createLogger("pairing.manager")
 
 export class PairingManager {
+  async initiatePairing(userId: string, channel: string): Promise<string> {
+    return deviceStore.generatePairingCode(userId, channel)
+  }
+
+  async isAuthorized(token: string): Promise<AuthResult | null> {
+    return deviceStore.validateToken(token)
+  }
+
   async generateCode(channel: string, senderId: string): Promise<string> {
     try {
-      return await deviceStore.generateCode(senderId, channel)
+      return await this.initiatePairing(senderId, channel)
     } catch (error) {
       log.error("generateCode failed", error)
       return ""
@@ -31,7 +39,7 @@ export class PairingManager {
 
   async validateToken(rawToken: string): Promise<AuthResult | null> {
     try {
-      return await deviceStore.validate(rawToken)
+      return await this.isAuthorized(rawToken)
     } catch (error) {
       log.error("validateToken failed", error)
       return null
