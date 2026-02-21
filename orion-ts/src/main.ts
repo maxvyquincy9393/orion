@@ -18,12 +18,40 @@ import { profiler } from "./memory/profiler.js"
 import { pluginLoader } from "./plugin-sdk/loader.js"
 import { filterPromptWithAffordance } from "./security/prompt-filter.js"
 import { outputScanner } from "./security/output-scanner.js"
+import { eventBus } from "./core/event-bus.js"
 
 const log = createLogger("main")
 
 const mode = process.argv.includes("--mode")
   ? process.argv[process.argv.indexOf("--mode") + 1]
   : "text"
+
+let eventHandlersInitialized = false
+
+function initializeEventHandlers(): void {
+  if (eventHandlersInitialized) {
+    return
+  }
+
+  eventHandlersInitialized = true
+
+  eventBus.on("memory.save.requested", async (data) => {
+    await memory.save(data.userId, data.content, data.metadata)
+  })
+
+  eventBus.on("profile.update.requested", async (data) => {
+    const { facts, opinions } = await profiler.extractFromMessage(data.userId, data.content, "user")
+    await profiler.updateProfile(data.userId, facts, opinions)
+  })
+
+  eventBus.on("causal.update.requested", async (data) => {
+    await causalGraph.extractAndUpdate(data.userId, data.content)
+  })
+
+  eventBus.on("memory.consolidate.requested", async (data) => {
+    await memory.compress(data.userId)
+  })
+}
 
 async function start(): Promise<void> {
   log.info("starting orion-ts")
@@ -38,6 +66,7 @@ async function start(): Promise<void> {
   await skillManager.init()
   await pluginLoader.loadAllFromDefaultDir()
   void agentRunner
+  initializeEventHandlers()
 
   const available = orchestrator.getAvailableEngines()
   if (available.length > 0) {
@@ -73,6 +102,9 @@ async function start(): Promise<void> {
     const shutdown = async () => {
       log.info("shutting down")
       rl.close()
+      if (daemon.isRunning()) {
+        daemon.stop()
+      }
       await prisma.$disconnect()
       process.exit(0)
     }
@@ -101,7 +133,8 @@ async function start(): Promise<void> {
         }
 
         const safeText = inputSafety.sanitized
-        await saveMessage(userId, "user", safeText, "cli", {
+        const userTimestamp = Date.now()
+        const userMessageMetadata = {
           role: "user",
           category: "event",
           level: 0,
@@ -109,16 +142,34 @@ async function start(): Promise<void> {
             affordance: inputSafety.affordance ?? null,
             sanitized: safeText !== text,
           },
-        })
-        await memory.save(userId, safeText, { role: "user", category: "event", level: 0, channel: "cli" })
-        sessionStore.addMessage(userId, "cli", { role: "user", content: safeText, timestamp: Date.now() })
-        void profiler
-          .extractFromMessage(userId, safeText, "user")
-          .then(({ facts, opinions }) => profiler.updateProfile(userId, facts, opinions))
-          .catch((error) => log.warn("profile extraction failed", error))
-        void causalGraph.extractAndUpdate(userId, safeText).catch((error) => log.warn("causal update failed", error))
+        }
+        const userMemoryMetadata = {
+          role: "user",
+          category: "event",
+          level: 0,
+          channel: "cli",
+        }
 
-        const { messages, systemContext } = await memory.buildContext(userId, safeText)
+        eventBus.dispatch("user.message.received", {
+          userId,
+          content: safeText,
+          channel: "cli",
+          timestamp: userTimestamp,
+        })
+        eventBus.dispatch("memory.save.requested", {
+          userId,
+          content: safeText,
+          metadata: userMemoryMetadata,
+        })
+        eventBus.dispatch("profile.update.requested", { userId, content: safeText })
+        eventBus.dispatch("causal.update.requested", { userId, content: safeText })
+
+        const [, { messages, systemContext }] = await Promise.all([
+          saveMessage(userId, "user", safeText, "cli", userMessageMetadata),
+          memory.buildContext(userId, safeText),
+        ])
+        sessionStore.addMessage(userId, "cli", { role: "user", content: safeText, timestamp: userTimestamp })
+
         const response = await orchestrator.generate("reasoning", {
           prompt: systemContext ? `${systemContext}\n\nUser: ${safeText}` : safeText,
           context: messages,
@@ -143,6 +194,27 @@ async function start(): Promise<void> {
 
         const safeResponse = scanResult.sanitized
         output.write(`${safeResponse}\n`)
+
+        const assistantTimestamp = Date.now()
+        const assistantMemoryMetadata = {
+          role: "assistant",
+          category: "summary",
+          level: 0,
+          channel: "cli",
+        }
+
+        eventBus.dispatch("user.message.sent", {
+          userId,
+          content: safeResponse,
+          channel: "cli",
+          timestamp: assistantTimestamp,
+        })
+        eventBus.dispatch("memory.save.requested", {
+          userId,
+          content: safeResponse,
+          metadata: assistantMemoryMetadata,
+        })
+
         await saveMessage(userId, "assistant", safeResponse, "cli", {
           role: "assistant",
           category: "summary",
@@ -152,13 +224,7 @@ async function start(): Promise<void> {
             sanitized: safeResponse !== finalResponse,
           },
         })
-        await memory.save(userId, safeResponse, {
-          role: "assistant",
-          category: "summary",
-          level: 0,
-          channel: "cli",
-        })
-        sessionStore.addMessage(userId, "cli", { role: "assistant", content: safeResponse, timestamp: Date.now() })
+        sessionStore.addMessage(userId, "cli", { role: "assistant", content: safeResponse, timestamp: assistantTimestamp })
       } catch (error) {
         if (error instanceof Error) {
           const lowered = error.message.toLowerCase()
