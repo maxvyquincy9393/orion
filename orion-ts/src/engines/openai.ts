@@ -1,4 +1,4 @@
-﻿import { openai } from "@ai-sdk/openai"
+﻿import { createOpenAI } from "@ai-sdk/openai"
 import { generateText } from "ai"
 
 import config from "../config.js"
@@ -6,6 +6,7 @@ import { createLogger } from "../logger.js"
 import type { Engine, GenerateOptions } from "./types.js"
 
 const log = createLogger("engines.openai")
+const openai = createOpenAI({ apiKey: config.OPENAI_API_KEY })
 
 function buildPrompt(options: GenerateOptions): string {
   const contextText = (options.context ?? [])
@@ -37,7 +38,7 @@ export class OpenAIEngine implements Engine {
       const result = await generateText({
         model: openai(options.model ?? this.defaultModel),
         prompt: buildPrompt(options),
-        maxTokens: options.maxTokens,
+        maxOutputTokens: options.maxTokens,
         temperature: options.temperature,
       })
       return result.text
