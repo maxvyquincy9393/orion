@@ -31,7 +31,7 @@ class TriggerEngine {
   async load(filePath: string): Promise<void> {
     if (!fs.existsSync(filePath)) {
       this.triggers = []
-      logger.warn(`Triggers file not found: ${filePath}`)
+      logger.warn(`Triggers file missing: ${filePath}`)
       return
     }
 
