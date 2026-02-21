@@ -427,6 +427,64 @@ Phase 3 COMPLETE.
 
 Phase 3 COMPLETE.
 
+### Phase 4 - Credentials, Setup, and First Live Conversation
+- [x] Interactive setup wizard (scripts/setup.py)
+- [x] SQLite support for database models (database/models.py - UUIDColumn helper)
+- [x] End-to-end smoke test (scripts/first_run.py)
+- [x] Setup guide documentation (docs/setup-guide.md)
+- [x] TELEGRAM_CHAT_ID added to config.py and .env.example
+- [x] DATA_DIR added to config.py
+- [x] Simplified .env.example with new API key format
+
+Phase 4 COMPLETE.
+
+**Phase 4 Implementation Details:**
+
+**scripts/setup.py:**
+- Interactive CLI wizard for credential configuration
+- Prompts for: ANTHROPIC_API_KEY (required), TELEGRAM_BOT_TOKEN (required), TELEGRAM_CHAT_ID (required)
+- Optional: OPENAI_API_KEY, GEMINI_API_KEY
+- Database URL configuration (SQLite default, PostgreSQL option)
+- Connectivity tests for Claude, OpenAI, Gemini, Telegram
+- Preserves existing .env values unless user confirms changes
+- Prints configuration summary and next steps
+
+**database/models.py:**
+- UUIDColumn() helper function for database-agnostic UUID handling
+- Detects SQLite vs PostgreSQL via DATABASE_URL
+- SQLite: uses String(36) for UUID columns
+- PostgreSQL: uses native UUID(as_uuid=True)
+- All 7 models updated to use UUIDColumn()
+- Allows quick local testing without PostgreSQL
+
+**scripts/first_run.py:**
+- End-to-end smoke test
+- Tests: database tables, memory save/retrieve, engine availability, conversation, daemon
+- Conversation test sends: "Hello, say 'Orion is online' and nothing else"
+- Daemon test: start, run for 5 seconds, verify cycles, stop
+- Prints detailed summary of all test results
+
+**docs/setup-guide.md:**
+- Prerequisites: Python 3.11+, pip, git
+- Quick start guide (SQLite + Claude only)
+- Full setup guide (PostgreSQL + all engines)
+- Telegram bot creation and chat ID instructions
+- Voice setup (Whisper + Coqui)
+- Vision setup (OpenCV + mss + Tesseract)
+- Permissions configuration guide
+- Troubleshooting common errors
+
+**config.py updates:**
+- Added TELEGRAM_CHAT_ID configuration variable
+- Added DATA_DIR path with auto-creation
+
+**.env.example updates:**
+- Simplified to use OPENAI_API_KEY and GEMINI_API_KEY (simpler than OAuth tokens)
+- Added TELEGRAM_CHAT_ID
+- Default DATABASE_URL changed to sqlite:///orion.db
+
+Phase 4 COMPLETE.
+
 ---
 
 ## Key Decisions Log
@@ -466,8 +524,13 @@ Established during sessions — all AI assistants must follow:
 2. Say: **"Read SKILL.md and docs/session-log.md then continue Orion"**
 3. Claude will know exactly where we are and what to do next
 
-Current state: Phase 3 complete. All core features implemented.
+Current state: All phases complete. Orion is ready for first live run.
+
+To run Orion:
+1. python scripts/setup.py - Configure credentials
+2. python scripts/first_run.py - Verify everything works
+3. python main.py - Start Orion
 
 ---
 
-*Last updated: February 2026 — Phase 3 complete*
+*Last updated: February 2026 - Phase 4 complete*
