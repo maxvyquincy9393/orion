@@ -1,14 +1,15 @@
 import { generateText } from "ai"
-import { anthropic } from "@ai-sdk/anthropic"
-import { openai } from "@ai-sdk/openai"
-import { orchestrator } from "../engines/orchestrator"
-import { orionTools } from "./tools"
+
+import { orchestrator } from "../engines/orchestrator.js"
+import { orionTools } from "./tools.js"
+import { createLogger } from "../logger.js"
+
+const logger = createLogger("runner")
 
 export interface AgentTask {
   id: string
   task: string
   context?: string
-  tools?: string[]
 }
 
 export interface AgentResult {
@@ -24,18 +25,24 @@ export class AgentRunner {
 
     try {
       const engine = orchestrator.route("reasoning")
-
       const prompt = task.context
         ? `Context: ${task.context}\n\nTask: ${task.task}`
         : task.task
 
-      const result = await orchestrator.generate("reasoning", { prompt })
-
-      return {
-        id: task.id,
-        result,
-        durationMs: Date.now() - start,
+      let output = ""
+      try {
+        const result = await generateText({
+          model: engine as any,
+          tools: orionTools,
+          prompt,
+        })
+        output = result.text
+      } catch {
+        output = await orchestrator.generate("reasoning", { prompt })
       }
+
+      logger.info(`task ${task.id} done in ${Date.now() - start}ms`)
+      return { id: task.id, result: output, durationMs: Date.now() - start }
     } catch (err) {
       return {
         id: task.id,
@@ -47,6 +54,7 @@ export class AgentRunner {
   }
 
   async runParallel(tasks: AgentTask[]): Promise<AgentResult[]> {
+    logger.info(`running ${tasks.length} tasks in parallel`)
     return await Promise.all(tasks.map((t) => this.runSingle(t)))
   }
 
@@ -55,8 +63,8 @@ export class AgentRunner {
 
     for (const task of tasks) {
       const prev = results[results.length - 1]
-      if (prev && prev.result) {
-        task.context = prev.result
+      if (prev?.result) {
+        task.context = `Previous: ${prev.result}\n${task.context ?? ""}`
       }
       results.push(await this.runSingle(task))
     }
@@ -64,35 +72,37 @@ export class AgentRunner {
     return results
   }
 
-  async runWithSupervisor(goal: string, maxAgents = 5): Promise<string> {
-    const planPrompt = `Break this goal into ${maxAgents} parallel subtasks. Return ONLY a JSON array of strings, no other text. Goal: "${goal}"`
+  async runWithSupervisor(goal: string, maxSubtasks = 5): Promise<string> {
+    logger.info(`supervisor planning: ${goal}`)
 
-    let plan: string[]
+    const plan = await orchestrator.generate("reasoning", {
+      prompt: `Break this goal into at most ${maxSubtasks} independent parallel subtasks. Return ONLY a valid JSON array of strings. No explanation. Goal: "${goal}"`,
+    })
+
+    let subtasks: string[]
     try {
-      const planResponse = await orchestrator.generate("reasoning", { prompt: planPrompt })
-      const jsonMatch = planResponse.match(/\[[\s\S]*\]/)
-      if (jsonMatch) {
-        plan = JSON.parse(jsonMatch[0])
-      } else {
-        plan = [goal]
+      subtasks = JSON.parse(plan.replace(/```json|```/g, "").trim())
+      if (!Array.isArray(subtasks)) {
+        throw new Error("invalid plan")
       }
     } catch {
-      plan = [goal]
+      subtasks = [goal]
     }
 
-    const tasks: AgentTask[] = plan.slice(0, maxAgents).map((t, i) => ({
-      id: `task_${i}`,
-      task: t,
+    const tasks: AgentTask[] = subtasks.map((task, index) => ({
+      id: `sub_${index}`,
+      task,
     }))
 
     const results = await this.runParallel(tasks)
 
-    const aggregatePrompt = `Combine these results into one coherent response for goal: "${goal}"
+    const aggregate = await orchestrator.generate("reasoning", {
+      prompt: `Combine into one coherent response. Goal: "${goal}" Results: ${results
+        .map((result, index) => `[${index + 1}] ${result.result}`)
+        .join("\n\n")}`,
+    })
 
-Results:
-${results.map((r) => r.result).join("\n\n")}`
-
-    return await orchestrator.generate("reasoning", { prompt: aggregatePrompt })
+    return aggregate
   }
 }
 
