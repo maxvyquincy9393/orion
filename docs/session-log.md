@@ -487,6 +487,42 @@ Phase 4 COMPLETE.
 
 ---
 
+## Session 5 - Multi-Provider Auth Upgrade
+**Date:** February 2026
+**Tools used:** Codex
+
+### What was implemented
+
+- Multi-provider auth system completed with new OAuth modules under `engines/auth/`
+- OpenAI/Codex OAuth device-code flow implemented with token persistence in `.orion/auth/openai.json`
+- Google Gemini OAuth device-code flow implemented with token persistence in `.orion/auth/gemini.json`
+- Central `AuthManager` added for provider token resolution, status, login/logout, and Ollama reachability checks
+- `openai_engine.py` updated to use `AuthManager` with OAuth Bearer mode and API-key mode fallback
+- `gemini_engine.py` updated to use `AuthManager` with OAuth REST mode and API-key SDK mode fallback
+- New engines added:
+  - `engines/groq_engine.py`
+  - `engines/openrouter_engine.py`
+- `core/orchestrator.py` integrated with all new providers and routing priorities:
+  - reasoning: anthropic > openai > gemini > openrouter > groq > local
+  - code: openai > anthropic > groq > openrouter > local
+  - fast: groq > gemini > local > anthropic
+  - multimodal: gemini > openai > anthropic
+  - local: ollama/local
+- `scripts/setup.py` replaced with full multi-provider onboarding wizard:
+  - Telegram required setup
+  - Multi-provider selection with API-key or OAuth path
+  - Connectivity testing and summary
+  - Database selection (SQLite or PostgreSQL)
+- `requirements.txt` updated with `groq` dependency and OpenRouter note
+
+### Outcome
+
+Multi-provider auth and onboarding flow are now complete and aligned with OpenClaw-style provider selection.
+OAuth support for OpenAI and Gemini is active.
+Groq and OpenRouter engines are integrated into routing.
+
+---
+
 ## Key Decisions Log
 
 | Decision | Choice | Reason |
@@ -533,4 +569,4 @@ To run Orion:
 
 ---
 
-*Last updated: February 2026 - Phase 4 complete*
+*Last updated: February 2026 - Session 5 multi-provider auth complete*
