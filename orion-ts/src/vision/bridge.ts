@@ -1,11 +1,13 @@
 import { execa } from "execa"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import config from "../config.js"
 import { createLogger } from "../logger.js"
 
 const logger = createLogger("vision")
 const PY = config.PYTHON_PATH ?? "python"
-const CWD = ".."
+const CWD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../python")
 
 export class VisionBridge {
   async analyzeScreen(prompt = "What is on the screen?"): Promise<string> {

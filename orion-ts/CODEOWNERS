@@ -1,0 +1,37 @@
+# Code Owners
+# https://help.github.com/articles/about-code-owners/
+
+# Core Domain - identity, bootstrap, system prompts
+/src/core/ @owner
+/src/agents/ @owner
+/src/engines/ @owner
+
+# Infrastructure - gateway, config, database
+/src/gateway/ @owner
+/src/config/ @owner
+/src/database/ @owner
+
+# Security & Safety
+/src/security/ @owner
+/src/permissions/ @owner
+
+# Memory & State
+/src/memory/ @owner
+/src/sessions/ @owner
+
+# Communication Channels
+/src/channels/ @owner
+
+# External Integrations
+/src/voice/ @owner
+/src/vision/ @owner
+
+# Skills & Plugins
+/src/skills/ @owner
+/src/plugin-sdk/ @owner
+
+# Workspace & Docs
+/workspace/ @owner
+
+# Data
+/prisma/ @owner
