@@ -216,6 +216,43 @@ model UsageEvent {
   @@index([timestamp])
 }
 
+/**
+ * Tenant configuration for multi-tenancy (OC-12)
+ *
+ * Stores tenant-level configuration and resource quotas.
+ * Used by WorkspaceResolver for tenant isolation.
+ */
+model Tenant {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  userId    String   @unique
+  
+  // Tenant metadata
+  displayName String?
+  tier        String   @default("free") // free, pro, enterprise
+  
+  // Resource limits (JSON for flexibility)
+  limits Json @default("{\"maxMessagesPerDay\": 100, \"maxStorageMb\": 50, \"maxSkills\": 3, \"apiRateLimit\": 60}")
+  
+  // Feature flags
+  features Json @default("{\"enableVoice\": false, \"enableVision\": false, \"enableCustomSkills\": false, \"enableApi\": false}")
+  
+  // Custom configuration
+  customConfig Json?
+  
+  // Workspace path (relative to saasDataDir)
+  workspacePath String?
+  
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastAccessedAt DateTime @default(now())
+  
+  // Indexes
+  @@index([tier])
+  @@index([createdAt])
+}
+
 model CausalNode {
   id        String   @id @default(cuid())
   userId    String

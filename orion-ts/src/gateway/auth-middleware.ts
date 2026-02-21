@@ -1,5 +1,13 @@
+/**
+ * Auth Middleware with Tenant Context (OC-12)
+ *
+ * Enhanced authentication that includes tenant/workspace context
+ * for multi-tenant SaaS deployments.
+ */
+
 import { createLogger } from "../logger.js"
 import { deviceStore } from "../pairing/device-store.js"
+import { workspaceResolver, type WorkspaceContext } from "../core/workspace-resolver.js"
 
 const log = createLogger("gateway.auth")
 
@@ -9,6 +17,11 @@ export interface AuthContext {
   userId: string
   channel: string
   authenticated: boolean
+  /**
+   * Tenant/workspace context for multi-tenant deployments
+   * Only populated in SaaS mode or when tenant config exists
+   */
+  tenant?: WorkspaceContext
 }
 
 export interface AuthFailure {
@@ -28,10 +41,22 @@ export async function authenticateWebSocket(token: string | null | undefined): P
     return null
   }
 
+  // Load tenant context for multi-tenant deployments (OC-12)
+  let tenant: WorkspaceContext | undefined
+  if (workspaceResolver.isSaasMode()) {
+    try {
+      tenant = (await workspaceResolver.getContext(result.userId)) ?? undefined
+    } catch (error) {
+      log.warn("Failed to load tenant context", { userId: result.userId, error })
+      // Continue without tenant context (graceful degradation)
+    }
+  }
+
   return {
     userId: result.userId,
     channel: result.channel,
     authenticated: true,
+    tenant,
   }
 }
 
