@@ -21,6 +21,8 @@ import { pluginLoader } from "./plugin-sdk/loader.js"
 import { filterPromptWithAffordance } from "./security/prompt-filter.js"
 import { outputScanner } from "./security/output-scanner.js"
 import { eventBus } from "./core/event-bus.js"
+import { buildSystemPrompt } from "./core/system-prompt-builder.js"
+import { bootstrapLoader } from "./core/bootstrap.js"
 
 const log = createLogger("main")
 
@@ -218,7 +220,7 @@ async function start(): Promise<void> {
         ])
         sessionStore.addMessage(userId, "cli", { role: "user", content: safeText, timestamp: userTimestamp })
 
-        let systemPrompt: string | undefined
+        let personaSystemPrompt: string | undefined
         if (config.PERSONA_ENABLED) {
           const [profile, profileSummary] = await Promise.all([
             profiler.getProfile(userId),
@@ -228,7 +230,7 @@ async function start(): Promise<void> {
           const mood = personaEngine.detectMood(safeText, profile?.currentTopics ?? [])
           const expertise = personaEngine.detectExpertise(profile, safeText)
           const topicCategory = personaEngine.detectTopicCategory(safeText)
-          systemPrompt = personaEngine.buildSystemPrompt(
+          personaSystemPrompt = personaEngine.buildSystemPrompt(
             {
               userMood: mood,
               userExpertise: expertise,
@@ -238,6 +240,11 @@ async function start(): Promise<void> {
             profileSummary,
           )
         }
+
+        const systemPrompt = await buildSystemPrompt({
+          mode: "dm",
+          extraContext: personaSystemPrompt,
+        })
 
         const response = await orchestrator.generate("reasoning", {
           prompt: systemContext ? `${systemContext}\n\nUser: ${safeText}` : safeText,
@@ -296,6 +303,25 @@ async function start(): Promise<void> {
           },
         })
         sessionStore.addMessage(userId, "cli", { role: "assistant", content: safeResponse, timestamp: assistantTimestamp })
+
+        void (async () => {
+          try {
+            const { facts } = await profiler.extractFromMessage(userId, safeText, "user")
+            const updates: Record<string, string> = {}
+
+            for (const fact of facts) {
+              if (fact.key && fact.value && fact.confidence > 0.7) {
+                updates[fact.key] = String(fact.value)
+              }
+            }
+
+            if (Object.keys(updates).length > 0) {
+              await bootstrapLoader.updateUserMd(updates)
+            }
+          } catch (err) {
+            log.debug("profiler -> USER.md sync skipped", err)
+          }
+        })()
 
         pendingFeedback = retrievedMemoryIds.length > 0
           ? {
