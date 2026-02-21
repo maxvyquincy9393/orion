@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js"
+import { affordanceChecker, type AffordanceResult } from "./affordance-checker.js"
 
 const log = createLogger("security.prompt-filter")
 
@@ -112,6 +113,10 @@ export interface PromptFilterResult {
   sanitized: string
 }
 
+export interface PromptSafetyResult extends PromptFilterResult {
+  affordance?: AffordanceResult
+}
+
 export function filterPrompt(prompt: string, userId: string): PromptFilterResult {
   try {
     const detection = detectInjection(prompt)
@@ -141,6 +146,49 @@ export function filterPrompt(prompt: string, userId: string): PromptFilterResult
       safe: true,
       sanitized: prompt,
     }
+  }
+}
+
+export async function filterPromptWithAffordance(
+  prompt: string,
+  userId: string,
+): Promise<PromptSafetyResult> {
+  const patternFiltered = filterPrompt(prompt, userId)
+  if (!patternFiltered.safe) {
+    return patternFiltered
+  }
+
+  const affordance = await affordanceChecker.deepCheck(patternFiltered.sanitized, userId)
+  if (affordance.shouldBlock) {
+    log.warn("Prompt blocked by affordance checker", {
+      userId,
+      riskScore: affordance.riskScore,
+      category: affordance.category,
+      reasoning: affordance.reasoning,
+      preview: truncateForLogging(prompt),
+    })
+
+    return {
+      safe: false,
+      reason: `Affordance blocked (${affordance.category})`,
+      sanitized: patternFiltered.sanitized,
+      affordance,
+    }
+  }
+
+  if (affordance.riskScore >= 0.55) {
+    log.warn("Prompt allowed with affordance warning", {
+      userId,
+      riskScore: affordance.riskScore,
+      category: affordance.category,
+      reasoning: affordance.reasoning,
+      preview: truncateForLogging(prompt),
+    })
+  }
+
+  return {
+    ...patternFiltered,
+    affordance,
   }
 }
 

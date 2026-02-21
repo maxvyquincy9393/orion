@@ -15,6 +15,8 @@ import { sessionStore } from "./sessions/session-store.js"
 import { causalGraph } from "./memory/causal-graph.js"
 import { profiler } from "./memory/profiler.js"
 import { pluginLoader } from "./plugin-sdk/loader.js"
+import { filterPromptWithAffordance } from "./security/prompt-filter.js"
+import { outputScanner } from "./security/output-scanner.js"
 
 const log = createLogger("main")
 
@@ -91,25 +93,62 @@ async function start(): Promise<void> {
           await shutdown()
         }
 
-        await saveMessage(userId, "user", text, "cli", { role: "user", category: "event", level: 0 })
-        await memory.save(userId, text, { role: "user", category: "event", level: 0, channel: "cli" })
-        sessionStore.addMessage(userId, "cli", { role: "user", content: text, timestamp: Date.now() })
+        const inputSafety = await filterPromptWithAffordance(text, userId)
+        if (!inputSafety.safe && inputSafety.affordance?.shouldBlock) {
+          output.write("Gue tidak bisa bantu dengan itu.\n")
+          continue
+        }
+
+        const safeText = inputSafety.sanitized
+        await saveMessage(userId, "user", safeText, "cli", {
+          role: "user",
+          category: "event",
+          level: 0,
+          security: {
+            affordance: inputSafety.affordance ?? null,
+            sanitized: safeText !== text,
+          },
+        })
+        await memory.save(userId, safeText, { role: "user", category: "event", level: 0, channel: "cli" })
+        sessionStore.addMessage(userId, "cli", { role: "user", content: safeText, timestamp: Date.now() })
         void profiler
-          .extractFromMessage(userId, text, "user")
+          .extractFromMessage(userId, safeText, "user")
           .then(({ facts, opinions }) => profiler.updateProfile(userId, facts, opinions))
           .catch((error) => log.warn("profile extraction failed", error))
-        void causalGraph.extractAndUpdate(userId, text).catch((error) => log.warn("causal update failed", error))
+        void causalGraph.extractAndUpdate(userId, safeText).catch((error) => log.warn("causal update failed", error))
 
-        const { messages, systemContext } = await memory.buildContext(userId, text)
+        const { messages, systemContext } = await memory.buildContext(userId, safeText)
         const response = await orchestrator.generate("reasoning", {
-          prompt: systemContext ? `${systemContext}\n\nUser: ${text}` : text,
+          prompt: systemContext ? `${systemContext}\n\nUser: ${safeText}` : safeText,
           context: messages,
         })
 
-        output.write(`${response}\n`)
-        await saveMessage(userId, "assistant", response, "cli", { role: "assistant", category: "summary", level: 0 })
-        await memory.save(userId, response, { role: "assistant", category: "summary", level: 0, channel: "cli" })
-        sessionStore.addMessage(userId, "cli", { role: "assistant", content: response, timestamp: Date.now() })
+        const scanResult = outputScanner.scan(response)
+        if (!scanResult.safe) {
+          log.warn("Assistant output sanitized", {
+            userId,
+            issues: scanResult.issues,
+          })
+        }
+
+        const safeResponse = scanResult.sanitized
+        output.write(`${safeResponse}\n`)
+        await saveMessage(userId, "assistant", safeResponse, "cli", {
+          role: "assistant",
+          category: "summary",
+          level: 0,
+          security: {
+            outputIssues: scanResult.issues,
+            sanitized: safeResponse !== response,
+          },
+        })
+        await memory.save(userId, safeResponse, {
+          role: "assistant",
+          category: "summary",
+          level: 0,
+          channel: "cli",
+        })
+        sessionStore.addMessage(userId, "cli", { role: "assistant", content: safeResponse, timestamp: Date.now() })
       } catch (error) {
         if (error instanceof Error) {
           const lowered = error.message.toLowerCase()

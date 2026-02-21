@@ -12,6 +12,7 @@ export interface AffordanceResult {
 
 const RISK_THRESHOLD_BLOCK = 0.85
 const RISK_THRESHOLD_WARN = 0.55
+const DEEP_CHECK_TIMEOUT_MS = 1900
 
 const INSTANT_BLOCK_PATTERNS = [
   /how to make (bomb|weapon|poison|malware|ransomware)/i,
@@ -108,12 +109,16 @@ export class AffordanceChecker {
 
     try {
       const checkPrompt = AFFORDANCE_PROMPT.replace("{request}", prompt.slice(0, 800))
-
-      const raw = await orchestrator.generate("fast", {
-        prompt: checkPrompt,
-        maxTokens: 200,
-        temperature: 0,
-      })
+      const raw = await Promise.race([
+        orchestrator.generate("fast", {
+          prompt: checkPrompt,
+          maxTokens: 200,
+          temperature: 0,
+        }),
+        new Promise<string>((_, reject) => {
+          setTimeout(() => reject(new Error(`affordance timeout after ${DEEP_CHECK_TIMEOUT_MS}ms`)), DEEP_CHECK_TIMEOUT_MS)
+        }),
+      ])
 
       const parsed = JSON.parse(extractJson(raw)) as {
         riskScore?: number
