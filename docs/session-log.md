@@ -671,9 +671,75 @@ TS Phase 3 COMPLETE.
 
 ---
 
-## TS Phase 4 - Production [PENDING]
+## TS Phase 4 - Production [COMPLETE]
 
-- [ ] Auto-update for desktop (electron-updater)
-- [ ] React Native mobile app
-- [ ] Cloud deploy option
-- [ ] Multi-user support
+**Date:** February 2026
+**Tools used:** OpenCode
+
+### What was implemented
+
+- [x] Auto-updater for desktop (electron-updater)
+- [x] React Native mobile app (apps/mobile/)
+- [x] Settings screen with gateway URL config
+- [x] Cloud deploy script (scripts/deploy.sh)
+- [x] Docker support (Dockerfile + docker-compose.yml)
+- [x] Multi-user manager (src/multiuser/)
+- [x] Gateway updated with multi-user support
+
+### Desktop Auto-Updater
+
+```
+apps/desktop/updater.js
+  - electron-updater integration
+  - IPC handlers: update:download, update:install, update:check
+  - Events: update:available, update:progress, update:ready, update:error
+```
+
+### Mobile App Structure
+
+```
+apps/mobile/
+  package.json      - Expo React Native dependencies
+  App.tsx           - Main chat screen with WebSocket
+  screens/
+    Settings.tsx    - Gateway URL configuration
+```
+
+### Deploy Options
+
+```
+scripts/deploy.sh   - Cloud deploy via rsync + systemd
+orion-ts/Dockerfile - Docker image for containerized deploy
+orion-ts/docker-compose.yml - Docker Compose for easy deployment
+```
+
+### Multi-User Support
+
+```
+orion-ts/src/multiuser/manager.ts
+  - UserProfile: userId, displayName, channel, createdAt, lastSeen
+  - registerUser(), getOrCreate(), getUser(), listUsers()
+  - isOwner() check for permission gating
+  - Gateway: non-owners limited to "message" type only
+```
+
+TS Phase 4 COMPLETE.
+
+---
+
+## Overall Status
+
+- Python Phase 1-4: COMPLETE (main branch)
+- TS Migration Phase 1: COMPLETE
+- TS Phase 2 Gateway+Agents: COMPLETE
+- TS Phase 3 Desktop+Mobile: COMPLETE
+- TS Phase 4 Production: COMPLETE
+
+## Next: First Live Test
+
+1. cd orion-ts && cp .env.example .env
+2. Add at least one API key to .env
+3. pnpm dev — test CLI
+4. pnpm dev -- --mode gateway — test gateway
+5. Open apps/desktop — test Electron
+6. Run apps/mobile via Expo — test mobile
