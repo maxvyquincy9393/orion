@@ -3,15 +3,10 @@ import config from "../config.js"
 import { logTrigger } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { triggerEngine } from "./triggers.js"
+import { sandbox, PermissionAction } from "../permissions/sandbox.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
-
-const sandbox = {
-  async isAllowed(): Promise<boolean> {
-    return true
-  },
-}
 
 export class OrionDaemon {
   private running = false
@@ -62,7 +57,7 @@ export class OrionDaemon {
       for (const trigger of triggers) {
         let actedOn = false
         try {
-          const allowed = await sandbox.isAllowed()
+          const allowed = await sandbox.check(PermissionAction.PROACTIVE_MESSAGE, trigger.userId)
           if (allowed) {
             actedOn = await channelManager.send(trigger.userId, trigger.message)
           }
