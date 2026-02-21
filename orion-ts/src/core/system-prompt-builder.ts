@@ -26,6 +26,7 @@ You operate with real tool access. Before taking actions:
 These are advisory guidelines. Hard enforcement comes from tool policy and sandboxing.`
 
 export interface BuildPromptOptions {
+  mode?: SessionMode
   sessionMode?: SessionMode
   includeSkills?: boolean
   includeSafety?: boolean
@@ -54,6 +55,7 @@ function buildRuntimeInfoSection(): string {
 
 export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promise<string> {
   const {
+    mode,
     sessionMode = "dm",
     includeSkills = true,
     includeSafety = true,
@@ -61,17 +63,19 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
     extraContext,
   } = options
 
+  const resolvedSessionMode = mode ?? sessionMode
+
   const sections: string[] = []
 
-  if (includeTooling && sessionMode !== "subagent") {
+  if (includeTooling && resolvedSessionMode !== "subagent") {
     sections.push(TOOLING_BLOCK)
   }
 
-  if (includeSafety && sessionMode !== "subagent") {
+  if (includeSafety && resolvedSessionMode !== "subagent") {
     sections.push(SAFETY_BLOCK)
   }
 
-  if (includeSkills && sessionMode !== "subagent") {
+  if (includeSkills && resolvedSessionMode !== "subagent") {
     const skillIndex = await skillLoader.getIndexForPrompt()
     if (skillIndex.trim().length > 0) {
       sections.push(skillIndex)
@@ -85,10 +89,10 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
     }
   }
 
-  sections.push(buildWorkspaceInfoSection(sessionMode))
+  sections.push(buildWorkspaceInfoSection(resolvedSessionMode))
 
   const loader = getBootstrapLoader()
-  const bootstrap = await loader.load(sessionMode)
+  const bootstrap = await loader.load(resolvedSessionMode)
   if (bootstrap.formatted.trim().length > 0) {
     sections.push(bootstrap.formatted)
   }
@@ -102,7 +106,7 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
   sections.push(buildRuntimeInfoSection())
 
   log.debug("system prompt built", {
-    sessionMode,
+    sessionMode: resolvedSessionMode,
     bootstrapFiles: bootstrap.files.length,
     bootstrapChars: bootstrap.totalChars,
     missingFiles: bootstrap.missingCount,
