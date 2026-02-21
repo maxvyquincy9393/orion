@@ -25,6 +25,17 @@ const intFromEnv = z.preprocess((value) => {
   return undefined
 }, z.number().int())
 
+const floatFromEnv = z.preprocess((value) => {
+  if (typeof value === "number") {
+    return value
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}, z.number())
+
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"])
 
 const ConfigSchema = z.object({
@@ -57,6 +68,8 @@ const ConfigSchema = z.object({
   DATABASE_URL: z.string().default("file:./orion.db"),
   DEFAULT_USER_ID: z.string().default("owner"),
   LOG_LEVEL: logLevelSchema.default("info"),
+  CRITIQUE_ENABLED: boolFromEnv.default(true),
+  CRITIQUE_THRESHOLD: floatFromEnv.default(0.75),
   PERMISSIONS_FILE: z.string().default("permissions/permissions.yaml"),
   VOICE_ENABLED: boolFromEnv.default(false),
   VISION_ENABLED: boolFromEnv.default(false),
