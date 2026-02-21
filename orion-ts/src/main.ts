@@ -22,7 +22,7 @@ import { filterPromptWithAffordance } from "./security/prompt-filter.js"
 import { outputScanner } from "./security/output-scanner.js"
 import { eventBus } from "./core/event-bus.js"
 import { buildSystemPrompt } from "./core/system-prompt-builder.js"
-import { bootstrapLoader } from "./core/bootstrap.js"
+import { getBootstrapLoader } from "./core/bootstrap.js"
 
 const log = createLogger("main")
 
@@ -47,11 +47,6 @@ function initializeEventHandlers(): void {
 
   eventBus.on("memory.save.requested", async (data) => {
     await memory.save(data.userId, data.content, data.metadata)
-  })
-
-  eventBus.on("profile.update.requested", async (data) => {
-    const { facts, opinions } = await profiler.extractFromMessage(data.userId, data.content, "user")
-    await profiler.updateProfile(data.userId, facts, opinions)
   })
 
   eventBus.on("causal.update.requested", async (data) => {
@@ -145,6 +140,7 @@ async function start(): Promise<void> {
     })
 
     const userId = config.DEFAULT_USER_ID
+    const bootstrapLoader = getBootstrapLoader()
 
     while (true) {
       try {
@@ -211,7 +207,6 @@ async function start(): Promise<void> {
           content: safeText,
           metadata: userMemoryMetadata,
         })
-        eventBus.dispatch("profile.update.requested", { userId, content: safeText })
         eventBus.dispatch("causal.update.requested", { userId, content: safeText })
 
         const [, { messages, systemContext, retrievedMemoryIds }] = await Promise.all([
@@ -242,7 +237,9 @@ async function start(): Promise<void> {
         }
 
         const systemPrompt = await buildSystemPrompt({
-          mode: "dm",
+          sessionMode: "dm",
+          includeSkills: true,
+          includeSafety: true,
           extraContext: personaSystemPrompt,
         })
 
@@ -251,6 +248,25 @@ async function start(): Promise<void> {
           context: messages,
           systemPrompt,
         })
+
+        const { facts, opinions } = await profiler.extractFromMessage(userId, safeText, "user")
+        if (facts.length > 0 || opinions.length > 0) {
+          await profiler.updateProfile(userId, facts, opinions)
+        }
+
+        if (facts.length > 0) {
+          const updates: Record<string, string> = {}
+          for (const fact of facts) {
+            if (fact.key && fact.value) {
+              updates[fact.key] = fact.value
+            }
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await bootstrapLoader.updateUserMd(updates)
+          }
+        }
+
         const provisionalReward = memrlUpdater.estimateRewardFromContext(null, response.length)
         const critiqued = await responseCritic.critiqueAndRefine(safeText, response, 2)
         const finalResponse = critiqued.finalResponse
@@ -303,25 +319,6 @@ async function start(): Promise<void> {
           },
         })
         sessionStore.addMessage(userId, "cli", { role: "assistant", content: safeResponse, timestamp: assistantTimestamp })
-
-        void (async () => {
-          try {
-            const { facts } = await profiler.extractFromMessage(userId, safeText, "user")
-            const updates: Record<string, string> = {}
-
-            for (const fact of facts) {
-              if (fact.key && fact.value && fact.confidence > 0.7) {
-                updates[fact.key] = String(fact.value)
-              }
-            }
-
-            if (Object.keys(updates).length > 0) {
-              await bootstrapLoader.updateUserMd(updates)
-            }
-          } catch (err) {
-            log.debug("profiler -> USER.md sync skipped", err)
-          }
-        })()
 
         pendingFeedback = retrievedMemoryIds.length > 0
           ? {
