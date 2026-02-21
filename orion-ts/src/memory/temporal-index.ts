@@ -74,11 +74,13 @@ export class TemporalIndex {
     content: string,
     level: MemoryLevel,
     category: string,
+    memoryId?: string,
   ): Promise<TemporalMemoryNode> {
     const cleanCategory = category.trim() || "fact"
 
     const created = await prisma.memoryNode.create({
       data: {
+        ...(memoryId ? { id: memoryId } : {}),
         userId,
         content,
         level,

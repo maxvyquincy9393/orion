@@ -9,6 +9,7 @@ import { getHistory, saveMessage } from "../database/index.js"
 import { validateMemoryEntries, type MemoryEntry } from "../security/memory-validator.js"
 import { createLogger } from "../logger.js"
 import { hiMeS } from "./himes.js"
+import { memrlUpdater, type TaskFeedback } from "./memrl.js"
 import { proMem } from "./promem.js"
 import { temporalIndex } from "./temporal-index.js"
 
@@ -143,6 +144,14 @@ function sanitizeUserId(userId: string): string {
   return userId
 }
 
+function parseMemoryMetadata(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
 export class MemoryStore {
   private db: lancedb.Connection | null = null
   private table: lancedb.Table | null = null
@@ -253,7 +262,7 @@ export class MemoryStore {
         const levelValue = Number(metadata.level)
         const level = levelValue === 1 || levelValue === 2 ? levelValue : 0
         const category = typeof metadata.category === "string" ? metadata.category : "fact"
-        void temporalIndex.store(userId, content, level, category)
+        void temporalIndex.store(userId, content, level, category, id)
       }
       log.debug("saved memory", { id, userId, contentLength: content.length })
       return id
@@ -263,39 +272,78 @@ export class MemoryStore {
     }
   }
 
+  private async legacySearch(
+    userId: string,
+    queryVector: number[],
+    limit: number,
+  ): Promise<SearchResult[]> {
+    if (!this.table || limit <= 0) {
+      return []
+    }
+
+    const sanitizedUserId = sanitizeUserId(userId)
+
+    const results = await this.table
+      .vectorSearch(queryVector)
+      .where(`userId = '${sanitizedUserId}'`)
+      .limit(limit * 2)
+      .toArray()
+
+    const filtered = (results as MemoryRow[])
+      .filter((row) => row.userId === sanitizedUserId && row.content !== "__init__")
+      .slice(0, limit)
+
+    return filtered.map((row) => ({
+      id: row.id,
+      content: row.content,
+      metadata: parseMemoryMetadata(row.metadata),
+      score: 1,
+    }))
+  }
+
   async search(
     userId: string,
     query: string,
-    limit = 5
+    limit = 5,
   ): Promise<SearchResult[]> {
-    if (!this.table) {
+    if (!this.table || limit <= 0) {
       return []
     }
+
+    let queryVector: number[] | null = null
 
     try {
-      const queryVector = await this.embed(query)
-      const sanitizedUserId = sanitizeUserId(userId)
+      queryVector = await this.embed(query)
+      const memrlResults = await memrlUpdater.twoPhaseRetrieve(
+        sanitizeUserId(userId),
+        queryVector,
+        limit,
+        config.MEMRL_SIMILARITY_THRESHOLD,
+      )
 
-      const results = await this.table
-        .vectorSearch(queryVector)
-        .where(`userId = '${sanitizedUserId}'`)
-        .limit(limit * 2)
-        .toArray()
+      if (memrlResults.length > 0) {
+        return memrlResults
+      }
 
-      const filtered = (results as MemoryRow[])
-        .filter((row) => row.userId === sanitizedUserId && row.content !== "__init__")
-        .slice(0, limit)
-
-      return filtered.map((row) => ({
-        id: row.id,
-        content: row.content,
-        metadata: JSON.parse(row.metadata) as Record<string, unknown>,
-        score: 1,
-      }))
+      return await this.legacySearch(userId, queryVector, limit)
     } catch (error) {
       log.error("search failed", error)
-      return []
+
+      if (!queryVector) {
+        return []
+      }
+
+      try {
+        return await this.legacySearch(userId, queryVector, limit)
+      } catch (fallbackError) {
+        log.error("legacy search fallback failed", fallbackError)
+        return []
+      }
     }
+  }
+
+  async provideFeedback(feedback: TaskFeedback): Promise<void> {
+    await memrlUpdater.updateFromFeedback(feedback)
   }
 
   async buildContext(
