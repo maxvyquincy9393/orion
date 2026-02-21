@@ -77,3 +77,48 @@ class BaseEngine(ABC):
                 response = engine.generate(prompt, context)
         """
         ...
+
+    @abstractmethod
+    def get_name(self) -> str:
+        """
+        Return the name identifier for this engine.
+
+        Returns:
+            A string name like "openai", "claude", "gemini", or "local".
+
+        Example:
+            name = engine.get_name()  # "claude"
+        """
+        ...
+
+    def format_messages(self, prompt: str, context: list[dict]) -> list[dict]:
+        """
+        Convert context into standard OpenAI message format and append user prompt.
+
+        Creates a message list suitable for LLM API calls in the format:
+        [{"role": "system"|"user"|"assistant", "content": "..."}]
+
+        Args:
+            prompt: The user's message or instruction.
+            context: A list of prior message dicts (role, content).
+
+        Returns:
+            A list of message dicts in OpenAI format, with the user prompt
+            appended as the final message.
+
+        Example:
+            messages = engine.format_messages(
+                "What is OAuth?",
+                [{"role": "system", "content": "You are helpful."}]
+            )
+            # [{"role": "system", "content": "You are helpful."},
+            #  {"role": "user", "content": "What is OAuth?"}]
+        """
+        messages = []
+        for msg in context:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role in ("system", "user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": prompt})
+        return messages
