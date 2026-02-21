@@ -27,7 +27,7 @@ import * as lancedb from "@lancedb/lancedb"
 import config from "../config.js"
 import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
-import { sanitizeUserId, clamp, parseJsonSafe } from "../utils/string.js"
+import { sanitizeUserId, clamp, parseJsonSafe } from "../utils/index.js"
 import type { SearchResult } from "./store.js"
 
 const log = createLogger("memory.memrl")
