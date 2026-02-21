@@ -38,12 +38,25 @@ def print_banner() -> None:
     print()
 
 
-def print_engines(engines: list[str]) -> None:
-    """Print available engines status."""
+def print_engines(engines: dict[str, object]) -> None:
+    """
+    Print available engines status.
+
+    Args:
+        engines: Dict of provider key to engine instance.
+    """
     print("Available Engines:")
-    for name in ["claude", "openai", "gemini", "local"]:
-        status = "[OK] online" if name in engines else "[--] offline"
-        print(f"  {name:10} {status}")
+    display_rows = [
+        ("anthropic", "Anthropic"),
+        ("openai", "OpenAI"),
+        ("gemini", "Gemini"),
+        ("openrouter", "OpenRouter"),
+        ("groq", "Groq"),
+        ("local", "Local (Ollama)"),
+    ]
+    for key, label in display_rows:
+        status = "[OK] online" if key in engines else "[--] offline"
+        print(f"  {label:16} {status}")
     print()
 
 
@@ -333,10 +346,11 @@ def main() -> None:
 
         if not engines:
             print("[Warning] No LLM engines available!")
-            print("Set up at least one engine in your .env file:")
-            print("  - ANTHROPIC_API_KEY for Claude")
-            print("  - OPENAI_ACCESS_TOKEN for GPT-4")
-            print("  - GOOGLE_ACCESS_TOKEN for Gemini")
+            print("Set up at least one provider:")
+            print("  - ANTHROPIC_API_KEY")
+            print("  - OPENAI_API_KEY or OpenAI OAuth login")
+            print("  - GEMINI_API_KEY or Gemini OAuth login")
+            print("  - OPENROUTER_API_KEY, GROQ_API_KEY, or MISTRAL_API_KEY")
             print("  - Or run Ollama locally for free inference")
             print()
     except Exception as exc:

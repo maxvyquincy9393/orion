@@ -125,16 +125,17 @@ def test_engines() -> tuple[bool, list[str]]:
         from core import orchestrator
 
         engines = orchestrator.get_available_engines()
+        available_names = list(engines.keys())
 
-        for name in ["claude", "openai", "gemini", "local"]:
-            if name in engines:
+        for name in ["anthropic", "openai", "gemini", "openrouter", "groq", "local"]:
+            if name in available_names:
                 print_result(name, True, "online")
             else:
                 print_result(name, False, "offline")
 
-        if engines:
-            print(f"\n  Available engines: {', '.join(engines)}")
-            return True, engines
+        if available_names:
+            print(f"\n  Available engines: {', '.join(available_names)}")
+            return True, available_names
         else:
             print("\n  No engines available!")
             return False, []

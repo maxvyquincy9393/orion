@@ -1,22 +1,25 @@
-"""
+﻿"""
 orchestrator.py
 
-Routes tasks to the appropriate LLM engine based on task type.
-Determines whether to use GPT-4, Claude, Gemini, or a local model
-depending on the nature of the request.
-Part of Orion — Persistent AI Companion System.
+Routes tasks to the appropriate engine based on task type and auth availability.
+Integrates AuthManager with multi-provider engine initialization.
+Part of Orion - Persistent AI Companion System.
 """
 
+from __future__ import annotations
+
 import logging
-import re
 from typing import Optional
 
 import config
+from engines.auth.manager import get_auth_manager
 from engines.base import BaseEngine
 from engines.claude_engine import ClaudeEngine
 from engines.gemini_engine import GeminiEngine
+from engines.groq_engine import GroqEngine
 from engines.local_engine import LocalEngine
 from engines.openai_engine import OpenAIEngine
+from engines.openrouter_engine import OpenRouterEngine
 
 _log = logging.getLogger("orion.orchestrator")
 _handler = logging.FileHandler(config.LOGS_DIR / "orchestrator.log")
@@ -25,16 +28,28 @@ _log.addHandler(_handler)
 _log.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
 
 _ENGINE_INSTANCES: dict[str, BaseEngine] = {}
+_AUTH_MANAGER = get_auth_manager()
+
+_ENGINE_CLASS_MAP = {
+    "anthropic": ClaudeEngine,
+    "openai": OpenAIEngine,
+    "gemini": GeminiEngine,
+    "openrouter": OpenRouterEngine,
+    "groq": GroqEngine,
+    "local": LocalEngine,
+    "ollama": LocalEngine,
+}
 
 _PRIORITY_MAP: dict[str, list[str]] = {
-    "reasoning": ["claude", "openai", "gemini", "local"],
-    "code": ["openai", "claude", "local"],
-    "fast": ["gemini", "local"],
-    "multimodal": ["gemini", "openai"],
-    "voice": ["openai", "claude"],
-    "browser": ["openai", "claude"],
-    "agent": ["claude", "openai"],
-    "vision": ["gemini", "openai"],
+    "reasoning": ["anthropic", "openai", "gemini", "openrouter", "groq", "local"],
+    "code": ["openai", "anthropic", "groq", "openrouter", "local"],
+    "fast": ["groq", "gemini", "local", "anthropic"],
+    "multimodal": ["gemini", "openai", "anthropic"],
+    "local": ["local"],
+    "voice": ["openai", "anthropic", "gemini", "local"],
+    "browser": ["openai", "anthropic", "openrouter", "local"],
+    "agent": ["anthropic", "openai", "gemini", "local"],
+    "vision": ["gemini", "openai", "anthropic"],
 }
 
 _AGENT_KEYWORDS: dict[str, list[str]] = {
@@ -54,109 +69,135 @@ _AGENT_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def _get_engine_instance(name: str) -> Optional[BaseEngine]:
+def _normalize_engine_name(name: str) -> str:
     """
-    Get or create an engine instance by name.
+    Normalize engine aliases to canonical provider keys.
 
     Args:
-        name: Engine name — "openai", "claude", "gemini", or "local".
+        name: Engine or provider name.
 
     Returns:
-        BaseEngine instance or None if creation fails.
+        Canonical engine key.
     """
-    if name in _ENGINE_INSTANCES:
-        return _ENGINE_INSTANCES[name]
-
-    engine_map = {
-        "openai": OpenAIEngine,
-        "claude": ClaudeEngine,
-        "gemini": GeminiEngine,
-        "local": LocalEngine,
+    normalized = name.lower().strip()
+    alias_map = {
+        "claude": "anthropic",
+        "ollama": "local",
     }
+    return alias_map.get(normalized, normalized)
 
-    engine_class = engine_map.get(name)
+
+def _get_engine_instance(name: str) -> Optional[BaseEngine]:
+    """
+    Get or create an engine instance by provider key.
+
+    Args:
+        name: Provider key.
+
+    Returns:
+        Engine instance, or None on failure.
+    """
+    canonical = _normalize_engine_name(name)
+
+    if canonical in _ENGINE_INSTANCES:
+        return _ENGINE_INSTANCES[canonical]
+
+    engine_class = _ENGINE_CLASS_MAP.get(canonical)
     if not engine_class:
-        _log.error("Unknown engine name: %s", name)
+        _log.error("Unknown engine/provider name: %s", name)
         return None
 
     try:
         instance = engine_class()
-        _ENGINE_INSTANCES[name] = instance
+        _ENGINE_INSTANCES[canonical] = instance
         return instance
     except Exception as exc:
-        _log.error("Failed to create engine '%s': %s", name, exc)
+        _log.error("Failed to create engine '%s': %s", canonical, exc)
         return None
+
+
+def get_available_engines() -> dict[str, BaseEngine]:
+    """
+    Return currently available engine instances keyed by provider name.
+
+    Availability is based on AuthManager provider readiness and engine health.
+
+    Returns:
+        Dict of provider -> engine instance.
+    """
+    available: dict[str, BaseEngine] = {}
+
+    available_providers = set(_AUTH_MANAGER.get_available_providers())
+    if "ollama" in available_providers:
+        available_providers.add("local")
+
+    for provider in available_providers:
+        canonical = _normalize_engine_name(provider)
+        engine = _get_engine_instance(canonical)
+        if engine and engine.is_available():
+            available[canonical] = engine
+
+    _log.info("Available engines: %s", sorted(available.keys()))
+    return available
 
 
 def route(task_type: str) -> BaseEngine:
     """
-    Route a task to the most suitable LLM engine.
+    Route task to the best available engine by priority.
 
-    Priority order per task type:
-        - reasoning: Claude → GPT → Gemini → local
-        - code: GPT → Claude → local
-        - fast: Gemini → local
-        - multimodal: Gemini → GPT
-        - voice: GPT → Claude
-        - browser: GPT → Claude
-        - agent: Claude → GPT
-        - vision: Gemini → GPT
+    Priority order:
+        - reasoning  -> anthropic > openai > gemini > openrouter > groq > local
+        - code       -> openai > anthropic > groq > openrouter > local
+        - fast       -> groq > gemini > local > anthropic
+        - multimodal -> gemini > openai > anthropic
+        - local      -> ollama/local
 
     Args:
-        task_type: The type of task to route. One of:
-            "reasoning", "code", "fast", "multimodal", "voice", "browser",
-            "agent", "vision"
+        task_type: Task type key.
 
     Returns:
-        An instance of the appropriate BaseEngine subclass.
+        Selected engine instance.
 
     Raises:
-        RuntimeError: If no engines are available.
-
-    Example:
-        engine = route("reasoning")
-        response = engine.generate(prompt, context)
+        RuntimeError: If no suitable engine is available.
     """
-    priorities = _PRIORITY_MAP.get(task_type, ["claude", "openai", "gemini", "local"])
+    normalized_task = task_type.lower().strip()
 
-    for engine_name in priorities:
-        engine = _get_engine_instance(engine_name)
-        if engine and engine.is_available():
-            _log.info("Routed task '%s' to engine '%s'", task_type, engine_name)
+    if normalized_task == "local":
+        local_engine = _get_engine_instance("local")
+        if local_engine:
+            return local_engine
+
+    available = get_available_engines()
+    priorities = _PRIORITY_MAP.get(normalized_task, _PRIORITY_MAP["reasoning"])
+
+    for provider in priorities:
+        canonical = _normalize_engine_name(provider)
+        engine = available.get(canonical)
+        if engine:
+            _log.info("Routed task '%s' to engine '%s'", task_type, canonical)
             return engine
 
-    for engine_name in ["local", "claude", "openai", "gemini"]:
-        if engine_name not in priorities:
-            engine = _get_engine_instance(engine_name)
-            if engine and engine.is_available():
-                _log.info(
-                    "Routed task '%s' to fallback engine '%s'",
-                    task_type,
-                    engine_name,
-                )
-                return engine
+    status = _AUTH_MANAGER.get_provider_status()
+    missing = [name for name, details in status.items() if not details.get("available")]
+    missing_text = ", ".join(sorted(missing)) if missing else "none"
 
-    _log.error("No engines available for task '%s'", task_type)
-    raise RuntimeError(f"No LLM engines available for task type: {task_type}")
+    raise RuntimeError(
+        "No LLM engines are available for task type "
+        f"'{task_type}'. Configure providers with python scripts/setup.py. "
+        f"Missing credentials/providers: {missing_text}."
+    )
 
 
 def route_to_agent(task: str) -> str:
     """
-    Determine the agent type based on task description keywords.
-
-    Analyzes the task string for keywords and returns the most
-    appropriate agent type.
+    Determine agent type based on keyword matching.
 
     Args:
-        task: The task description string.
+        task: Task description text.
 
     Returns:
-        An agent type string: "research", "browsing", "file", "calendar",
-        "system", "code", "analysis", or "general".
-
-    Example:
-        agent_type = route_to_agent("Search for the latest AI news")
-        # Returns: "research"
+        Agent type name.
     """
     task_lower = task.lower()
 
@@ -181,74 +222,58 @@ def route_to_agent(task: str) -> str:
     return "general"
 
 
-def get_available_engines() -> list[str]:
-    """
-    Return a list of currently available and healthy engine names.
-
-    Checks each engine via is_available() and returns only those
-    that can accept requests.
-
-    Returns:
-        A list of engine name strings that are ready to accept requests.
-
-    Example:
-        engines = get_available_engines()
-        # ["openai", "claude", "local"]
-    """
-    available = []
-    engine_names = ["claude", "openai", "gemini", "local"]
-
-    for name in engine_names:
-        engine = _get_engine_instance(name)
-        if engine and engine.is_available():
-            available.append(name)
-
-    _log.info("Available engines: %s", available)
-    return available
-
-
 def get_engine_by_name(name: str) -> Optional[BaseEngine]:
     """
-    Get a specific engine by its name, bypassing automatic routing.
+    Get specific engine by provider key if available.
 
     Args:
-        name: The engine name — "openai", "claude", "gemini", or "local".
+        name: Provider or engine key.
 
     Returns:
-        An instance of the specified BaseEngine subclass, or None if
-        the engine is not available.
-
-    Example:
-        engine = get_engine_by_name("claude")
+        Engine instance or None.
     """
-    engine = _get_engine_instance(name)
-    if engine and engine.is_available():
+    canonical = _normalize_engine_name(name)
+    available = get_available_engines()
+    engine = available.get(canonical)
+    if engine:
         return engine
+
     _log.warning("Engine '%s' requested but not available", name)
     return None
 
 
 def log_startup_status() -> None:
-    """
-    Log which engines are available on startup.
-
-    Should be called once when the application starts.
-    """
+    """Log provider and engine availability status on startup."""
     _log.info("=== Orion Engine Startup Status ===")
-    available = get_available_engines()
 
-    if available:
-        _log.info("Available engines: %s", ", ".join(available))
+    provider_status = _AUTH_MANAGER.get_provider_status()
+    for provider in [
+        "anthropic",
+        "openai",
+        "gemini",
+        "openrouter",
+        "groq",
+        "mistral",
+        "ollama",
+    ]:
+        details = provider_status.get(provider, {})
+        available = details.get("available", False)
+        auth_type = details.get("auth_type", "unknown")
+        model = details.get("model", "unknown")
+        status = "available" if available else "unavailable"
+        _log.info(
+            "provider=%s status=%s auth=%s model=%s",
+            provider,
+            status,
+            auth_type,
+            model,
+        )
+
+    available_engines = get_available_engines()
+    if available_engines:
+        _log.info("Available engines: %s", ", ".join(sorted(available_engines.keys())))
     else:
-        _log.warning("No LLM engines available!")
-
-    for name in ["claude", "openai", "gemini", "local"]:
-        engine = _get_engine_instance(name)
-        if engine:
-            status = "[OK] available" if engine.is_available() else "[--] unavailable"
-            _log.info("  %s: %s", name, status)
-        else:
-            _log.info("  %s: [--] failed to initialise", name)
+        _log.warning("No engines available")
 
     _log.info("===================================")
 
