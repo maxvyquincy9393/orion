@@ -5,7 +5,7 @@ import { createLogger } from "../logger.js"
 
 const log = createLogger("core.identity")
 
-const WORKSPACE_DIR = path.resolve(process.cwd(), "workspace")
+const WORKSPACE_DIR = path.resolve(process.env.ORION_WORKSPACE ?? path.join(process.cwd(), "workspace"))
 const BOOTSTRAP_MAX_CHARS = 20_000
 const BOOTSTRAP_TOTAL_MAX_CHARS = 80_000
 
