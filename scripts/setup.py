@@ -251,6 +251,17 @@ def write_env(values: dict[str, str]) -> None:
     print(f"\nSaved configuration: {ENV_PATH}")
 
 
+def apply_env_to_process(values: dict[str, str]) -> None:
+    """
+    Apply env values to current process for immediate runtime use.
+
+    Args:
+        values: Env values to apply.
+    """
+    for key, value in values.items():
+        os.environ[key] = value
+
+
 def configure_telegram(existing: dict[str, str], updates: dict[str, str]) -> None:
     """Run setup step for required Telegram delivery config."""
     print("Step 1 - Telegram (required for delivery)")
@@ -691,6 +702,7 @@ def main() -> None:
 
     merged = merge_updates(existing, updates)
     write_env(merged)
+    apply_env_to_process(merged)
 
     readiness = run_connectivity_tests(merged, auth_manager)
 
@@ -699,6 +711,7 @@ def main() -> None:
     apply_defaults(merged, updates)
     merged = merge_updates(merged, updates)
     write_env(merged)
+    apply_env_to_process(merged)
 
     print_final_summary(readiness)
 
