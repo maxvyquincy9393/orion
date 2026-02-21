@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orion Setup</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .container {
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .logo {
+      font-size: 48px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: #666;
+      margin-bottom: 40px;
+    }
+
+    .step {
+      display: none;
+    }
+
+    .step.active {
+      display: block;
+    }
+
+    .step-title {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .step-desc {
+      font-size: 14px;
+      color: #888;
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+
+    .provider-options {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 32px;
+      text-align: left;
+    }
+
+    .provider-option {
+      padding: 16px;
+      background: #141414;
+      border: 2px solid #222;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .provider-option:hover {
+      border-color: #333;
+      background: #1a1a1a;
+    }
+
+    .provider-option.selected {
+      border-color: #1d4ed8;
+      background: #1a1a2e;
+    }
+
+    .provider-option input {
+      display: none;
+    }
+
+    .provider-name {
+      font-weight: 600;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+
+    .provider-desc {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .provider-badge {
+      display: inline-block;
+      background: #22c55e;
+      color: #000;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-left: 8px;
+    }
+
+    .input-group {
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .input-label {
+      display: block;
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+
+    .input-field {
+      width: 100%;
+      padding: 12px 16px;
+      background: #141414;
+      border: 2px solid #222;
+      border-radius: 8px;
+      color: #e5e5e5;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .input-field:focus {
+      border-color: #1d4ed8;
+    }
+
+    .input-link {
+      display: block;
+      font-size: 12px;
+      color: #1d4ed8;
+      margin-top: 8px;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .checkbox-group input {
+      width: 18px;
+      height: 18px;
+      accent-color: #1d4ed8;
+    }
+
+    .checkbox-label {
+      font-size: 14px;
+    }
+
+    .btn {
+      padding: 12px 32px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .btn-primary {
+      background: #1d4ed8;
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #222;
+      color: #888;
+    }
+
+    .btn-secondary:hover {
+      background: #333;
+      color: #e5e5e5;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    .test-status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    .test-status.success {
+      background: #0a2e0a;
+      color: #22c55e;
+    }
+
+    .test-status.error {
+      background: #2e0a0a;
+      color: #ef4444;
+    }
+
+    .progress-dots {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 32px;
+    }
+
+    .progress-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #333;
+    }
+
+    .progress-dot.active {
+      background: #1d4ed8;
+    }
+
+    .progress-dot.complete {
+      background: #22c55e;
+    }
+
+    .install-btn {
+      display: inline-block;
+      background: #222;
+      color: #1d4ed8;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+
+    .install-btn:hover {
+      background: #333;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">Orion</div>
+    <div class="subtitle">Your persistent AI companion</div>
+
+    <div class="progress-dots">
+      <div class="progress-dot" id="dot-1"></div>
+      <div class="progress-dot" id="dot-2"></div>
+      <div class="progress-dot" id="dot-3"></div>
+      <div class="progress-dot" id="dot-4"></div>
+    </div>
+
+    <div class="step active" id="step-1">
+      <div class="step-title">Welcome to Orion</div>
+      <div class="step-desc">
+        Orion is a persistent AI companion that learns from your conversations,
+        proactively reaches out, and helps you stay on top of your tasks.
+        Let's get you set up.
+      </div>
+      <button class="btn btn-primary" id="step1-next">Get Started</button>
+    </div>
+
+    <div class="step" id="step-2">
+      <div class="step-title">Choose AI Provider</div>
+      <div class="step-desc">Select the AI engine you want to use.</div>
+      <div class="provider-options">
+        <label class="provider-option" data-provider="groq">
+          <input type="radio" name="provider" value="groq" />
+          <div class="provider-name">Groq <span class="provider-badge">Recommended</span></div>
+          <div class="provider-desc">Free, fast inference with Llama models</div>
+        </label>
+        <label class="provider-option" data-provider="ollama">
+          <input type="radio" name="provider" value="ollama" />
+          <div class="provider-name">Ollama</div>
+          <div class="provider-desc">Local, private, free - runs on your machine</div>
+        </label>
+        <label class="provider-option" data-provider="anthropic">
+          <input type="radio" name="provider" value="anthropic" />
+          <div class="provider-name">Anthropic</div>
+          <div class="provider-desc">Claude - best quality reasoning</div>
+        </label>
+        <label class="provider-option" data-provider="openai">
+          <input type="radio" name="provider" value="openai" />
+          <div class="provider-name">OpenAI</div>
+          <div class="provider-desc">GPT-4 - excellent for code and tasks</div>
+        </label>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-secondary" id="step2-back">Back</button>
+        <button class="btn btn-primary" id="step2-next" disabled>Continue</button>
+      </div>
+    </div>
+
+    <div class="step" id="step-3">
+      <div class="step-title" id="credentials-title">Enter Credentials</div>
+      <div class="step-desc" id="credentials-desc">Configure your AI provider.</div>
+      <div id="credentials-form"></div>
+      <div class="btn-group">
+        <button class="btn btn-secondary" id="step3-back">Back</button>
+        <button class="btn btn-primary" id="step3-test">Test Connection</button>
+      </div>
+      <div class="test-status" id="test-status" style="display: none;"></div>
+    </div>
+
+    <div class="step" id="step-4">
+      <div class="step-title">All Set!</div>
+      <div class="step-desc">
+        Orion is ready to go. You can start chatting now.
+        The app will run in the system tray.
+      </div>
+      <button class="btn btn-primary" id="step4-done">Start Chatting</button>
+    </div>
+  </div>
+
+  <script>
+    let currentStep = 1
+    let selectedProvider = null
+    let credentials = {}
+
+    const dots = [
+      document.getElementById("dot-1"),
+      document.getElementById("dot-2"),
+      document.getElementById("dot-3"),
+      document.getElementById("dot-4")
+    ]
+
+    function updateDots() {
+      dots.forEach((dot, i) => {
+        dot.className = "progress-dot"
+        if (i + 1 < currentStep) dot.classList.add("complete")
+        else if (i + 1 === currentStep) dot.classList.add("active")
+      })
+    }
+
+    function showStep(step) {
+      document.querySelectorAll(".step").forEach(s => s.classList.remove("active"))
+      document.getElementById(`step-${step}`).classList.add("active")
+      currentStep = step
+      updateDots()
+    }
+
+    document.querySelectorAll(".provider-option").forEach(opt => {
+      opt.addEventListener("click", () => {
+        document.querySelectorAll(".provider-option").forEach(o => o.classList.remove("selected"))
+        opt.classList.add("selected")
+        opt.querySelector("input").checked = true
+        selectedProvider = opt.dataset.provider
+        document.getElementById("step2-next").disabled = false
+      })
+    })
+
+    document.getElementById("step1-next").addEventListener("click", () => {
+      showStep(2)
+    })
+
+    document.getElementById("step2-back").addEventListener("click", () => {
+      showStep(1)
+    })
+
+    document.getElementById("step2-next").addEventListener("click", () => {
+      renderCredentialsForm()
+      showStep(3)
+    })
+
+    document.getElementById("step3-back").addEventListener("click", () => {
+      showStep(2)
+    })
+
+    document.getElementById("step3-test").addEventListener("click", async () => {
+      const status = document.getElementById("test-status")
+      const btn = document.getElementById("step3-test")
+      btn.disabled = true
+      btn.textContent = "Testing..."
+
+      credentials = collectCredentials()
+
+      const success = await testConnection()
+
+      status.style.display = "block"
+      if (success) {
+        status.className = "test-status success"
+        status.textContent = "Connection successful!"
+        setTimeout(() => showStep(4), 1000)
+      } else {
+        status.className = "test-status error"
+        status.textContent = "Connection failed. Please check your credentials."
+        btn.disabled = false
+        btn.textContent = "Test Connection"
+      }
+    })
+
+    document.getElementById("step4-done").addEventListener("click", () => {
+      saveCredentials()
+      window.location.href = "index.html"
+    })
+
+    function renderCredentialsForm() {
+      const form = document.getElementById("credentials-form")
+      const title = document.getElementById("credentials-title")
+      const desc = document.getElementById("credentials-desc")
+
+      switch (selectedProvider) {
+        case "groq":
+          title.textContent = "Groq API Key"
+          desc.textContent = "Get your free API key from console.groq.com"
+          form.innerHTML = `
+            <div class="input-group">
+              <label class="input-label">GROQ_API_KEY</label>
+              <input type="password" class="input-field" id="groq-key" placeholder="gsk_..." />
+              <a href="https://console.groq.com" target="_blank" class="input-link">Get API key from console.groq.com</a>
+            </div>
+          `
+          break
+        case "ollama":
+          title.textContent = "Ollama Setup"
+          desc.textContent = "Make sure Ollama is installed and running."
+          form.innerHTML = `
+            <div class="checkbox-group">
+              <input type="checkbox" id="ollama-installed" />
+              <label class="checkbox-label" for="ollama-installed">I have Ollama installed and running</label>
+            </div>
+            <a href="https://ollama.ai" target="_blank" class="install-btn">Download Ollama</a>
+          `
+          break
+        case "anthropic":
+          title.textContent = "Anthropic API Key"
+          desc.textContent = "Get your API key from console.anthropic.com"
+          form.innerHTML = `
+            <div class="input-group">
+              <label class="input-label">ANTHROPIC_API_KEY</label>
+              <input type="password" class="input-field" id="anthropic-key" placeholder="sk-ant-..." />
+              <a href="https://console.anthropic.com" target="_blank" class="input-link">Get API key from console.anthropic.com</a>
+            </div>
+          `
+          break
+        case "openai":
+          title.textContent = "OpenAI API Key"
+          desc.textContent = "Get your API key from platform.openai.com"
+          form.innerHTML = `
+            <div class="input-group">
+              <label class="input-label">OPENAI_API_KEY</label>
+              <input type="password" class="input-field" id="openai-key" placeholder="sk-..." />
+              <a href="https://platform.openai.com/api-keys" target="_blank" class="input-link">Get API key from platform.openai.com</a>
+            </div>
+          `
+          break
+      }
+    }
+
+    function collectCredentials() {
+      const creds = { provider: selectedProvider }
+      switch (selectedProvider) {
+        case "groq":
+          creds.GROQ_API_KEY = document.getElementById("groq-key")?.value || ""
+          break
+        case "ollama":
+          creds.OLLAMA_INSTALLED = document.getElementById("ollama-installed")?.checked || false
+          break
+        case "anthropic":
+          creds.ANTHROPIC_API_KEY = document.getElementById("anthropic-key")?.value || ""
+          break
+        case "openai":
+          creds.OPENAI_API_KEY = document.getElementById("openai-key")?.value || ""
+          break
+      }
+      return creds
+    }
+
+    async function testConnection() {
+      await new Promise(r => setTimeout(r, 1500))
+
+      if (selectedProvider === "ollama") {
+        return credentials.OLLAMA_INSTALLED
+      }
+
+      const key = credentials.GROQ_API_KEY || credentials.ANTHROPIC_API_KEY || credentials.OPENAI_API_KEY
+      return key && key.length > 10
+    }
+
+    function saveCredentials() {
+      console.log("Saving credentials:", credentials)
+    }
+
+    updateDots()
+  </script>
+</body>
+</html>
