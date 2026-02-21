@@ -5,3 +5,19 @@ logs/
 .prisma/
 prisma/*.db
 .orion/
+
+# Private workspace data (ignored by default)
+workspace/*
+!workspace/SOUL.md
+!workspace/AGENTS.md
+!workspace/TOOLS.md
+!workspace/IDENTITY.md
+!workspace/USER.md
+!workspace/HEARTBEAT.md
+!workspace/BOOTSTRAP.md
+!workspace/MEMORY.md
+!workspace/skills/
+workspace/skills/*
+!workspace/skills/.gitkeep
+!workspace/skills/templates/
+!workspace/skills/templates/**
