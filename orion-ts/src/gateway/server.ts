@@ -9,16 +9,18 @@ import { memory } from "../memory/store.js"
 import { saveMessage } from "../database/index.js"
 import { daemon } from "../background/daemon.js"
 import { multiUser } from "../multiuser/manager.js"
-import { filterPrompt } from "../security/prompt-filter.js"
+import { filterPromptWithAffordance } from "../security/prompt-filter.js"
 import { createLogger } from "../logger.js"
 import { sessionStore } from "../sessions/session-store.js"
 import { causalGraph } from "../memory/causal-graph.js"
 import { profiler } from "../memory/profiler.js"
 import { linkSummarizer } from "../link-understanding/summarizer.js"
 import { hookPipeline } from "../hooks/pipeline.js"
+import { outputScanner } from "../security/output-scanner.js"
 import config from "../config.js"
 
 const logger = createLogger("gateway")
+const BLOCKED_RESPONSE = "Gue tidak bisa bantu dengan itu."
 
 export class GatewayServer {
   private app = Fastify({ logger: false })
@@ -128,8 +130,27 @@ export class GatewayServer {
       return preMessage.abortReason ?? "Message blocked by pre_message hook"
     }
 
-    const filtered = filterPrompt(preMessage.content, userId)
-    const safePrompt = filtered.sanitized
+    const inputSafety = await filterPromptWithAffordance(preMessage.content, userId)
+    const safePrompt = inputSafety.sanitized
+    if (!inputSafety.safe && inputSafety.affordance?.shouldBlock) {
+      logger.warn("Blocked message in gateway by affordance checker", {
+        userId,
+        channel,
+        riskScore: inputSafety.affordance.riskScore,
+        category: inputSafety.affordance.category,
+        reason: inputSafety.reason,
+      })
+      return BLOCKED_RESPONSE
+    }
+
+    if (!inputSafety.safe && inputSafety.reason) {
+      logger.warn("Prompt sanitized before generation", {
+        userId,
+        channel,
+        reason: inputSafety.reason,
+      })
+    }
+
     const linkContext = await linkSummarizer.processMessage(safePrompt)
     const modelInput = linkContext.enrichedContext
 
@@ -164,11 +185,37 @@ export class GatewayServer {
       return preSend.abortReason ?? "Message blocked by pre_send hook"
     }
 
-    const response = preSend.content
+    const outputScan = outputScanner.scan(preSend.content)
+    if (!outputScan.safe) {
+      logger.warn("Gateway response sanitized by output scanner", {
+        userId,
+        channel,
+        issues: outputScan.issues,
+      })
+    }
+    const response = outputScan.sanitized
 
     const now = Date.now()
-    const userMeta = { role: "user", channel, category: "event", level: 0 }
-    const assistantMeta = { role: "assistant", channel, category: "summary", level: 0 }
+    const userMeta = {
+      role: "user",
+      channel,
+      category: "event",
+      level: 0,
+      security: {
+        affordance: inputSafety.affordance ?? null,
+        sanitized: safePrompt !== preMessage.content,
+      },
+    }
+    const assistantMeta = {
+      role: "assistant",
+      channel,
+      category: "summary",
+      level: 0,
+      security: {
+        outputIssues: outputScan.issues,
+        sanitized: response !== preSend.content,
+      },
+    }
 
     await Promise.all([
       saveMessage(userId, "user", safePrompt, channel, userMeta),

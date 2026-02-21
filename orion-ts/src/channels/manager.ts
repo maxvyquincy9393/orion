@@ -9,6 +9,7 @@ import { iMessageChannel } from "./imessage.js"
 import { createLogger } from "../logger.js"
 import config from "../config.js"
 import { sandbox } from "../permissions/sandbox.js"
+import { outputScanner } from "../security/output-scanner.js"
 
 const log = createLogger("channels.manager")
 
@@ -54,6 +55,15 @@ export class ChannelManager {
   }
 
   async send(userId: string, message: string): Promise<boolean> {
+    const scan = outputScanner.scan(message)
+    if (!scan.safe) {
+      log.warn("Channel send payload sanitized", {
+        userId,
+        issues: scan.issues,
+      })
+    }
+    const safeMessage = scan.sanitized
+
     const priorityOrder = ["webchat", "whatsapp", "signal", "line", "matrix", "teams", "imessage"]
     for (const name of priorityOrder) {
       const channel = this.channels.get(name)
@@ -61,7 +71,7 @@ export class ChannelManager {
         continue
       }
 
-      const sent = await channel.send(userId, message)
+      const sent = await channel.send(userId, safeMessage)
       if (sent) {
         return true
       }
@@ -71,9 +81,17 @@ export class ChannelManager {
   }
 
   async broadcast(message: string): Promise<void> {
+    const scan = outputScanner.scan(message)
+    if (!scan.safe) {
+      log.warn("Broadcast payload sanitized", {
+        issues: scan.issues,
+      })
+    }
+    const safeMessage = scan.sanitized
+
     for (const [, channel] of this.channels) {
       try {
-        await channel.send(config.DEFAULT_USER_ID, message)
+        await channel.send(config.DEFAULT_USER_ID, safeMessage)
       } catch (error) {
         log.error("broadcast failed for channel", error)
       }
