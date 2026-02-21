@@ -1,4 +1,4 @@
-﻿import { PrismaClient, type Message, type Prisma, type Thread, type TriggerLog } from "@prisma/client"
+﻿import { PrismaClient, Prisma, type Message, type Thread, type TriggerLog } from "@prisma/client"
 
 import { createLogger } from "../logger.js"
 
