@@ -240,7 +240,7 @@ export class GatewayServer {
     const modelInput = linkContext.enrichedContext
 
     const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
-    let personaSystemPrompt: string | undefined
+    let personaDynamicContext: string | undefined
     if (config.PERSONA_ENABLED) {
       const [profile, profileSummary] = await Promise.all([
         profiler.getProfile(userId),
@@ -250,7 +250,7 @@ export class GatewayServer {
       const mood = personaEngine.detectMood(safePrompt, profile?.currentTopics ?? [])
       const expertise = personaEngine.detectExpertise(profile, safePrompt)
       const topicCategory = personaEngine.detectTopicCategory(safePrompt)
-      personaSystemPrompt = personaEngine.buildSystemPrompt(
+      personaDynamicContext = personaEngine.buildDynamicContext(
         {
           userMood: mood,
           userExpertise: expertise,
@@ -265,7 +265,7 @@ export class GatewayServer {
       sessionMode: "dm",
       includeSkills: true,
       includeSafety: true,
-      extraContext: personaSystemPrompt,
+      extraContext: personaDynamicContext,
     })
 
     // Track LLM usage with timing (OC-11)

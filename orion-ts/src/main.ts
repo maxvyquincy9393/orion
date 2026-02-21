@@ -225,7 +225,7 @@ async function start(): Promise<void> {
         ])
         sessionStore.addMessage(userId, "cli", { role: "user", content: safeText, timestamp: userTimestamp })
 
-        let personaSystemPrompt: string | undefined
+        let personaDynamicContext: string | undefined
         if (config.PERSONA_ENABLED) {
           const [profile, profileSummary] = await Promise.all([
             profiler.getProfile(userId),
@@ -235,7 +235,7 @@ async function start(): Promise<void> {
           const mood = personaEngine.detectMood(safeText, profile?.currentTopics ?? [])
           const expertise = personaEngine.detectExpertise(profile, safeText)
           const topicCategory = personaEngine.detectTopicCategory(safeText)
-          personaSystemPrompt = personaEngine.buildSystemPrompt(
+          personaDynamicContext = personaEngine.buildDynamicContext(
             {
               userMood: mood,
               userExpertise: expertise,
@@ -250,7 +250,7 @@ async function start(): Promise<void> {
           sessionMode: "dm",
           includeSkills: true,
           includeSafety: true,
-          extraContext: personaSystemPrompt,
+          extraContext: personaDynamicContext,
         })
 
         const response = await orchestrator.generate("reasoning", {

@@ -1,43 +1,48 @@
+/**
+ * PersonaEngine — Dynamic conversation context engine.
+ *
+ * Design intent (OpenClaw paradigm):
+ *   - Static identity (who Orion is, values, tone) lives in workspace/SOUL.md
+ *   - Dynamic context (current user mood, expertise, topic) is computed here
+ *
+ * The output of buildDynamicContext() is passed as `extraContext` to
+ * buildSystemPrompt(), which injects it AFTER the SOUL.md bootstrap file.
+ * This ensures the static persona always takes precedence over runtime annotations.
+ *
+ * @module core/persona
+ */
+
 import { createLogger } from "../logger.js"
 import type { UserProfile } from "../memory/profiler.js"
 
 const log = createLogger("core.persona")
 
-const ORION_OCEAN = {
-  openness: 0.85,
-  conscientiousness: 0.9,
-  extraversion: 0.55,
-  agreeableness: 0.85,
-  neuroticism: 0.15,
-} as const
-
 export type UserMood = "calm" | "stressed" | "confused" | "excited" | "neutral"
 export type UserExpertise = "beginner" | "intermediate" | "expert"
 export type TopicCategory = "work" | "personal" | "technical" | "creative" | "casual"
 
+/**
+ * Runtime context detected for the current conversation turn.
+ * These are dynamic, not static — they change based on the user's message.
+ */
 export interface ConversationContext {
+  /** Detected emotional state of the user */
   userMood: UserMood
+  /** Detected expertise level based on vocabulary and profile */
   userExpertise: UserExpertise
+  /** Detected topic category */
   topicCategory: TopicCategory
+  /** Whether the message indicates urgency */
   urgency: boolean
 }
 
+/**
+ * Adapts Orion's responses based on real-time detection of user context.
+ * 
+ * This engine does NOT define Orion's personality — that lives in SOUL.md.
+ * It only computes context annotations that help the LLM adapt tone and depth.
+ */
 export class PersonaEngine {
-  private readonly basePersona = `You are Orion, a highly capable AI companion.
-Your character:
-- Direct and precise - no unnecessary filler phrases like "Certainly!" or "Of course!"
-- Curious and engaged - you find the user's interests genuinely interesting
-- Proactive - you notice patterns and sometimes bring relevant things up
-- Reliable - you are consistent, you remember things, and you follow through
-- Warm but not sycophantic - supportive without being over the top
-
-Communication style:
-- Use the same language the user is writing in (Indonesian -> Indonesian, English -> English)
-- Match the user's level of formality
-- When technical, be precise. When casual, be natural.
-- Occasionally use first person "gue/lo" if user writes in informal Indonesian
-- Short responses for simple things. Detailed responses when complexity requires it.`
-
   private readonly moodAdaptations: Record<UserMood, string> = {
     stressed: "The user seems stressed. Be calm and direct. Skip small talk. Focus on what helps immediately.",
     confused: "The user seems confused. Break things down step by step. Use examples. Check understanding.",
@@ -60,6 +65,13 @@ Communication style:
     casual: "Stay natural and concise.",
   }
 
+  /**
+   * Detect the user's current mood from message text and recent context.
+   *
+   * @param message      - Current user message
+   * @param recentTopics - Topics from recent conversation history
+   * @returns Detected mood category
+   */
   detectMood(message: string, recentTopics: string[]): UserMood {
     const lower = message.toLowerCase()
     const urgencyWords = [
@@ -99,13 +111,22 @@ Communication style:
     return "neutral"
   }
 
+  /**
+   * Detect the user's expertise level from message vocabulary and profile.
+   *
+   * @param profile - User's long-term profile (may be null for new users)
+   * @param message - Current user message
+   * @returns Detected expertise level
+   */
   detectExpertise(profile: UserProfile | null, message: string): UserExpertise {
     const lower = message.toLowerCase()
 
     if (profile) {
       const expertKeys = ["developer", "engineer", "programmer", "researcher", "expert"]
       const hasExpertFact = profile.facts.some((fact) =>
-        expertKeys.some((key) => fact.value.toLowerCase().includes(key) || fact.key.toLowerCase().includes(key)),
+        expertKeys.some((key) =>
+          fact.value.toLowerCase().includes(key) || fact.key.toLowerCase().includes(key)
+        )
       )
 
       if (hasExpertFact) {
@@ -137,37 +158,43 @@ Communication style:
     return "intermediate"
   }
 
-  buildSystemPrompt(context: ConversationContext, profileSummary: string): string {
-    const parts: string[] = [this.basePersona]
-
-    parts.push(
-      `\nOCEAN traits: openness=${ORION_OCEAN.openness}, conscientiousness=${ORION_OCEAN.conscientiousness}, extraversion=${ORION_OCEAN.extraversion}, agreeableness=${ORION_OCEAN.agreeableness}, neuroticism=${ORION_OCEAN.neuroticism}.`,
-    )
+  /**
+   * Build a concise dynamic context block for the current turn.
+   *
+   * This block is injected into the system prompt AFTER SOUL.md so that
+   * static persona traits always have higher priority.
+   *
+   * @param context        - Detected mood, expertise, topic, urgency
+   * @param profileSummary - What Orion knows about this user (from profiler)
+   * @returns              Formatted context string, or empty string if nothing notable
+   */
+  buildDynamicContext(context: ConversationContext, profileSummary: string): string {
+    const parts: string[] = []
 
     const moodAdaptation = this.moodAdaptations[context.userMood]
     if (moodAdaptation) {
-      parts.push(`\nCurrent context note: ${moodAdaptation}`)
+      parts.push(`Current context note: ${moodAdaptation}`)
     }
 
     const expertiseAdaptation = this.expertiseAdaptations[context.userExpertise]
     if (expertiseAdaptation) {
-      parts.push(`\nExpertise level note: ${expertiseAdaptation}`)
+      parts.push(`Expertise level note: ${expertiseAdaptation}`)
     }
 
     const topicAdaptation = this.topicAdaptations[context.topicCategory]
     if (topicAdaptation) {
-      parts.push(`\nTopic note: ${topicAdaptation}`)
+      parts.push(`Topic note: ${topicAdaptation}`)
     }
 
     if (profileSummary.trim().length > 0) {
-      parts.push(`\nWhat you know about this user:\n${profileSummary}`)
+      parts.push(`What you know about this user:\n${profileSummary}`)
     }
 
     if (context.urgency) {
-      parts.push("\nUser needs a quick response. Be concise.")
+      parts.push("User needs a quick response. Be concise.")
     }
 
-    log.debug("persona prompt built", {
+    log.debug("persona context built", {
       mood: context.userMood,
       expertise: context.userExpertise,
       topic: context.topicCategory,
@@ -175,9 +202,20 @@ Communication style:
       hasProfileSummary: profileSummary.trim().length > 0,
     })
 
+    // Return empty string if no context to add (keeps system prompt clean)
+    if (parts.length === 0) {
+      return ""
+    }
+
     return parts.join("\n")
   }
 
+  /**
+   * Detect the topic category from message content.
+   *
+   * @param message - Current user message
+   * @returns Detected topic category
+   */
   detectTopicCategory(message: string): TopicCategory {
     const lower = message.toLowerCase()
     if (/code|debug|error|function|api|database/.test(lower)) {
@@ -196,4 +234,8 @@ Communication style:
   }
 }
 
+/**
+ * Singleton instance of the PersonaEngine.
+ * Use this for all persona detection operations.
+ */
 export const personaEngine = new PersonaEngine()
