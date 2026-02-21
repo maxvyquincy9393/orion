@@ -1,26 +1,31 @@
 import { execa } from "execa"
-import config from "../config"
-import * as path from "path"
+
+import config from "../config.js"
+import { createLogger } from "../logger.js"
+
+const logger = createLogger("voice")
+const PY = config.PYTHON_PATH ?? "python"
+const CWD = ".."
 
 export class VoiceBridge {
-  private pythonPath = config.PYTHON_PATH
-  private projectRoot = path.resolve("..")
-
   async speak(text: string, voiceProfile = "default"): Promise<void> {
     if (!config.VOICE_ENABLED) {
       return
     }
 
-    const escapedText = text.replace(/"/g, '\\"')
-    const code = `from delivery.voice import VoicePipeline; VoicePipeline().speak("${escapedText}", "${voiceProfile}")`
-
     try {
-      await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 60000,
-      })
+      await execa(
+        PY,
+        [
+          "-c",
+          `from delivery.voice import VoicePipeline; VoicePipeline().speak(${JSON.stringify(
+            text,
+          )}, ${JSON.stringify(voiceProfile)})`,
+        ],
+        { cwd: CWD },
+      )
     } catch (err) {
-      console.error("[VoiceBridge] speak failed:", err)
+      logger.error("speak failed", err)
     }
   }
 
@@ -29,63 +34,51 @@ export class VoiceBridge {
       return ""
     }
 
-    const code = `from delivery.voice import VoicePipeline; print(VoicePipeline().listen(${duration}))`
-
     try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: duration * 1000 + 10000,
-      })
+      const { stdout } = await execa(
+        PY,
+        [
+          "-c",
+          `from delivery.voice import VoicePipeline; print(VoicePipeline().listen(${duration}))`,
+        ],
+        { cwd: CWD, timeout: (duration + 10) * 1000 },
+      )
       return stdout.trim()
     } catch (err) {
-      console.error("[VoiceBridge] listen failed:", err)
+      logger.error("listen failed", err)
       return ""
     }
   }
 
-  async listVoiceProfiles(): Promise<string[]> {
-    const code = `from delivery.voice import VoicePipeline; import json; print(json.dumps(VoicePipeline().list_voice_profiles()))`
-
+  async listProfiles(): Promise<string[]> {
     try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 30000,
-      })
+      const { stdout } = await execa(
+        PY,
+        [
+          "-c",
+          "from delivery.voice import VoicePipeline; import json; print(json.dumps(VoicePipeline().list_voice_profiles()))",
+        ],
+        { cwd: CWD },
+      )
       return JSON.parse(stdout)
     } catch (err) {
-      console.error("[VoiceBridge] listVoiceProfiles failed:", err)
+      logger.error("listProfiles failed", err)
       return []
     }
   }
 
-  async transcribeFile(audioPath: string): Promise<string> {
-    const code = `from delivery.voice import VoicePipeline; print(VoicePipeline().transcribe_file("${audioPath}"))`
-
-    try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 120000,
-      })
-      return stdout.trim()
-    } catch (err) {
-      console.error("[VoiceBridge] transcribeFile failed:", err)
-      return ""
-    }
-  }
-
-  async cloneVoiceFromSample(samplePath: string, voiceName: string): Promise<boolean> {
-    const code = `from delivery.voice import VoicePipeline; VoicePipeline().clone_voice_from_file("${samplePath}", "${voiceName}")`
-
-    try {
-      await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 60000,
-      })
-      return true
-    } catch (err) {
-      console.error("[VoiceBridge] cloneVoiceFromSample failed:", err)
-      return false
-    }
+  async cloneVoice(referenceAudio: string, voiceName: string): Promise<string> {
+    const { stdout } = await execa(
+      PY,
+      [
+        "-c",
+        `from delivery.voice import VoicePipeline; print(VoicePipeline().clone_voice_from_file(${JSON.stringify(
+          referenceAudio,
+        )}, ${JSON.stringify(voiceName)}))`,
+      ],
+      { cwd: CWD, timeout: 60_000 },
+    )
+    return stdout.trim()
   }
 }
 
