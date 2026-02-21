@@ -1,29 +1,22 @@
 # User Profile
 
-Last updated: (auto-updated by Orion)
-
-## Identity
+## Basic Info
+(Auto-populated during onboarding or from conversation)
 Name: unknown
+Language: auto-detected
 Timezone: unknown
-Language preference: auto-detected from messages
-Location: unknown
 
-## Work Context
-Role: unknown
-Current projects: (updated from conversation)
-Tools/tech stack: (updated from conversation)
+## Preferences
+(Updated automatically as Orion learns about you)
 
-## Communication Preferences
-Formality: (detected - formal/informal/mixed)
-Technical level: (detected - beginner/intermediate/expert)
-Response length: (detected - concise/detailed/context-dependent)
-Language: (detected)
+## Communication Style
+(Detected from conversation patterns)
+Formality: unknown
+Technical level: unknown
+Response length preference: unknown
 
-## Known Preferences
-(Auto-populated as Orion learns about user)
+## Context
+(What Orion knows about your current situation)
 
-## Current Focus
-(Updated from recent conversations)
-
-## Notes
-(Things Orion should keep in mind about this user)
+## Topics of Interest
+(Updated automatically)
