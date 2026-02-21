@@ -3,6 +3,9 @@
 ## Phase 5
 - Added prompt filtering, tool guard, memory validator, pairing, send policy, provenance tagging.
 - Security-first ingress and tool execution path.
+- Phase E hardening: affordance checker (AURA-inspired) and outbound output scanner.
+- Integrated affordance gate in CLI and gateway message paths.
+- Integrated output sanitization in gateway and channel manager send/broadcast paths.
 
 ## Phase 6
 - Added temporal memory hierarchy, profile facts/opinions, session summarization, ProMem extraction.

@@ -1,7 +1,7 @@
 ﻿# Phase 5 Security Overview
 
 ## Scope
-Phase 5 hardens inbound prompts, tool execution, memory injection, sender trust, and per-session messaging behavior.
+Phase 5 hardens inbound prompts, semantic affordance risk, output safety, tool execution, memory injection, sender trust, and per-session messaging behavior.
 
 ## Threat Model
 - Direct prompt injection in user message.
@@ -24,27 +24,38 @@ Phase 5 hardens inbound prompts, tool execution, memory injection, sender trust,
 - Pattern scan for direct jailbreak and role hijack.
 - Sanitization instead of hard-block by default.
 
-4. Memory validation
+4. Affordance checking (AURA-inspired)
+- Semantic risk evaluation for implied harm paths.
+- Block threshold for high-risk intents before model generation.
+- Warn-and-log behavior for ambiguous requests.
+
+5. Memory validation
 - Memory snippets scanned before context assembly.
 - Suspicious snippets dropped from prompt context.
 
-5. Tool guard
+6. Tool guard
 - Terminal command deny patterns.
 - File path guard against sensitive paths and traversal.
 - URL guard against internal network SSRF targets.
 
-6. Result filtering
+7. Result filtering
 - Tool output scanned to reduce second-order injection.
+
+8. Output scanner
+- Redacts sensitive secrets in outbound responses.
+- Flags potentially harmful instruction-style output content.
 
 ## Core Data Flow
 1. Channel receives message.
 2. Pairing and rate policy checked.
 3. Prompt filter sanitizes message.
-4. Memory/context assembled with validation.
-5. LLM response and optional tool calls.
-6. Tool guard checks each tool input.
-7. Tool output passes result filter.
-8. Response sent and persisted with metadata.
+4. Affordance checker evaluates implied harm risk.
+5. Memory/context assembled with validation.
+6. LLM response and optional tool calls.
+7. Tool guard checks each tool input.
+8. Tool output passes result filter.
+9. Output scanner sanitizes outbound response.
+10. Response sent and persisted with metadata.
 
 ## Logging and Observability
 - All blocks/warnings logged with component namespace.
@@ -58,6 +69,7 @@ Phase 5 hardens inbound prompts, tool execution, memory injection, sender trust,
 
 ## Residual Risks
 - Novel injection patterns may bypass regex-only detection.
+- Affordance false positives/negatives depend on evaluator model quality.
 - External channel identity assumptions may vary by provider.
 - Tool wrappers rely on strict usage path; bypasses must be code-reviewed.
 

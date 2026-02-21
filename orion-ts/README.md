@@ -111,9 +111,11 @@ Message path:
 1. Pairing/rate policy checks.
 2. Prompt filter sanitization (direct + indirect injection patterns).
 3. Hook pipeline (`pre_message`, `post_message`, `pre_send`).
-4. Memory validation before context injection.
-5. Tool guard for file/terminal/url restrictions.
-6. ACP security for agent-to-agent messages:
+4. Affordance check (`filterPromptWithAffordance`) for implied-harm risk scoring.
+5. Memory validation before context injection.
+6. Tool guard for file/terminal/url restrictions.
+7. Output scanner redaction before delivery (`output-scanner` in gateway + channel manager).
+8. ACP security for agent-to-agent messages:
    - HMAC-SHA256 signing
    - capability check
    - payload filtering
@@ -162,6 +164,7 @@ python -m pip install git+https://github.com/QwenLM/Qwen3-TTS
 | UserCentrix | 2505.00472 | Proactive | `src/core/voi.ts` |
 | ContextAgent | 2505.14668 | Proactive | `src/core/context-predictor.ts` |
 | PASB | 2602.08412 | Security | `src/security/prompt-filter.ts` |
+| AURA | 2508.06124 | Security | `src/security/affordance-checker.ts`, `src/security/output-scanner.ts` |
 | SoK Injection | 2601.17548 | Security | `src/acp/protocol.ts`, `src/acp/router.ts` |
 | Agentic AI Security | 2510.23883 | Security | security review layer |
 | Systems Security | 2512.01295 | Security | permission/task scoping |
