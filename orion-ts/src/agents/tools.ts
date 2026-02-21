@@ -5,20 +5,10 @@ import fs from "fs/promises"
 
 import { memory } from "../memory/store.js"
 import { filterToolResult } from "../security/prompt-filter.js"
+import { BLOCKED_COMMANDS, guardTerminal, guardFilePath } from "../security/tool-guard.js"
 import { createLogger } from "../logger.js"
 
 const logger = createLogger("tools")
-
-const BLOCKED_COMMANDS = [
-  "rm -rf",
-  "del /f",
-  "format",
-  "mkfs",
-  "shutdown",
-  "reboot",
-  ":(){:|:&};:",
-  "dd if=",
-]
 
 function stripHtml(input: string): string {
   return input.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim()
@@ -104,6 +94,10 @@ export const fileReadTool = tool({
     path: z.string(),
   }),
   execute: async ({ path }) => {
+    const guard = guardFilePath(path, "read", "tool")
+    if (!guard.allowed) {
+      return guard.reason ?? "File access blocked"
+    }
     try {
       return await fs.readFile(path, "utf-8")
     } catch (err) {
@@ -119,6 +113,10 @@ export const fileWriteTool = tool({
     content: z.string(),
   }),
   execute: async ({ path, content }) => {
+    const guard = guardFilePath(path, "write", "tool")
+    if (!guard.allowed) {
+      return guard.reason ?? "File access blocked"
+    }
     try {
       await fs.writeFile(path, content, "utf-8")
       return `Written to ${path}`
@@ -134,6 +132,10 @@ export const fileListTool = tool({
     path: z.string(),
   }),
   execute: async ({ path }) => {
+    const guard = guardFilePath(path, "read", "tool")
+    if (!guard.allowed) {
+      return guard.reason ?? "File access blocked"
+    }
     try {
       const entries = await fs.readdir(path, { withFileTypes: true })
       return entries
@@ -151,11 +153,9 @@ export const terminalTool = tool({
     command: z.string(),
   }),
   execute: async ({ command }) => {
-    const blocked = BLOCKED_COMMANDS.find((blockedCmd) =>
-      command.toLowerCase().includes(blockedCmd),
-    )
-    if (blocked) {
-      return `Command blocked: contains "${blocked}"`
+    const guard = guardTerminal(command, "tool")
+    if (!guard.allowed) {
+      return guard.reason ?? "Command blocked"
     }
 
     try {
