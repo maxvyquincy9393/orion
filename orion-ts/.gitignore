@@ -16,6 +16,7 @@ workspace/*
 !workspace/HEARTBEAT.md
 !workspace/BOOTSTRAP.md
 !workspace/MEMORY.md
+!workspace/CHECKSUMS.sha256
 !workspace/skills/
 workspace/skills/*
 !workspace/skills/.gitkeep
