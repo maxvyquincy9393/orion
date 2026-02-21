@@ -1,7 +1,7 @@
 import { prisma } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
-import { identityManager } from "../core/identity.js"
+import { bootstrapLoader } from "../core/bootstrap.js"
 
 const log = createLogger("memory.profiler")
 
@@ -272,7 +272,7 @@ export class UserProfiler {
       }
 
       if (Object.keys(profileUpdates).length > 0) {
-        await identityManager.updateUserProfile(profileUpdates)
+        await bootstrapLoader.updateUserMd(profileUpdates)
       }
 
       log.debug("profile updated", {
