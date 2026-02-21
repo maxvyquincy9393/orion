@@ -229,22 +229,208 @@ def search_node(state: AgentState) -> AgentState:
     """
     Search node that performs web searches.
 
-    Note: This is a stub for Phase 2. Will be implemented with
-    DuckDuckGo / SearXNG integration.
+    Uses DuckDuckGo (no API key) with SearXNG fallback for web search.
 
     Args:
         state: Current agent state.
 
     Returns:
-        Updated agent state.
+        Updated agent state with search results.
 
-    Raises:
-        NotImplementedError: This node is not yet implemented.
+    Example:
+        state = search_node(state)
     """
-    raise NotImplementedError(
-        "search_node is not implemented yet - coming in Phase 2. "
-        "Use browser/search.py directly for now."
-    )
+    task = state.task
+    _log.info("Search node processing: %s", task[:100])
+
+    state.current_step = "search"
+
+    try:
+        import browser.search as search_module
+
+        search_query = _extract_search_query(task)
+        max_results = 5
+
+        results = search_module.search(search_query, max_results=max_results)
+
+        if results:
+            summaries = []
+            for r in results[:3]:
+                title = r.get("title", "Untitled")
+                url = r.get("url", "")
+                snippet = r.get("snippet", "")
+                summaries.append(f"- {title}: {snippet[:200]}")
+
+            state.add_result(
+                "search",
+                {
+                    "query": search_query,
+                    "results_count": len(results),
+                    "results": results,
+                    "summary": "\n".join(summaries),
+                },
+            )
+            _log.info(
+                "Search node found %d results for: %s", len(results), search_query
+            )
+        else:
+            state.add_result(
+                "search",
+                {
+                    "query": search_query,
+                    "results_count": 0,
+                    "results": [],
+                    "summary": "No search results found.",
+                },
+            )
+            _log.info("Search node found no results for: %s", search_query)
+
+    except Exception as exc:
+        _log.error("Search node failed: %s", exc)
+        state.add_result(
+            "search",
+            {
+                "error": str(exc),
+                "results_count": 0,
+            },
+        )
+
+    return state
+
+
+def _extract_search_query(task: str) -> str:
+    """
+    Extract a clean search query from a task description.
+
+    Args:
+        task: The full task description.
+
+    Returns:
+        A clean search query string.
+
+    Example:
+        query = _extract_search_query("Search for Python tutorials")
+        # Returns: "Python tutorials"
+    """
+    task_lower = task.lower()
+
+    prefixes = [
+        "search for ",
+        "search ",
+        "find ",
+        "look up ",
+        "research ",
+        "google ",
+        "what is ",
+        "who is ",
+        "where is ",
+        "how to ",
+        "tell me about ",
+    ]
+
+    for prefix in prefixes:
+        if task_lower.startswith(prefix):
+            return task[len(prefix) :].strip()
+
+    return task.strip()
+
+
+def code_node(state: AgentState) -> AgentState:
+    """
+    Code node that generates or analyzes code.
+
+    Routes code-related tasks to the appropriate LLM engine.
+
+    Args:
+        state: Current agent state.
+
+    Returns:
+        Updated agent state with code generation results.
+
+    Example:
+        state = code_node(state)
+    """
+    task = state.task
+    _log.info("Code node processing: %s", task[:100])
+
+    state.current_step = "code"
+
+    try:
+        import core.orchestrator as orchestrator
+
+        engine = orchestrator.route("code")
+        _log.info("Code node using engine: %s", engine.get_name())
+
+        code_prompt = _build_code_prompt(task, state.memory)
+
+        messages = [
+            {"role": "system", "content": _get_code_system_prompt()},
+            {"role": "user", "content": code_prompt},
+        ]
+
+        response = engine.generate(code_prompt, messages)
+
+        state.add_result(
+            "code",
+            {
+                "engine": engine.get_name(),
+                "response": response,
+                "task": task,
+            },
+        )
+        _log.info("Code node completed with engine: %s", engine.get_name())
+
+    except Exception as exc:
+        _log.error("Code node failed: %s", exc)
+        state.add_result(
+            "code",
+            {
+                "error": str(exc),
+            },
+        )
+
+    return state
+
+
+def _get_code_system_prompt() -> str:
+    """Get the system prompt for code generation tasks."""
+    return """You are Orion, an expert code assistant. Generate clean, well-documented code.
+
+Guidelines:
+- Write production-ready code with proper error handling
+- Include type hints where appropriate
+- Add docstrings for functions and classes
+- Follow best practices for the language
+- Explain your approach briefly before the code
+- Use standard libraries when possible"""
+
+
+def _build_code_prompt(task: str, memory_context: list) -> str:
+    """
+    Build a prompt for code generation including memory context.
+
+    Args:
+        task: The code task description.
+        memory_context: Relevant memories from previous conversations.
+
+    Returns:
+        A formatted prompt string.
+    """
+    prompt_parts = [f"Task: {task}"]
+
+    if memory_context:
+        context_texts = []
+        for m in memory_context[:3]:
+            content = m.get("content", "")
+            if content:
+                context_texts.append(content)
+
+        if context_texts:
+            prompt_parts.append("\n\nRelevant context from previous conversations:")
+            prompt_parts.append("\n".join(context_texts))
+
+    prompt_parts.append("\n\nPlease generate or analyze the code as requested.")
+    return "\n".join(prompt_parts)
 
 
 def code_node(state: AgentState) -> AgentState:

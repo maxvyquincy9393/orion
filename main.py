@@ -3,9 +3,10 @@ main.py
 
 Entry point for the Orion Persistent AI Companion System.
 Starts a CLI chat loop for interactive conversation.
-Part of Orion — Persistent AI Companion System.
+Part of Orion - Persistent AI Companion System.
 """
 
+import argparse
 import logging
 import sys
 
@@ -125,6 +126,184 @@ def chat_loop(user_id: str) -> None:
             _log.exception("Unexpected error in chat loop")
 
 
+def voice_loop(user_id: str) -> None:
+    """
+    Run voice-based interaction loop.
+
+    Args:
+        user_id: The user ID for the session.
+    """
+    print(f"User: {user_id}")
+    print("Voice mode - Say 'Orion' to activate, 'exit' to quit.")
+    print()
+
+    try:
+        from delivery.voice import VoicePipeline
+
+        voice = VoicePipeline()
+        print("Voice pipeline initialized.")
+
+        voice.conversation_loop(
+            wake_word="orion",
+            on_wake=lambda: print("Listening..."),
+            on_response=lambda text: print(f"Response: {text}"),
+        )
+
+    except ImportError:
+        print("[Error] Voice dependencies not installed.")
+        print("Install with: pip install TTS openai-whisper sounddevice soundfile")
+    except Exception as exc:
+        print(f"[Error] Voice initialization failed: {exc}")
+        _log.error("Voice loop error: %s", exc)
+
+
+def vision_loop(user_id: str) -> None:
+    """
+    Run vision-based interaction loop.
+
+    Args:
+        user_id: The user ID for the session.
+    """
+    print(f"User: {user_id}")
+    print("Vision mode - Camera analysis active. Type 'exit' to quit.")
+    print()
+
+    try:
+        from vision.stream import CameraStream
+        from vision.processor import VisionProcessor
+
+        camera = CameraStream()
+        processor = VisionProcessor()
+
+        camera.start()
+        print("Camera started. Commands: capture | analyze | stop | exit")
+
+        while True:
+            try:
+                cmd = input("Vision> ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                break
+
+            if cmd in ("exit", "quit"):
+                break
+            elif cmd == "capture":
+                frame = camera.get_frame()
+                if frame is not None:
+                    camera.save_frame(frame, config.DATA_DIR / "captures" / "frame.jpg")
+                    print("Frame captured.")
+            elif cmd == "analyze":
+                frame = camera.get_frame()
+                if frame is not None:
+                    result = processor.analyze_frame(frame)
+                    print(f"Analysis: {result[:500]}")
+            elif cmd == "stop":
+                camera.stop()
+                print("Camera stopped.")
+            elif cmd == "start":
+                camera.start()
+                print("Camera started.")
+
+        camera.stop()
+
+    except ImportError:
+        print("[Error] Vision dependencies not installed.")
+        print("Install with: pip install opencv-python numpy mss Pillow")
+    except Exception as exc:
+        print(f"[Error] Vision initialization failed: {exc}")
+        _log.error("Vision loop error: %s", exc)
+
+
+def all_modes_loop(user_id: str) -> None:
+    """
+    Run combined text, voice, and vision interaction.
+
+    Args:
+        user_id: The user ID for the session.
+    """
+    print(f"User: {user_id}")
+    print("All modes - Text, voice, and vision available.")
+    print("Commands: voice | vision | text | exit")
+    print()
+
+    current_mode = "text"
+
+    while True:
+        try:
+            if current_mode == "text":
+                user_input = input("You: ").strip()
+            else:
+                user_input = input(f"[{current_mode}] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            break
+
+        if not user_input:
+            continue
+
+        if user_input.lower() in ("exit", "quit", "bye"):
+            print("Goodbye!")
+            break
+
+        if user_input.lower() == "voice":
+            current_mode = "voice"
+            print("Switched to voice mode. Type 'text' to switch back.")
+            continue
+
+        if user_input.lower() == "vision":
+            current_mode = "vision"
+            print("Switched to vision mode. Type 'text' to switch back.")
+            continue
+
+        if user_input.lower() == "text":
+            current_mode = "text"
+            print("Switched to text mode.")
+            continue
+
+        if current_mode == "text":
+            try:
+                memory.save_message(user_id, "user", user_input)
+                messages = context_module.build(
+                    user_id, user_input, task_type="reasoning"
+                )
+                engine = orchestrator.route("reasoning")
+                print(f"[{engine.get_name()}] ", end="", flush=True)
+                response = engine.generate(user_input, messages)
+                print(response)
+                memory.save_message(
+                    user_id,
+                    "assistant",
+                    response,
+                    {"engine": engine.get_name()},
+                )
+            except Exception as exc:
+                print(f"\n[Error] {exc}")
+                _log.error("Error in all_modes_loop: %s", exc)
+
+
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command line arguments.
+
+    Returns:
+        Parsed arguments namespace.
+    """
+    parser = argparse.ArgumentParser(
+        description="Orion - Persistent AI Companion System"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["text", "voice", "vision", "all"],
+        default="text",
+        help="Interaction mode (default: text)",
+    )
+    parser.add_argument(
+        "--user",
+        default=config.DEFAULT_USER_ID,
+        help=f"User ID (default: {config.DEFAULT_USER_ID})",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
     """
     Main entry point. Initializes configuration, database connections,
@@ -133,6 +312,8 @@ def main() -> None:
     Returns:
         None
     """
+    args = parse_args()
+
     print_banner()
 
     print("Initializing Orion...")
@@ -164,13 +345,19 @@ def main() -> None:
 
     load_permissions()
 
-    user_id = config.DEFAULT_USER_ID
-
+    print(f"Mode: {args.mode}")
     print("-" * 60)
     print()
 
     try:
-        chat_loop(user_id)
+        if args.mode == "voice":
+            voice_loop(args.user)
+        elif args.mode == "vision":
+            vision_loop(args.user)
+        elif args.mode == "all":
+            all_modes_loop(args.user)
+        else:
+            chat_loop(args.user)
     except KeyboardInterrupt:
         print("\n\nInterrupted. Goodbye!")
     except Exception as exc:
