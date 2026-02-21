@@ -1,79 +1,79 @@
 # ============================================
-# Orion — Permissions Configuration
+# Orion — Permission Configuration
 # ============================================
-# Defines what each AI engine and module is allowed to do.
+# Set to true to enable, false to disable.
+# require_confirm: Orion will ask before executing.
 # Part of Orion — Persistent AI Companion System.
 # ============================================
 
 permissions:
-  engines:
-    openai:
-      allowed_tasks:
-        - reasoning
-        - code
-        - multimodal
-      max_tokens: 8000
-      rate_limit_per_minute: 60
-      can_access_memory: true
-      can_send_messages: false
 
-    claude:
-      allowed_tasks:
-        - reasoning
-        - code
-      max_tokens: 8000
-      rate_limit_per_minute: 40
-      can_access_memory: true
-      can_send_messages: false
+  browsing:
+    enabled: true
+    autonomous: true          # Can browse without asking each time
+    require_confirm: false
+    allowed_domains: []       # Empty = all domains allowed
+    blocked_domains:
+      - "banking.com"
 
-    gemini:
-      allowed_tasks:
-        - multimodal
-        - fast
-      max_tokens: 4000
-      rate_limit_per_minute: 60
-      can_access_memory: true
-      can_send_messages: false
+  search:
+    enabled: true
+    engine: "duckduckgo"      # duckduckgo | searxng
 
-    local:
-      allowed_tasks:
-        - fast
-      max_tokens: 2000
-      rate_limit_per_minute: 0  # No limit — local
-      can_access_memory: true
-      can_send_messages: false
+  file_system:
+    enabled: true
+    read: true
+    write: true
+    delete: false             # Delete is disabled by default
+    require_confirm: true     # Always ask before writing
+    allowed_paths:
+      - "~/Documents/orion"
+      - "~/Desktop"
+    blocked_paths:
+      - "~/.ssh"
+      - "~/.env"
 
-  modules:
-    background:
-      can_initiate_contact: true
-      can_read_memory: true
-      can_write_memory: true
-      can_send_messages: true
-      max_proactive_messages_per_hour: 5
+  terminal:
+    enabled: true
+    require_confirm: true     # Always ask before running commands
+    blocked_commands:
+      - "rm -rf"
+      - "sudo"
+      - "format"
 
-    delivery:
-      can_send_telegram: true
-      can_send_whatsapp: true
-      can_send_discord: true
-      can_use_voice: true
+  app_control:
+    enabled: true
+    require_confirm: false
+    allowed_apps:
+      - "chrome"
+      - "vscode"
+      - "spotify"
 
-    memory:
-      can_read: true
-      can_write: true
-      can_compress: true
-      can_delete: false  # Safety: never auto-delete memory
+  input_control:
+    enabled: false            # Mouse/keyboard control off by default
+    require_confirm: true
 
-    rag:
-      can_embed: true
-      can_query: true
-      can_delete_embeddings: false
+  calendar:
+    enabled: true
+    read: true
+    write: true
+    require_confirm: true
 
-  users:
-    owner:
-      full_access: true
-      can_modify_permissions: true
-      delivery_channels:
-        - telegram
-        - whatsapp
-        - discord
-        - voice
+  system_info:
+    enabled: true             # Read CPU, memory, battery etc.
+
+  camera:
+    enabled: true
+    mode: "passive"           # passive | active | on-demand | screen
+
+  voice:
+    enabled: true
+    tts_engine: "coqui"       # coqui (free local) | elevenlabs
+    stt_engine: "whisper"     # always local, always free
+
+  proactive:
+    enabled: true
+    max_messages_per_hour: 5
+    quiet_hours:
+      start: "22:00"
+      end: "08:00"
