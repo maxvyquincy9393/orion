@@ -1,4 +1,24 @@
-﻿import { createLogger } from "../logger.js"
+/**
+ * orchestrator.ts — Multi-provider LLM router.
+ *
+ * Maintains a registry of available engine adapters (Anthropic, OpenAI,
+ * Gemini, Groq, OpenRouter, Ollama) and routes generation requests to the
+ * highest-priority available engine for a given task type.
+ *
+ * Task types and their priority order:
+ *   - reasoning: gemini → groq → anthropic → openai → ollama
+ *   - code:       groq  → gemini → anthropic → openai → ollama
+ *   - fast:       groq  → gemini → ollama → openai → anthropic
+ *   - multimodal: gemini → openai → anthropic
+ *   - local:      ollama
+ *
+ * Engines are checked for availability on init() and only registered
+ * if they respond successfully to an availability probe.
+ *
+ * @module engines/orchestrator
+ */
+
+import { createLogger } from "../logger.js"
 import { anthropicEngine } from "./anthropic.js"
 import { geminiEngine } from "./gemini.js"
 import { groqEngine } from "./groq.js"

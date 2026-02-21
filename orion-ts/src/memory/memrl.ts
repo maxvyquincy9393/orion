@@ -1,15 +1,21 @@
 /**
- * MemRL (Memory Reinforcement Learning) - OC-9 Implementation
- * 
+ * memrl.ts — Memory Reinforcement Learning (MemRL) engine.
+ *
+ * Implements two key algorithms:
+ *
+ * 1. Two-phase retrieval (twoPhaseRetrieve):
+ *    Phase 1 — Vector similarity filter (threshold-based)
+ *    Phase 2 — Utility/Q-value re-ranking using IEU triplets
+ *    Result  — Memories ranked by blended score (50% sim + 30% Q + 20% utility)
+ *
+ * 2. Bellman Q-value update (updateFromFeedback):
+ *    Q(s,a) = Q(s,a) + α * [r + γ * maxQ(s') - Q(s,a)]
+ *    Called after each user turn with the estimated reward signal.
+ *
  * Based on research papers:
- * - MemRL (arXiv 2601.03192): Experience-based memory optimization
- * - Mem-α (arXiv 2509.25911): Intent-aware memory retrieval with Bellman updates
- * 
- * Key improvements:
- * 1. Intent-Experience-Utility (IEU) triplets instead of flat utility scores
- * 2. Bellman Q-value update for temporal credit assignment
- * 3. Proper feedback integration with task success tracking
- * 
+ *   - MemRL:  arXiv 2601.03192 — experience-based memory optimization
+ *   - Mem-α:  arXiv 2509.25911 — intent-aware retrieval with Bellman updates
+ *
  * @module memory/memrl
  */
 

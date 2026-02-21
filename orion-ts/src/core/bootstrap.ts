@@ -1,3 +1,24 @@
+/**
+ * bootstrap.ts — Workspace file loader with integrity verification.
+ *
+ * Loads the set of markdown "bootstrap files" from the workspace directory
+ * into the system prompt. These files define Orion's identity, soul, memory,
+ * and operating instructions.
+ *
+ * Key features:
+ *   - mtime-based file caching (avoids redundant disk reads)
+ *   - SHA256 checksum verification (detects tampering via CHECKSUMS.sha256)
+ *   - Security scanning (zero-width unicode, suspicious base64 blocks)
+ *   - Per-file and total character caps with graceful truncation
+ *   - Session mode routing (dm | group | subagent loads different file sets)
+ *
+ * Bootstrap file load order (DM mode):
+ *   AGENTS.md → SOUL.md → TOOLS.md → IDENTITY.md → USER.md →
+ *   HEARTBEAT.md → BOOTSTRAP.md → MEMORY.md
+ *
+ * @module core/bootstrap
+ */
+
 import { EventEmitter } from "node:events"
 import { createHash } from "node:crypto"
 import fs from "node:fs/promises"

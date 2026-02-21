@@ -1,3 +1,22 @@
+/**
+ * system-prompt-builder.ts — Compose the full system prompt for each LLM call.
+ *
+ * Assembly order (mirrors OpenClaw's injection sequence):
+ *   1. Tooling block         — available tools and usage guidelines
+ *   2. Safety block          — guardrails and prompt injection defense
+ *   3. Always-active skills  — skill content that is always in context
+ *   4. Skill index           — compact list: name + description + path
+ *   5. Workspace info        — working directory, session mode
+ *   6. Identity              — resolved agent name and source
+ *   7. Bootstrap files       — SOUL.md, AGENTS.md, USER.md, MEMORY.md, etc.
+ *   8. Bootstrap warnings    — integrity / security alerts (if any)
+ *   9. Extra context         — dynamic persona context from PersonaEngine
+ *  10. Date / time           — current timestamp
+ *  11. Sandbox / runtime info
+ *
+ * @module core/system-prompt-builder
+ */
+
 import os from "node:os"
 import path from "node:path"
 
