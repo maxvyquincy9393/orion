@@ -10,6 +10,7 @@ import { signMessage, type ACPMessage, type AgentCredential } from "../acp/proto
 import { wrapWithGuard } from "../security/tool-guard.js"
 import { dualAgentReviewer, wrapWithDualAgentReview } from "../security/dual-agent-reviewer.js"
 import { applyTaskScope, getScopeForTask, inferTaskType } from "../permissions/task-scope.js"
+import { responseCritic } from "../core/critic.js"
 
 const logger = createLogger("runner")
 
@@ -92,6 +93,17 @@ export class AgentRunner {
         output = result.text
       } catch {
         output = await orchestrator.generate("reasoning", { prompt })
+      }
+
+      const critiqued = await responseCritic.critiqueAndRefine(task.task, output, 1)
+      output = critiqued.finalResponse
+
+      if (critiqued.refined) {
+        logger.debug("response refined", {
+          taskId: task.id,
+          score: critiqued.critique.score,
+          iterations: critiqued.iterations,
+        })
       }
 
       logger.info(`task ${task.id} done in ${Date.now() - start}ms`)
