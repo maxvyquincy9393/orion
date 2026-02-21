@@ -1,107 +1,56 @@
 import { execa } from "execa"
-import config from "../config"
-import * as path from "path"
+
+import config from "../config.js"
+import { createLogger } from "../logger.js"
+
+const logger = createLogger("vision")
+const PY = config.PYTHON_PATH ?? "python"
+const CWD = ".."
 
 export class VisionBridge {
-  private pythonPath = config.PYTHON_PATH
-  private projectRoot = path.resolve("..")
-
   async analyzeScreen(prompt = "What is on the screen?"): Promise<string> {
     if (!config.VISION_ENABLED) {
-      return "[Vision disabled] VISION_ENABLED is false"
+      return ""
     }
 
-    const escapedPrompt = prompt.replace(/"/g, '\\"')
-    const code = `from vision.processor import VisionProcessor; print(VisionProcessor().analyze_screen("${escapedPrompt}"))`
-
     try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 60000,
-      })
+      const { stdout } = await execa(
+        PY,
+        [
+          "-c",
+          `from vision.processor import VisionProcessor; from vision.stream import CameraStream; s = CameraStream(); print(VisionProcessor(s).analyze_screen(${JSON.stringify(
+            prompt,
+          )}))`,
+        ],
+        { cwd: CWD, timeout: 30_000 },
+      )
       return stdout.trim()
     } catch (err) {
-      console.error("[VisionBridge] analyzeScreen failed:", err)
-      return `[Error] Screen analysis failed: ${err}`
+      logger.error("analyzeScreen failed", err)
+      return ""
     }
   }
 
-  async analyzeFrame(imagePath: string, prompt: string): Promise<string> {
+  async analyzeFrame(imagePath: string, prompt = "What do you see?"): Promise<string> {
     if (!config.VISION_ENABLED) {
-      return "[Vision disabled] VISION_ENABLED is false"
+      return ""
     }
 
-    const escapedPrompt = prompt.replace(/"/g, '\\"')
-    const escapedPath = imagePath.replace(/"/g, '\\"')
-    const code = `from vision.processor import VisionProcessor; import cv2; frame = cv2.imread("${escapedPath}"); print(VisionProcessor().analyze_frame(frame, "${escapedPrompt}"))`
-
     try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 60000,
-      })
+      const { stdout } = await execa(
+        PY,
+        [
+          "-c",
+          `import cv2; from vision.processor import VisionProcessor; from vision.stream import CameraStream; s = CameraStream(); frame = cv2.imread(${JSON.stringify(
+            imagePath,
+          )}); print(VisionProcessor(s).analyze_frame(frame, ${JSON.stringify(prompt)}))`,
+        ],
+        { cwd: CWD, timeout: 30_000 },
+      )
       return stdout.trim()
     } catch (err) {
-      console.error("[VisionBridge] analyzeFrame failed:", err)
-      return `[Error] Frame analysis failed: ${err}`
-    }
-  }
-
-  async extractTextFromImage(imagePath: string): Promise<string> {
-    if (!config.VISION_ENABLED) {
-      return "[Vision disabled] VISION_ENABLED is false"
-    }
-
-    const escapedPath = imagePath.replace(/"/g, '\\"')
-    const code = `from vision.processor import VisionProcessor; import cv2; frame = cv2.imread("${escapedPath}"); print(VisionProcessor().extract_text_from_frame(frame))`
-
-    try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 30000,
-      })
-      return stdout.trim()
-    } catch (err) {
-      console.error("[VisionBridge] extractTextFromImage failed:", err)
-      return `[Error] OCR failed: ${err}`
-    }
-  }
-
-  async detectObjects(imagePath: string): Promise<Array<{ name: string; position: string }>> {
-    if (!config.VISION_ENABLED) {
-      return []
-    }
-
-    const escapedPath = imagePath.replace(/"/g, '\\"')
-    const code = `from vision.processor import VisionProcessor; import cv2; import json; frame = cv2.imread("${escapedPath}"); print(json.dumps(VisionProcessor().detect_objects(frame)))`
-
-    try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 60000,
-      })
-      return JSON.parse(stdout)
-    } catch (err) {
-      console.error("[VisionBridge] detectObjects failed:", err)
-      return []
-    }
-  }
-
-  async isAvailable(): Promise<boolean> {
-    if (!config.VISION_ENABLED) {
-      return false
-    }
-
-    const code = `from vision.processor import VisionProcessor; print(VisionProcessor().is_available())`
-
-    try {
-      const { stdout } = await execa(this.pythonPath, ["-c", code], {
-        cwd: this.projectRoot,
-        timeout: 10000,
-      })
-      return stdout.trim().toLowerCase() === "true"
-    } catch {
-      return false
+      logger.error("analyzeFrame failed", err)
+      return ""
     }
   }
 }
