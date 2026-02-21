@@ -17,6 +17,7 @@ import { profiler } from "../memory/profiler.js"
 import { linkSummarizer } from "../link-understanding/summarizer.js"
 import { hookPipeline } from "../hooks/pipeline.js"
 import { outputScanner } from "../security/output-scanner.js"
+import { personaEngine } from "../core/persona.js"
 import config from "../config.js"
 
 const logger = createLogger("gateway")
@@ -155,9 +156,31 @@ export class GatewayServer {
     const modelInput = linkContext.enrichedContext
 
     const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
+    let systemPrompt: string | undefined
+    if (config.PERSONA_ENABLED) {
+      const [profile, profileSummary] = await Promise.all([
+        profiler.getProfile(userId),
+        profiler.formatForContext(userId),
+      ])
+
+      const mood = personaEngine.detectMood(safePrompt, profile?.currentTopics ?? [])
+      const expertise = personaEngine.detectExpertise(profile, safePrompt)
+      const topicCategory = personaEngine.detectTopicCategory(safePrompt)
+      systemPrompt = personaEngine.buildSystemPrompt(
+        {
+          userMood: mood,
+          userExpertise: expertise,
+          topicCategory,
+          urgency: mood === "stressed",
+        },
+        profileSummary,
+      )
+    }
+
     const generatedResponse = await orchestrator.generate("reasoning", {
       prompt: systemContext ? `${systemContext}\n\nUser: ${modelInput}` : modelInput,
       context: messages,
+      systemPrompt,
     })
 
     const postMessage = await hookPipeline.run("post_message", {

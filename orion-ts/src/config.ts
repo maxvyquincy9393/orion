@@ -68,6 +68,7 @@ const ConfigSchema = z.object({
   DATABASE_URL: z.string().default("file:./orion.db"),
   DEFAULT_USER_ID: z.string().default("owner"),
   LOG_LEVEL: logLevelSchema.default("info"),
+  PERSONA_ENABLED: boolFromEnv.default(true),
   CRITIQUE_ENABLED: boolFromEnv.default(true),
   CRITIQUE_THRESHOLD: floatFromEnv.default(0.75),
   MEMRL_ALPHA: floatFromEnv.default(0.1),

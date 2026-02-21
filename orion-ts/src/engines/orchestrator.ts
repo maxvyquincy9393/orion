@@ -82,6 +82,7 @@ export class Orchestrator {
       task,
       engine: engine.name,
       latencyMs: elapsedMs,
+      hasSystemPrompt: Boolean(options.systemPrompt?.trim()),
     })
 
     return output

@@ -5,7 +5,9 @@ import config from "./config.js"
 import { prisma, saveMessage } from "./database/index.js"
 import { orchestrator } from "./engines/orchestrator.js"
 import { responseCritic } from "./core/critic.js"
+import { personaEngine } from "./core/persona.js"
 import { createLogger } from "./logger.js"
+import { memrlUpdater } from "./memory/memrl.js"
 import { memory } from "./memory/store.js"
 import { gateway } from "./gateway/server.js"
 import { channelManager } from "./channels/manager.js"
@@ -25,6 +27,12 @@ const log = createLogger("main")
 const mode = process.argv.includes("--mode")
   ? process.argv[process.argv.indexOf("--mode") + 1]
   : "text"
+
+interface PendingMemRLFeedback {
+  memoryIds: string[]
+  previousResponseLength: number
+  provisionalReward: number
+}
 
 let eventHandlersInitialized = false
 
@@ -98,9 +106,30 @@ async function start(): Promise<void> {
 
   if (mode === "text" || mode === "all") {
     const rl = readline.createInterface({ input, output })
+    let pendingFeedback: PendingMemRLFeedback | null = null
+
+    const flushPendingFeedback = async () => {
+      if (!pendingFeedback || pendingFeedback.memoryIds.length === 0) {
+        return
+      }
+
+      const fallbackFeedback = {
+        memoryIds: pendingFeedback.memoryIds,
+        taskSuccess: false,
+        reward: pendingFeedback.provisionalReward,
+      }
+      pendingFeedback = null
+
+      try {
+        await memory.provideFeedback(fallbackFeedback)
+      } catch (error) {
+        log.warn("failed to flush memrl feedback", error)
+      }
+    }
 
     const shutdown = async () => {
       log.info("shutting down")
+      await flushPendingFeedback()
       rl.close()
       if (daemon.isRunning()) {
         daemon.stop()
@@ -133,6 +162,25 @@ async function start(): Promise<void> {
         }
 
         const safeText = inputSafety.sanitized
+
+        if (pendingFeedback && pendingFeedback.memoryIds.length > 0) {
+          const followupReward = memrlUpdater.estimateRewardFromContext(
+            safeText,
+            pendingFeedback.previousResponseLength,
+          )
+          const reward = Math.max(pendingFeedback.provisionalReward, followupReward)
+
+          void memory
+            .provideFeedback({
+              memoryIds: pendingFeedback.memoryIds,
+              taskSuccess: reward >= 0.5,
+              reward,
+            })
+            .catch((error) => log.warn("async memrl feedback update failed", error))
+
+          pendingFeedback = null
+        }
+
         const userTimestamp = Date.now()
         const userMessageMetadata = {
           role: "user",
@@ -164,15 +212,37 @@ async function start(): Promise<void> {
         eventBus.dispatch("profile.update.requested", { userId, content: safeText })
         eventBus.dispatch("causal.update.requested", { userId, content: safeText })
 
-        const [, { messages, systemContext }] = await Promise.all([
+        const [, { messages, systemContext, retrievedMemoryIds }] = await Promise.all([
           saveMessage(userId, "user", safeText, "cli", userMessageMetadata),
           memory.buildContext(userId, safeText),
         ])
         sessionStore.addMessage(userId, "cli", { role: "user", content: safeText, timestamp: userTimestamp })
 
+        let systemPrompt: string | undefined
+        if (config.PERSONA_ENABLED) {
+          const [profile, profileSummary] = await Promise.all([
+            profiler.getProfile(userId),
+            profiler.formatForContext(userId),
+          ])
+
+          const mood = personaEngine.detectMood(safeText, profile?.currentTopics ?? [])
+          const expertise = personaEngine.detectExpertise(profile, safeText)
+          const topicCategory = personaEngine.detectTopicCategory(safeText)
+          systemPrompt = personaEngine.buildSystemPrompt(
+            {
+              userMood: mood,
+              userExpertise: expertise,
+              topicCategory,
+              urgency: mood === "stressed",
+            },
+            profileSummary,
+          )
+        }
+
         const response = await orchestrator.generate("reasoning", {
           prompt: systemContext ? `${systemContext}\n\nUser: ${safeText}` : safeText,
           context: messages,
+          systemPrompt,
         })
         const critiqued = await responseCritic.critiqueAndRefine(safeText, response, 2)
         const finalResponse = critiqued.finalResponse
