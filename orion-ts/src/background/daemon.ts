@@ -4,6 +4,10 @@ import { logTrigger, getHistory } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { triggerEngine } from "./triggers.js"
 import { sandbox, PermissionAction } from "../permissions/sandbox.js"
+import { pairingManager } from "../pairing/manager.js"
+import { temporalIndex } from "../memory/temporal-index.js"
+import { contextPredictor } from "../core/context-predictor.js"
+import { voiCalculator } from "../core/voi.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
@@ -12,12 +16,14 @@ const INTERVAL_URGENT_MS = 10 * 1000
 const INTERVAL_NORMAL_MS = 60 * 1000
 const INTERVAL_LOW_MS = 5 * 60 * 1000
 const INACTIVITY_THRESHOLD_MS = 60 * 60 * 1000
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 export class OrionDaemon {
   private running = false
   private interval: NodeJS.Timeout | null = null
   private currentIntervalMs = INTERVAL_NORMAL_MS
   private lastActivityTime = Date.now()
+  private lastTemporalMaintenanceAt = new Map<string, number>()
 
   async start(): Promise<void> {
     if (this.running) {
@@ -95,8 +101,10 @@ export class OrionDaemon {
       await triggerEngine.load(TRIGGERS_FILE)
       const userId = config.DEFAULT_USER_ID
       const triggers = await triggerEngine.evaluate(userId)
+      await pairingManager.cleanupExpired()
 
       await this.checkForActivity(userId)
+      await this.maybeRunTemporalMaintenance(userId)
 
       let hasUrgentTrigger = false
 
@@ -106,6 +114,28 @@ export class OrionDaemon {
           const isUrgent = trigger.priority === "urgent" || (trigger as any).confidence > 0.9
           if (isUrgent) {
             hasUrgentTrigger = true
+          }
+
+          const channel = "webchat"
+          const context = await contextPredictor.predict(trigger.userId, channel)
+          const voi = voiCalculator.calculate({
+            userId: trigger.userId,
+            messageContent: trigger.message,
+            triggerType: trigger.type,
+            triggerPriority: trigger.priority ?? "normal",
+            currentHour: new Date().getHours(),
+            context,
+          })
+
+          if (!voi.shouldSend) {
+            logger.info("Trigger skipped by VoI", {
+              trigger: trigger.name,
+              userId: trigger.userId,
+              score: voi.score,
+              reasoning: voi.reasoning,
+            })
+            await logTrigger(trigger.userId, trigger.name, false)
+            continue
           }
 
           const allowed = await sandbox.check(PermissionAction.PROACTIVE_MESSAGE, trigger.userId)
@@ -134,6 +164,17 @@ export class OrionDaemon {
     } catch (error) {
       logger.error("Daemon cycle failed", error)
     }
+  }
+
+  private async maybeRunTemporalMaintenance(userId: string): Promise<void> {
+    const now = Date.now()
+    const previous = this.lastTemporalMaintenanceAt.get(userId) ?? 0
+    if (now - previous < WEEK_MS) {
+      return
+    }
+
+    await temporalIndex.runMaintenance(userId)
+    this.lastTemporalMaintenanceAt.set(userId, now)
   }
 }
 

@@ -6,10 +6,14 @@ import websocketPlugin from "@fastify/websocket"
 import { orchestrator } from "../engines/orchestrator.js"
 import { channelManager } from "../channels/manager.js"
 import { memory } from "../memory/store.js"
+import { saveMessage } from "../database/index.js"
 import { daemon } from "../background/daemon.js"
 import { multiUser } from "../multiuser/manager.js"
 import { filterPrompt } from "../security/prompt-filter.js"
 import { createLogger } from "../logger.js"
+import { sessionStore } from "../sessions/session-store.js"
+import { causalGraph } from "../memory/causal-graph.js"
+import { profiler } from "../memory/profiler.js"
 import config from "../config.js"
 
 const logger = createLogger("gateway")
@@ -68,17 +72,7 @@ export class GatewayServer {
         "/message",
         async (req) => {
           const { message, userId = config.DEFAULT_USER_ID } = req.body
-          const filtered = filterPrompt(message, userId)
-          const safePrompt = filtered.sanitized
-          const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
-          const response = await orchestrator.generate("reasoning", {
-            prompt: systemContext ? `${systemContext}\n\nUser: ${safePrompt}` : safePrompt,
-            context: messages,
-          })
-
-          await memory.save(userId, safePrompt, { role: "user" })
-          await memory.save(userId, response, { role: "assistant" })
-
+          const response = await this.handleUserMessage(userId, message, "webchat")
           return { response }
         },
       )
@@ -96,15 +90,7 @@ export class GatewayServer {
 
     switch (msg.type) {
       case "message": {
-        const filtered = filterPrompt(msg.content, userId)
-        const safePrompt = filtered.sanitized
-        const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
-        const response = await orchestrator.generate("reasoning", {
-          prompt: systemContext ? `${systemContext}\n\nUser: ${safePrompt}` : safePrompt,
-          context: messages,
-        })
-        await memory.save(userId, safePrompt, { role: "user" })
-        await memory.save(userId, response, { role: "assistant" })
+        const response = await this.handleUserMessage(userId, msg.content, "webchat")
         return { type: "response", content: response, requestId: msg.requestId }
       }
       case "status":
@@ -126,6 +112,48 @@ export class GatewayServer {
   async start(): Promise<void> {
     await this.app.listen({ port: this.port, host: "127.0.0.1" })
     logger.info(`gateway running at ws://127.0.0.1:${this.port}`)
+  }
+
+  private async handleUserMessage(userId: string, rawMessage: string, channel: string): Promise<string> {
+    const filtered = filterPrompt(rawMessage, userId)
+    const safePrompt = filtered.sanitized
+    const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
+    const response = await orchestrator.generate("reasoning", {
+      prompt: systemContext ? `${systemContext}\n\nUser: ${safePrompt}` : safePrompt,
+      context: messages,
+    })
+
+    const now = Date.now()
+    const userMeta = { role: "user", channel, category: "event", level: 0 }
+    const assistantMeta = { role: "assistant", channel, category: "summary", level: 0 }
+
+    await Promise.all([
+      saveMessage(userId, "user", safePrompt, channel, userMeta),
+      memory.save(userId, safePrompt, userMeta),
+    ])
+    sessionStore.addMessage(userId, channel, { role: "user", content: safePrompt, timestamp: now })
+    void this.runAsyncExtractors(userId, safePrompt, "user")
+
+    await Promise.all([
+      saveMessage(userId, "assistant", response, channel, assistantMeta),
+      memory.save(userId, response, assistantMeta),
+    ])
+    sessionStore.addMessage(userId, channel, { role: "assistant", content: response, timestamp: Date.now() })
+
+    return response
+  }
+
+  private runAsyncExtractors(userId: string, message: string, role: "user" | "assistant"): void {
+    void profiler
+      .extractFromMessage(userId, message, role)
+      .then(({ facts, opinions }) => profiler.updateProfile(userId, facts, opinions))
+      .catch((error) => logger.warn("Profiler async extraction failed", { userId, error }))
+
+    if (role === "user") {
+      void causalGraph
+        .extractAndUpdate(userId, message)
+        .catch((error) => logger.warn("Causal graph async update failed", { userId, error }))
+    }
   }
 
   async stop(): Promise<void> {

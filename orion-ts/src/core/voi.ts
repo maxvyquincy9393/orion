@@ -1,4 +1,5 @@
-import { createLogger } from "../logger.js"
+﻿import { createLogger } from "../logger.js"
+import type { MultiDimContext } from "./context-predictor.js"
 
 const log = createLogger("core.voi")
 
@@ -8,6 +9,7 @@ export interface VoIInput {
   triggerType: string
   triggerPriority: "low" | "normal" | "urgent"
   currentHour: number
+  context: MultiDimContext
 }
 
 export interface VoIResult {
@@ -34,23 +36,26 @@ const BENEFIT_VALUES: Record<string, number> = {
 
 const ACTION_COST = 0.1
 
-const PEAK_HOURS = [9, 10, 11, 14, 15, 16, 17, 18, 19, 20]
-const QUIET_HOURS = [0, 1, 2, 3, 4, 5, 6, 22, 23]
+function clamp(value: number, min = 0, max = 1): number {
+  if (Number.isNaN(value)) {
+    return min
+  }
+  return Math.max(min, Math.min(max, value))
+}
 
 export class VoICalculator {
   private readonly threshold = 0.3
 
   calculate(input: VoIInput): VoIResult {
     try {
-      const pUserBenefits = PRIORITY_PROBABILITY[input.triggerPriority] ?? 0.3
+      const baseProbability = PRIORITY_PROBABILITY[input.triggerPriority] ?? 0.3
+      const pUserBenefits = this.adjustBenefitProbability(baseProbability, input.context)
 
       const triggerCategory = this.categorizeTrigger(input.triggerType, input.messageContent)
       const benefitValue = BENEFIT_VALUES[triggerCategory] ?? BENEFIT_VALUES.default
 
-      const disturbanceCost = this.calculateDisturbanceCost(input.currentHour)
-
+      const disturbanceCost = this.calculateDisturbanceCost(input.currentHour, input.context)
       const voi = pUserBenefits * benefitValue - ACTION_COST - disturbanceCost
-
       const shouldSend = voi > this.threshold
 
       const reasoning = this.buildReasoning(
@@ -59,7 +64,8 @@ export class VoICalculator {
         pUserBenefits,
         benefitValue,
         disturbanceCost,
-        triggerCategory
+        triggerCategory,
+        input.context,
       )
 
       if (!shouldSend) {
@@ -84,6 +90,26 @@ export class VoICalculator {
         reasoning: "Defaulting to send due to calculation error",
       }
     }
+  }
+
+  private adjustBenefitProbability(baseProbability: number, context: MultiDimContext): number {
+    let adjusted = baseProbability
+
+    if (context.typicalActiveHour) {
+      adjusted += 0.2
+    }
+
+    if (context.channelActivity >= 0.6) {
+      adjusted += 0.1
+    } else if (context.channelActivity <= 0.2) {
+      adjusted -= 0.05
+    }
+
+    if (context.urgencySignals.length > 0) {
+      adjusted += 0.08
+    }
+
+    return clamp(adjusted)
   }
 
   private categorizeTrigger(triggerType: string, content: string): string {
@@ -111,14 +137,26 @@ export class VoICalculator {
     return "default"
   }
 
-  private calculateDisturbanceCost(currentHour: number): number {
-    if (QUIET_HOURS.includes(currentHour)) {
+  private calculateDisturbanceCost(currentHour: number, context: MultiDimContext): number {
+    const quietHours = [0, 1, 2, 3, 4, 5, 6, 22, 23]
+
+    if (context.conversationRecency < 5 / 60) {
+      return 0.1
+    }
+
+    if (!context.typicalActiveHour || quietHours.includes(currentHour)) {
       return 0.5
     }
-    if (!PEAK_HOURS.includes(currentHour)) {
-      return 0.2
+
+    if (context.conversationRecency > 8) {
+      return 0.4
     }
-    return 0.1
+
+    if (context.conversationRecency > 2) {
+      return 0.25
+    }
+
+    return 0.15
   }
 
   private buildReasoning(
@@ -127,7 +165,8 @@ export class VoICalculator {
     pUserBenefits: number,
     benefitValue: number,
     disturbanceCost: number,
-    category: string
+    category: string,
+    context: MultiDimContext,
   ): string {
     const parts: string[] = []
 
@@ -135,6 +174,9 @@ export class VoICalculator {
     parts.push(`P(user benefits): ${(pUserBenefits * 100).toFixed(0)}%`)
     parts.push(`Benefit value: ${benefitValue.toFixed(1)} (${category})`)
     parts.push(`Disturbance cost: ${disturbanceCost.toFixed(1)}`)
+    parts.push(`Recency(h): ${context.conversationRecency.toFixed(2)}`)
+    parts.push(`Channel activity: ${context.channelActivity.toFixed(2)}`)
+    parts.push(`Typical hour: ${context.typicalActiveHour}`)
 
     if (shouldSend) {
       parts.push("Decision: SEND")

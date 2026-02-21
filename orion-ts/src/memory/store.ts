@@ -5,9 +5,12 @@ import path from "node:path"
 import * as lancedb from "@lancedb/lancedb"
 
 import config from "../config.js"
-import { getHistory } from "../database/index.js"
+import { getHistory, saveMessage } from "../database/index.js"
 import { validateMemoryEntries, type MemoryEntry } from "../security/memory-validator.js"
 import { createLogger } from "../logger.js"
+import { hiMeS } from "./himes.js"
+import { proMem } from "./promem.js"
+import { temporalIndex } from "./temporal-index.js"
 
 const log = createLogger("memory.store")
 
@@ -174,6 +177,12 @@ export class MemoryStore {
       }
 
       await this.table.add([row])
+      if (metadata.temporal !== false) {
+        const levelValue = Number(metadata.level)
+        const level = levelValue === 1 || levelValue === 2 ? levelValue : 0
+        const category = typeof metadata.category === "string" ? metadata.category : "fact"
+        void temporalIndex.store(userId, content, level, category)
+      }
       log.debug("saved memory", { id, userId, contentLength: content.length })
       return id
     } catch (error) {
@@ -223,37 +232,30 @@ export class MemoryStore {
     limit = 10
   ): Promise<BuildContextResult> {
     try {
-      const messages = await getHistory(userId, limit)
-      const searchResults = await this.search(userId, query, 5)
+      const fused = await hiMeS.buildFusedContext(userId, query)
+      const systemBlocks: string[] = []
+      const contextMessages: Array<{ role: "user" | "assistant"; content: string }> = []
 
-      const memoryEntries: MemoryEntry[] = searchResults.map((r) => ({
-        content: r.content,
-        metadata: r.metadata,
-      }))
-
-      const validated = validateMemoryEntries(memoryEntries)
-
-      let systemContext = ""
-      if (validated.clean.length > 0) {
-        const snippets = validated.clean.map((r, i) => {
-          const source = String(r.metadata.source ?? "memory")
-          return `[${i + 1}] (${source}) ${r.content}`
-        })
-        systemContext = `Relevant memories:\n${snippets.join("\n\n")}`
-      }
-
-      const context: Array<{ role: "user" | "assistant"; content: string }> = []
-
-      for (const msg of messages.reverse()) {
-        if (msg.role === "user" || msg.role === "assistant") {
-          context.push({
-            role: msg.role as "user" | "assistant",
-            content: msg.content,
-          })
+      for (const item of fused) {
+        if (item.role === "user" && item.content.startsWith("[")) {
+          systemBlocks.push(item.content)
+          continue
         }
+        contextMessages.push(item)
       }
 
-      return { systemContext, messages: context }
+      if (contextMessages.length > limit) {
+        contextMessages.splice(0, contextMessages.length - limit)
+      }
+
+      const validationInput: MemoryEntry[] = systemBlocks.map((content) => ({
+        content,
+        metadata: { source: "himes" },
+      }))
+      const validated = validateMemoryEntries(validationInput)
+      const systemContext = validated.clean.map((item) => item.content).join("\n\n")
+
+      return { systemContext, messages: contextMessages }
     } catch (error) {
       log.error("buildContext failed", error)
       return { systemContext: "", messages: [] }
@@ -297,17 +299,25 @@ export class MemoryStore {
         return
       }
 
-      const summaryContent = messages
-        .slice(0, 50)
-        .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
-        .join("\n")
+      const facts = await proMem.extract(userId, messages.slice(0, 50).reverse())
+      if (facts.length === 0) {
+        return
+      }
 
-      await this.save(userId, `[Compressed] ${summaryContent}`, {
-        compressed: true,
-        compressedAt: Date.now(),
-      })
+      for (const fact of facts) {
+        const metadata = {
+          role: "system",
+          compressed: true,
+          source: "promem",
+          category: "fact",
+          level: 1,
+          compressedAt: Date.now(),
+        }
+        await this.save(userId, fact, metadata)
+        await saveMessage(userId, "system", fact, "memory", metadata)
+      }
 
-      log.info("compressed history", { userId, count: messages.length })
+      log.info("compressed history with promem", { userId, count: messages.length, facts: facts.length })
     } catch (error) {
       log.error("compress failed", error)
     }

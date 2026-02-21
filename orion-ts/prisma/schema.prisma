@@ -88,9 +88,24 @@ model ApprovedUser {
 model UserProfile {
   id         String   @id @default(cuid())
   userId     String   @unique
-  attributes Json
+  facts      Json
+  opinions   Json
   topics     Json
   updatedAt  DateTime @updatedAt
+}
+
+model MemoryNode {
+  id         String   @id @default(cuid())
+  userId     String
+  content    String
+  level      Int
+  validFrom  DateTime @default(now())
+  validUntil DateTime?
+  category   String
+  embedding  Bytes?
+
+  @@index([userId, level])
+  @@index([userId, validUntil])
 }
 
 model CausalNode {
@@ -102,6 +117,7 @@ model CausalNode {
 
   causesEdges CausalEdge[] @relation("from")
   effectEdges CausalEdge[] @relation("to")
+  hyperEdges  HyperEdgeMembership[]
 
   @@index([userId, category])
 }
@@ -120,4 +136,25 @@ model CausalEdge {
 
   @@unique([fromId, toId])
   @@index([userId])
+}
+
+model HyperEdge {
+  id       String   @id @default(cuid())
+  userId   String
+  relation String
+  context  String
+  weight   Float    @default(0.5)
+  members  HyperEdgeMembership[]
+
+  @@index([userId])
+}
+
+model HyperEdgeMembership {
+  hyperEdgeId String
+  nodeId      String
+
+  hyperEdge HyperEdge  @relation(fields: [hyperEdgeId], references: [id])
+  node      CausalNode @relation(fields: [nodeId], references: [id])
+
+  @@id([hyperEdgeId, nodeId])
 }

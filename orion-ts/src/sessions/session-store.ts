@@ -4,7 +4,7 @@ import { getHistory } from "../database/index.js"
 const log = createLogger("sessions.store")
 
 export interface Message {
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "system"
   content: string
   timestamp: number
 }
@@ -64,11 +64,15 @@ class SessionStore {
       history = dbMessages
         .filter((msg) => !channel || msg.channel === channel)
         .reverse()
-        .map((msg) => ({
-          role: msg.role === "assistant" ? "assistant" : "user" as const,
-          content: msg.content,
-          timestamp: msg.createdAt.getTime(),
-        }))
+        .map((msg) => {
+          const role: Message["role"] =
+            msg.role === "assistant" || msg.role === "system" ? msg.role : "user"
+          return {
+            role,
+            content: msg.content,
+            timestamp: msg.createdAt.getTime(),
+          }
+        })
       this.histories.set(key, history)
     }
 
@@ -87,6 +91,21 @@ class SessionStore {
     }
 
     history.push(message)
+    void this.maybeCompressAsync(userId, channel)
+  }
+
+  replaceSessionHistory(userId: string, channel: string, messages: Message[]): void {
+    const key = makeSessionKey(userId, channel)
+    this.histories.set(key, messages)
+  }
+
+  private async maybeCompressAsync(userId: string, channel: string): Promise<void> {
+    try {
+      const { sessionSummarizer } = await import("../memory/session-summarizer.js")
+      await sessionSummarizer.maybeCompress(userId, channel)
+    } catch (error) {
+      log.debug("Session summarizer unavailable", { userId, channel, error })
+    }
   }
 
   clearSession(userId: string, channel: string): void {

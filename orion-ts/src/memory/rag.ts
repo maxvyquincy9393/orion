@@ -8,6 +8,7 @@ import config from "../config.js"
 import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { memory } from "./store.js"
+import { detectQueryComplexity, temporalIndex } from "./temporal-index.js"
 
 const log = createLogger("memory.rag")
 
@@ -72,22 +73,23 @@ export class RAGEngine {
 
   async query(userId: string, queryText: string, limit = 5): Promise<string> {
     try {
-      const results = await memory.search(userId, queryText, limit)
-      const ragResults = results.filter((item) => {
-        const source = item.metadata.source
-        return typeof source === "string" && source.length > 0
-      })
+      const complexity = detectQueryComplexity(queryText)
+      const temporalResults = await temporalIndex.retrieve(userId, queryText, complexity)
 
-      if (ragResults.length === 0) {
+      if (temporalResults.length > 0) {
+        return temporalResults
+          .slice(0, limit)
+          .map((item, index) => `[${index + 1}] (${item.category}, L${item.level})\n${item.content}`)
+          .join("\n\n")
+      }
+
+      const fallbackResults = await memory.search(userId, queryText, limit)
+      if (fallbackResults.length === 0) {
         return ""
       }
 
-      return ragResults
-        .map((item, index) => {
-          const source = String(item.metadata.source ?? "unknown")
-          const title = String(item.metadata.title ?? "untitled")
-          return `[${index + 1}] (${source}) ${title}\n${item.content}`
-        })
+      return fallbackResults
+        .map((item, index) => `[${index + 1}] (${String(item.metadata.source ?? "unknown")})\n${item.content}`)
         .join("\n\n")
     } catch (error) {
       log.error("query failed", error)
