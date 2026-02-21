@@ -1,0 +1,133 @@
+import crypto from "node:crypto"
+
+import Fastify from "fastify"
+import websocketPlugin from "@fastify/websocket"
+
+import { orchestrator } from "../engines/orchestrator.js"
+import { channelManager } from "../channels/manager.js"
+import { memory } from "../memory/store.js"
+import { daemon } from "../background/daemon.js"
+import { createLogger } from "../logger.js"
+import config from "../config.js"
+
+const logger = createLogger("gateway")
+
+export class GatewayServer {
+  private app = Fastify({ logger: false })
+  private clients = new Map<string, any>()
+
+  constructor(private port = 18789) {
+    this.registerRoutes()
+  }
+
+  private registerRoutes(): void {
+    this.app.register(websocketPlugin)
+
+    this.app.register(async (app) => {
+      app.get("/ws", { websocket: true }, (socket) => {
+        const clientId = crypto.randomUUID()
+        this.clients.set(clientId, socket)
+        logger.info(`client connected: ${clientId}`)
+
+        socket.send(
+          JSON.stringify({
+            type: "connected",
+            clientId,
+            engines: orchestrator.getAvailableEngines(),
+            channels: channelManager.getConnectedChannels(),
+            daemon: daemon.healthCheck(),
+          }),
+        )
+
+        socket.on("message", async (raw: Buffer) => {
+          try {
+            const msg = JSON.parse(raw.toString())
+            const res = await this.handle(msg)
+            socket.send(JSON.stringify(res))
+          } catch (err) {
+            socket.send(JSON.stringify({ type: "error", message: String(err) }))
+          }
+        })
+
+        socket.on("close", () => {
+          this.clients.delete(clientId)
+        })
+      })
+
+      app.get("/health", async () => ({
+        status: "ok",
+        uptime: process.uptime(),
+        engines: orchestrator.getAvailableEngines(),
+        channels: channelManager.getConnectedChannels(),
+      }))
+
+      app.post<{ Body: { message: string; userId?: string } }>(
+        "/message",
+        async (req) => {
+          const { message, userId = config.DEFAULT_USER_ID } = req.body
+          const context = await memory.buildContext(userId, message)
+          const response = await orchestrator.generate("reasoning", {
+            prompt: message,
+            context,
+          })
+
+          await memory.save(userId, message, { role: "user" })
+          await memory.save(userId, response, { role: "assistant" })
+
+          return { response }
+        },
+      )
+    })
+  }
+
+  private async handle(msg: any): Promise<any> {
+    switch (msg.type) {
+      case "message": {
+        const userId = msg.userId ?? config.DEFAULT_USER_ID
+        const context = await memory.buildContext(userId, msg.content)
+        const response = await orchestrator.generate("reasoning", {
+          prompt: msg.content,
+          context,
+        })
+        await memory.save(userId, msg.content, { role: "user" })
+        await memory.save(userId, response, { role: "assistant" })
+        return { type: "response", content: response, requestId: msg.requestId }
+      }
+      case "status":
+        return {
+          type: "status",
+          engines: orchestrator.getAvailableEngines(),
+          channels: channelManager.getConnectedChannels(),
+          daemon: daemon.healthCheck(),
+          requestId: msg.requestId,
+        }
+      case "broadcast":
+        await channelManager.broadcast(msg.content)
+        return { type: "ok", requestId: msg.requestId }
+      default:
+        return { type: "error", message: `unknown type: ${msg.type}` }
+    }
+  }
+
+  async start(): Promise<void> {
+    await this.app.listen({ port: this.port, host: "127.0.0.1" })
+    logger.info(`gateway running at ws://127.0.0.1:${this.port}`)
+  }
+
+  async stop(): Promise<void> {
+    await this.app.close()
+  }
+
+  broadcast(payload: unknown): void {
+    const raw = JSON.stringify(payload)
+    for (const [, socket] of this.clients) {
+      try {
+        socket.send(raw)
+      } catch {
+        continue
+      }
+    }
+  }
+}
+
+export const gateway = new GatewayServer()
