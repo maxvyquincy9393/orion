@@ -12,6 +12,7 @@ import { contextPredictor } from "../core/context-predictor.js"
 import { voiCalculator } from "../core/voi.js"
 import { acpRouter } from "../acp/router.js"
 import { signMessage, type ACPMessage, type AgentCredential } from "../acp/protocol.js"
+import { eventBus } from "../core/event-bus.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
@@ -27,6 +28,8 @@ export class OrionDaemon {
   private interval: NodeJS.Timeout | null = null
   private currentIntervalMs = INTERVAL_NORMAL_MS
   private lastActivityTime = Date.now()
+  private cycleInProgress = false
+  private eventSubscriptionsInitialized = false
   private lastTemporalMaintenanceAt = new Map<string, number>()
   private readonly credential: AgentCredential
 
@@ -45,19 +48,74 @@ export class OrionDaemon {
 
     this.running = true
     this.lastActivityTime = Date.now()
-    logger.info("Daemon started")
+    this.initializeEventSubscriptions()
+    logger.info("Daemon started (event-driven mode)")
     await this.runCycle()
-    this.scheduleNextCycle()
+    this.startHeartbeat()
   }
 
-  private scheduleNextCycle(): void {
+  private initializeEventSubscriptions(): void {
+    if (this.eventSubscriptionsInitialized) {
+      return
+    }
+
+    this.eventSubscriptionsInitialized = true
+
+    eventBus.on("user.message.received", async (data) => {
+      if (!this.running) {
+        return
+      }
+
+      if (data.timestamp > this.lastActivityTime) {
+        this.lastActivityTime = data.timestamp
+      }
+    })
+
+    eventBus.on("system.heartbeat", async () => {
+      if (!this.running) {
+        return
+      }
+
+      if (this.cycleInProgress) {
+        logger.debug("Skipping heartbeat while previous cycle is running")
+        return
+      }
+
+      this.cycleInProgress = true
+      try {
+        await this.runCycle()
+      } finally {
+        this.cycleInProgress = false
+      }
+    })
+  }
+
+  private startHeartbeat(): void {
     if (this.interval) {
       clearTimeout(this.interval)
     }
 
-    this.interval = setTimeout(() => {
-      void this.runCycle().then(() => this.scheduleNextCycle())
-    }, this.currentIntervalMs)
+    const tick = () => {
+      if (!this.running) {
+        return
+      }
+
+      eventBus.dispatch("system.heartbeat", { timestamp: Date.now() })
+
+      const timeSinceActivity = Date.now() - this.lastActivityTime
+      const activityInterval = timeSinceActivity > INACTIVITY_THRESHOLD_MS
+        ? INTERVAL_LOW_MS
+        : INTERVAL_NORMAL_MS
+
+      const nextInterval = this.currentIntervalMs === INTERVAL_URGENT_MS
+        ? INTERVAL_URGENT_MS
+        : activityInterval
+
+      this.currentIntervalMs = nextInterval
+      this.interval = setTimeout(tick, nextInterval)
+    }
+
+    this.interval = setTimeout(tick, INTERVAL_NORMAL_MS)
   }
 
   stop(): void {
@@ -65,6 +123,7 @@ export class OrionDaemon {
       clearTimeout(this.interval)
     }
     this.interval = null
+    this.cycleInProgress = false
     this.running = false
     logger.info("Daemon stopped")
   }
@@ -156,6 +215,12 @@ export class OrionDaemon {
             actedOn = await channelManager.send(trigger.userId, trigger.message)
             if (actedOn) {
               this.lastActivityTime = Date.now()
+              eventBus.dispatch("trigger.fired", {
+                triggerName: trigger.name,
+                userId: trigger.userId,
+                message: trigger.message,
+                priority: trigger.priority ?? "normal",
+              })
             }
           }
           await logTrigger(trigger.userId, trigger.name, actedOn)
