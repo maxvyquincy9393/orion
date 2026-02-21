@@ -11,6 +11,8 @@ import { wrapWithGuard } from "../security/tool-guard.js"
 import { dualAgentReviewer, wrapWithDualAgentReview } from "../security/dual-agent-reviewer.js"
 import { applyTaskScope, getScopeForTask, inferTaskType } from "../permissions/task-scope.js"
 import { responseCritic } from "../core/critic.js"
+import { taskPlanner, type TaskDAG } from "./task-planner.js"
+import { executionMonitor, type TaskResult } from "./execution-monitor.js"
 
 const logger = createLogger("runner")
 
@@ -137,37 +139,92 @@ export class AgentRunner {
     return results
   }
 
-  async runWithSupervisor(goal: string, maxSubtasks = 5): Promise<string> {
-    logger.info(`supervisor planning: ${goal}`)
+  async runWithSupervisor(goal: string, maxSubtasks = 8): Promise<string> {
+    logger.info("supervisor starting", { goal: goal.slice(0, 80), maxSubtasks })
 
-    const plan = await orchestrator.generate("reasoning", {
-      prompt: `Break this goal into at most ${maxSubtasks} independent parallel subtasks. Return ONLY a valid JSON array of strings. No explanation. Goal: "${goal}"`,
-    })
+    const timeoutMs = 120_000
+    let timeoutHandle: NodeJS.Timeout | undefined
 
-    let subtasks: string[]
-    try {
-      subtasks = JSON.parse(plan.replace(/```json|```/g, "").trim())
-      if (!Array.isArray(subtasks)) {
-        throw new Error("invalid plan")
+    const supervisorRun = async (): Promise<string> => {
+      const dag = await taskPlanner.plan(goal)
+      const boundedDag = this.limitDagSize(dag, maxSubtasks)
+      const executionWaves = taskPlanner.getExecutionOrder(boundedDag)
+      const completedResults = new Map<string, TaskResult>()
+
+      for (const wave of executionWaves) {
+        logger.info("executing wave", { tasks: wave.map((node) => node.id) })
+
+        const waveResults = await Promise.all(
+          wave.map((node) => executionMonitor.executeNode(node, completedResults)),
+        )
+
+        for (const result of waveResults) {
+          completedResults.set(result.nodeId, result)
+        }
       }
-    } catch {
-      subtasks = [goal]
+
+      const successfulOutputs = boundedDag.nodes
+        .map((node) => {
+          const result = completedResults.get(node.id)
+
+          if (!result) {
+            return `[${node.id}] success=false attempts=0\nTask: ${node.task}\nOutput: missing result`
+          }
+
+          return `[${node.id}] success=${result.success} attempts=${result.attempts}\nTask: ${node.task}\nOutput: ${result.output.slice(0, 900)}`
+        })
+        .join("\n\n---\n\n")
+
+      const synthesisPrompt = `Synthesize these task results into one coherent response for this goal.
+Goal: ${goal}
+Results: ${successfulOutputs.slice(0, 4000)}
+
+Provide a clear, unified answer.`
+
+      return orchestrator.generate("reasoning", { prompt: synthesisPrompt })
     }
 
-    const tasks: AgentTask[] = subtasks.map((task, index) => ({
-      id: `sub_${index}`,
-      task,
-    }))
-
-    const results = await this.runParallel(tasks)
-
-    const aggregate = await orchestrator.generate("reasoning", {
-      prompt: `Combine into one coherent response. Goal: "${goal}" Results: ${results
-        .map((result, index) => `[${index + 1}] ${result.result}`)
-        .join("\n\n")}`,
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Supervisor timed out after ${timeoutMs}ms`))
+      }, timeoutMs)
     })
 
-    return aggregate
+    try {
+      return await Promise.race([supervisorRun(), timeoutPromise])
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle)
+      }
+    }
+  }
+
+  private limitDagSize(dag: TaskDAG, maxSubtasks: number): TaskDAG {
+    const boundedMax = Number.isFinite(maxSubtasks)
+      ? Math.max(1, Math.min(8, Math.floor(maxSubtasks)))
+      : 8
+
+    if (dag.nodes.length <= boundedMax) {
+      return dag
+    }
+
+    const keptNodes = dag.nodes.slice(0, boundedMax)
+    const keptIds = new Set(keptNodes.map((node) => node.id))
+    const normalizedNodes = keptNodes.map((node) => ({
+      ...node,
+      dependsOn: node.dependsOn.filter((depId) => keptIds.has(depId)),
+    }))
+
+    logger.warn("task plan exceeded max subtasks and was trimmed", {
+      goal: dag.rootGoal.slice(0, 80),
+      planned: dag.nodes.length,
+      boundedMax,
+    })
+
+    return {
+      ...dag,
+      nodes: normalizedNodes,
+    }
   }
 
   private async handleACPMessage(message: ACPMessage): Promise<ACPMessage> {
@@ -188,7 +245,7 @@ export class AgentRunner {
     } else if (message.action === "runner.supervise") {
       result = await this.runWithSupervisor(
         String(payload.goal ?? ""),
-        Number(payload.maxSubtasks ?? 5),
+        Number(payload.maxSubtasks ?? 8),
       )
     } else {
       result = { error: `unknown action: ${message.action}` }
