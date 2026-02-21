@@ -487,6 +487,20 @@ Phase 4 COMPLETE.
 
 ---
 
+## TS Phase 2 — Gateway + Agents + Intelligence [COMPLETE]
+- [x] Gateway WebSocket server (src/gateway/server.ts)
+- [x] Gateway client SDK (src/gateway/client.ts)
+- [x] Agent tools — search, memory, file, terminal, calendar
+- [x] Parallel agent runner with supervisor
+- [x] PatternIntelligence — proactive pattern detection
+- [x] Voice bridge → Python voice pipeline
+- [x] Vision bridge → Python vision pipeline
+- [x] main.ts updated with --mode gateway|text|all
+
+## TS Phase 3 — Desktop + Mobile [PENDING]
+
+## TS Phase 4 — Production + Deploy [PENDING]
+
 ## Session 5 - Multi-Provider Auth Upgrade
 **Date:** February 2026
 **Tools used:** Codex
