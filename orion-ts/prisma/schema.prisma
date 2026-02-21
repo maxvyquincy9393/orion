@@ -151,6 +151,24 @@ model MemoryNode {
   @@index([userId, utilityScore]) // Index for utility-based ranking
 }
 
+/**
+ * FTS5 Virtual Table for full-text search (OC-10)
+ * 
+ * Enables fast keyword search using SQLite FTS5 extension.
+ * This is used by HybridRetriever for lexical search alongside
+ * vector search for semantic similarity.
+ * 
+ * Note: FTS tables are virtual and don't use standard Prisma migrations.
+ * The table must be created manually via raw SQL:
+ * CREATE VIRTUAL TABLE MemoryNodeFTS USING fts5(content, content_rowid=rowid);
+ */
+model MemoryNodeFTS {
+  rowid   Int    @id
+  content String
+
+  @@ignore // Virtual table, managed via raw SQL
+}
+
 model CausalNode {
   id        String   @id @default(cuid())
   userId    String
