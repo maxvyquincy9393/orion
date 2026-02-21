@@ -7,6 +7,9 @@ import { orionTools } from "./tools.js"
 import { createLogger } from "../logger.js"
 import { acpRouter } from "../acp/router.js"
 import { signMessage, type ACPMessage, type AgentCredential } from "../acp/protocol.js"
+import { wrapWithGuard } from "../security/tool-guard.js"
+import { dualAgentReviewer, wrapWithDualAgentReview } from "../security/dual-agent-reviewer.js"
+import { applyTaskScope, getScopeForTask, inferTaskType } from "../permissions/task-scope.js"
 
 const logger = createLogger("runner")
 
@@ -14,6 +17,7 @@ export interface AgentTask {
   id: string
   task: string
   context?: string
+  userId?: string
 }
 
 export interface AgentResult {
@@ -43,6 +47,37 @@ export class AgentRunner {
 
     try {
       const engine = orchestrator.route("reasoning")
+      const inferredTaskType = inferTaskType(task.task)
+      const taskScope = getScopeForTask(inferredTaskType)
+      const scopeResult = applyTaskScope(orionTools, taskScope, {
+        actorId: task.userId ?? "runner",
+      })
+      const scopedTools = scopeResult.tools
+      const guardedTools = wrapWithGuard(scopedTools, task.userId ?? "runner")
+      const reviewedTools = wrapWithDualAgentReview(guardedTools, {
+        userRequest: task.task,
+        actorId: task.userId ?? "runner",
+        reviewer: dualAgentReviewer,
+      })
+
+      if (scopeResult.approvalRequired) {
+        return {
+          id: task.id,
+          result: "",
+          error:
+            "Task requires explicit approval for system-level tools. Set ORION_SYSTEM_TOOL_APPROVED=true to allow.",
+          durationMs: Date.now() - start,
+        }
+      }
+
+      if (scopeResult.blockedTools.length > 0) {
+        logger.info("Task scope blocked tools", {
+          taskId: task.id,
+          taskType: inferredTaskType,
+          blockedTools: scopeResult.blockedTools,
+        })
+      }
+
       const prompt = task.context
         ? `Context: ${task.context}\n\nTask: ${task.task}`
         : task.task
@@ -51,7 +86,7 @@ export class AgentRunner {
       try {
         const result = await generateText({
           model: engine as any,
-          tools: orionTools,
+          ...(Object.keys(reviewedTools).length > 0 ? { tools: reviewedTools as any } : {}),
           prompt,
         })
         output = result.text
@@ -132,6 +167,7 @@ export class AgentRunner {
         id: String(payload.id ?? `acp_${Date.now()}`),
         task: String(payload.task ?? ""),
         context: typeof payload.context === "string" ? payload.context : undefined,
+        userId: typeof payload.userId === "string" ? payload.userId : undefined,
       }
       result = await this.runSingle(task)
     } else if (message.action === "runner.parallel") {
