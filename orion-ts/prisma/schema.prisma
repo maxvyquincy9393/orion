@@ -84,3 +84,40 @@ model ApprovedUser {
 
   @@unique([userId, channel])
 }
+
+model UserProfile {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  attributes Json
+  topics     Json
+  updatedAt  DateTime @updatedAt
+}
+
+model CausalNode {
+  id        String   @id @default(cuid())
+  userId    String
+  event     String
+  category  String
+  createdAt DateTime @default(now())
+
+  causesEdges CausalEdge[] @relation("from")
+  effectEdges CausalEdge[] @relation("to")
+
+  @@index([userId, category])
+}
+
+model CausalEdge {
+  id        String   @id @default(cuid())
+  userId    String
+  fromId    String
+  toId      String
+  strength  Float    @default(0.5)
+  evidence  Int      @default(1)
+  createdAt DateTime @default(now())
+
+  from CausalNode @relation("from", fields: [fromId], references: [id])
+  to   CausalNode @relation("to", fields: [toId], references: [id])
+
+  @@unique([fromId, toId])
+  @@index([userId])
+}
