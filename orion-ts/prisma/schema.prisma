@@ -85,6 +85,28 @@ model ApprovedUser {
   @@unique([userId, channel])
 }
 
+model DeviceToken {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  channel    String
+  deviceName String   @default("unknown")
+  createdAt  DateTime @default(now())
+  lastUsed   DateTime @updatedAt
+  revokedAt  DateTime?
+
+  @@index([userId])
+}
+
+model PairingSession {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  userId    String
+  channel   String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+}
+
 model UserProfile {
   id         String   @id @default(cuid())
   userId     String   @unique

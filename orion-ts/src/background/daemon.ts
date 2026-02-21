@@ -13,20 +13,15 @@ import { voiCalculator } from "../core/voi.js"
 import { acpRouter } from "../acp/router.js"
 import { signMessage, type ACPMessage, type AgentCredential } from "../acp/protocol.js"
 import { eventBus } from "../core/event-bus.js"
+import { heartbeat } from "./heartbeat.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
 
-const INTERVAL_URGENT_MS = 10 * 1000
-const INTERVAL_NORMAL_MS = 60 * 1000
-const INTERVAL_LOW_MS = 5 * 60 * 1000
-const INACTIVITY_THRESHOLD_MS = 60 * 60 * 1000
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 export class OrionDaemon {
   private running = false
-  private interval: NodeJS.Timeout | null = null
-  private currentIntervalMs = INTERVAL_NORMAL_MS
   private lastActivityTime = Date.now()
   private cycleInProgress = false
   private eventSubscriptionsInitialized = false
@@ -48,10 +43,11 @@ export class OrionDaemon {
 
     this.running = true
     this.lastActivityTime = Date.now()
+    heartbeat.recordActivity(this.lastActivityTime)
     this.initializeEventSubscriptions()
-    logger.info("Daemon started (event-driven mode)")
+    logger.info("Daemon started (heartbeat mode)")
     await this.runCycle()
-    this.startHeartbeat()
+    heartbeat.start()
   }
 
   private initializeEventSubscriptions(): void {
@@ -68,6 +64,7 @@ export class OrionDaemon {
 
       if (data.timestamp > this.lastActivityTime) {
         this.lastActivityTime = data.timestamp
+        heartbeat.recordActivity(data.timestamp)
       }
     })
 
@@ -90,39 +87,8 @@ export class OrionDaemon {
     })
   }
 
-  private startHeartbeat(): void {
-    if (this.interval) {
-      clearTimeout(this.interval)
-    }
-
-    const tick = () => {
-      if (!this.running) {
-        return
-      }
-
-      eventBus.dispatch("system.heartbeat", { timestamp: Date.now() })
-
-      const timeSinceActivity = Date.now() - this.lastActivityTime
-      const activityInterval = timeSinceActivity > INACTIVITY_THRESHOLD_MS
-        ? INTERVAL_LOW_MS
-        : INTERVAL_NORMAL_MS
-
-      const nextInterval = this.currentIntervalMs === INTERVAL_URGENT_MS
-        ? INTERVAL_URGENT_MS
-        : activityInterval
-
-      this.currentIntervalMs = nextInterval
-      this.interval = setTimeout(tick, nextInterval)
-    }
-
-    this.interval = setTimeout(tick, INTERVAL_NORMAL_MS)
-  }
-
   stop(): void {
-    if (this.interval) {
-      clearTimeout(this.interval)
-    }
-    this.interval = null
+    heartbeat.stop()
     this.cycleInProgress = false
     this.running = false
     logger.info("Daemon stopped")
@@ -137,21 +103,8 @@ export class OrionDaemon {
       running: this.running,
       uptime: process.uptime(),
       triggersLoaded: triggerEngine.getTriggers().length,
-      intervalMs: this.currentIntervalMs,
+      intervalMs: heartbeat.isRunning() ? heartbeat.getCurrentIntervalMs() : 0,
     }
-  }
-
-  private calculateInterval(hasUrgentTrigger: boolean): number {
-    if (hasUrgentTrigger) {
-      return INTERVAL_URGENT_MS
-    }
-
-    const timeSinceActivity = Date.now() - this.lastActivityTime
-    if (timeSinceActivity > INACTIVITY_THRESHOLD_MS) {
-      return INTERVAL_LOW_MS
-    }
-
-    return INTERVAL_NORMAL_MS
   }
 
   private async checkForActivity(userId: string): Promise<void> {
@@ -161,6 +114,7 @@ export class OrionDaemon {
         const lastMsgTime = history[0].createdAt.getTime()
         if (lastMsgTime > this.lastActivityTime) {
           this.lastActivityTime = lastMsgTime
+          heartbeat.recordActivity(lastMsgTime)
         }
       }
     } catch (error) {
@@ -178,16 +132,9 @@ export class OrionDaemon {
       await this.checkForActivity(userId)
       await this.maybeRunTemporalMaintenance(userId)
 
-      let hasUrgentTrigger = false
-
       for (const trigger of triggers) {
         let actedOn = false
         try {
-          const isUrgent = trigger.priority === "urgent" || (trigger as any).confidence > 0.9
-          if (isUrgent) {
-            hasUrgentTrigger = true
-          }
-
           const channel = "webchat"
           const context = await contextPredictor.predict(trigger.userId, channel)
           const voi = voiCalculator.calculate({
@@ -215,6 +162,7 @@ export class OrionDaemon {
             actedOn = await channelManager.send(trigger.userId, trigger.message)
             if (actedOn) {
               this.lastActivityTime = Date.now()
+              heartbeat.recordActivity(this.lastActivityTime)
               eventBus.dispatch("trigger.fired", {
                 triggerName: trigger.name,
                 userId: trigger.userId,
@@ -227,17 +175,6 @@ export class OrionDaemon {
         } catch (error) {
           logger.error(`Failed to handle trigger ${trigger.name}`, error)
         }
-      }
-
-      const newInterval = this.calculateInterval(hasUrgentTrigger)
-      if (newInterval !== this.currentIntervalMs) {
-        const oldInterval = this.currentIntervalMs
-        this.currentIntervalMs = newInterval
-        logger.info("Daemon interval adjusted", {
-          fromMs: oldInterval,
-          toMs: newInterval,
-          reason: hasUrgentTrigger ? "urgent trigger" : newInterval === INTERVAL_LOW_MS ? "inactivity" : "normal",
-        })
       }
     } catch (error) {
       logger.error("Daemon cycle failed", error)

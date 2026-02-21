@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events"
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -5,27 +6,21 @@ import { createLogger } from "../logger.js"
 
 const log = createLogger("core.bootstrap")
 
-const DEFAULT_PER_FILE_MAX = 65_536
-const DEFAULT_TOTAL_MAX = 100_000
+const DEFAULT_BOOTSTRAP_MAX_CHARS = 65_536
+const DEFAULT_BOOTSTRAP_TOTAL_MAX_CHARS = 150_000
+const TRUNCATION_MARKER = "\n\n[...truncated]"
 
 const ALWAYS_INJECT = [
-  "SOUL.md",
   "AGENTS.md",
+  "SOUL.md",
   "TOOLS.md",
   "IDENTITY.md",
   "USER.md",
   "HEARTBEAT.md",
   "BOOTSTRAP.md",
 ]
-
-const DM_ONLY_INJECT = [
-  "MEMORY.md",
-]
-
-const SUBAGENT_INJECT = [
-  "AGENTS.md",
-  "TOOLS.md",
-]
+const DM_ONLY_INJECT = ["MEMORY.md"]
+const SUBAGENT_INJECT = ["AGENTS.md", "TOOLS.md"]
 
 export type SessionMode = "dm" | "group" | "subagent"
 
@@ -40,131 +35,215 @@ export interface BootstrapFile {
 export interface BootstrapContext {
   files: BootstrapFile[]
   totalChars: number
+  truncatedCount: number
   missingCount: number
   formatted: string
 }
 
-interface CachedBootstrapFile {
+interface BootstrapCacheEntry {
   content: string
-  mtime: number
+  mtimeMs: number
+  resolvedPath: string
 }
 
-export class BootstrapLoader {
-  private readonly dir: string
+export class BootstrapLoader extends EventEmitter {
+  private readonly workspaceDir: string
   private readonly maxPerFile: number
   private readonly maxTotal: number
-  private cache = new Map<string, CachedBootstrapFile>()
+  private readonly fileCache = new Map<string, BootstrapCacheEntry>()
 
-  constructor(dir: string, opts: { maxPerFile?: number; maxTotal?: number } = {}) {
-    this.dir = dir
-    this.maxPerFile = opts.maxPerFile ?? DEFAULT_PER_FILE_MAX
-    this.maxTotal = opts.maxTotal ?? DEFAULT_TOTAL_MAX
+  constructor(
+    workspaceDir: string,
+    opts: { maxPerFile?: number; maxTotal?: number } = {},
+  ) {
+    super()
+    this.workspaceDir = path.resolve(workspaceDir)
+    this.maxPerFile = opts.maxPerFile ?? DEFAULT_BOOTSTRAP_MAX_CHARS
+    this.maxTotal = opts.maxTotal ?? DEFAULT_BOOTSTRAP_TOTAL_MAX_CHARS
   }
 
   async load(mode: SessionMode = "dm"): Promise<BootstrapContext> {
-    const filenames = this.filesForMode(mode)
+    const filenames = this.getFileListForMode(mode)
     const files: BootstrapFile[] = []
     let totalChars = 0
 
     for (const filename of filenames) {
-      if (totalChars >= this.maxTotal) {
-        log.warn("bootstrap total limit hit", { remaining: filenames.slice(files.length) })
+      const remaining = this.maxTotal - totalChars
+      if (remaining <= 0) {
+        log.warn("bootstrap total limit hit, skipping remaining files", {
+          loaded: files.length,
+          skipped: filenames.slice(files.length).join(", "),
+          maxTotal: this.maxTotal,
+        })
         break
       }
 
-      const remainingBudget = this.maxTotal - totalChars
-      const file = await this.loadOne(filename, remainingBudget)
-      files.push(file)
-      totalChars += file.chars
+      let loadedFile = await this.loadOne(filename)
+      if (loadedFile.chars > remaining) {
+        const capped = this.capContent(loadedFile.content, remaining)
+        loadedFile = {
+          ...loadedFile,
+          content: capped,
+          chars: capped.length,
+          truncated: loadedFile.truncated || capped.length < loadedFile.content.length,
+        }
+
+        files.push(loadedFile)
+        totalChars += loadedFile.chars
+
+        log.warn("bootstrap total limit reached during file injection", {
+          filename,
+          maxTotal: this.maxTotal,
+        })
+        break
+      }
+
+      files.push(loadedFile)
+      totalChars += loadedFile.chars
     }
 
-    const label = mode === "subagent" ? "Subagent Context" : "Project Context"
-    const blocks: string[] = [`# ${label}\n`]
-    for (const file of files) {
-      if (!file.missing) {
-        blocks.push(`## ${file.filename}\n\n${file.content}`)
-      }
-    }
+    this.emit("agent:bootstrap", { mode, files: files.length, totalChars })
 
     return {
       files,
       totalChars,
+      truncatedCount: files.filter((file) => file.truncated).length,
       missingCount: files.filter((file) => file.missing).length,
-      formatted: blocks.join("\n\n---\n\n"),
+      formatted: this.format(files, mode),
     }
   }
 
-  private async loadOne(filename: string, budget: number): Promise<BootstrapFile> {
-    const resolved = await this.resolve(filename)
-    if (!resolved) {
-      return { filename, content: "", chars: 0, truncated: false, missing: true }
+  private async loadOne(filename: string): Promise<BootstrapFile> {
+    const cacheKey = filename.toLowerCase()
+    const resolvedPath = await this.resolvePath(filename)
+
+    if (!resolvedPath) {
+      return this.buildMissingFile(filename, "not found")
     }
 
     try {
-      const stat = await fs.stat(resolved)
-      const cached = this.cache.get(filename.toLowerCase())
-      const hardLimit = Math.max(0, Math.min(this.maxPerFile, budget))
+      const stat = await fs.stat(resolvedPath)
+      const cached = this.fileCache.get(cacheKey)
 
-      if (cached && cached.mtime === stat.mtimeMs) {
-        const { content, truncated } = this.limitContent(cached.content, hardLimit)
-        return { filename, content, chars: content.length, truncated, missing: false }
+      if (
+        cached
+        && cached.mtimeMs === stat.mtimeMs
+        && cached.resolvedPath === resolvedPath
+      ) {
+        return this.buildLoadedFile(filename, cached.content)
       }
 
-      const raw = await fs.readFile(resolved, "utf-8")
-      this.cache.set(filename.toLowerCase(), { content: raw, mtime: stat.mtimeMs })
-      const { content, truncated } = this.limitContent(raw, hardLimit)
-      return { filename, content, chars: content.length, truncated, missing: false }
-    } catch (err) {
-      log.warn("bootstrap file read error", { filename, err })
-      return { filename, content: "", chars: 0, truncated: false, missing: true }
+      const raw = await fs.readFile(resolvedPath, "utf-8")
+      this.fileCache.set(cacheKey, {
+        content: raw,
+        mtimeMs: stat.mtimeMs,
+        resolvedPath,
+      })
+
+      this.emit("file:loaded", { filename, chars: raw.length })
+      return this.buildLoadedFile(filename, raw)
+    } catch (error) {
+      log.warn("failed to read bootstrap file", { filename, error })
+      return this.buildMissingFile(filename, "read error")
     }
   }
 
-  private limitContent(raw: string, hardLimit: number): { content: string; truncated: boolean } {
-    if (hardLimit <= 0) {
-      return { content: "", truncated: true }
-    }
-
-    if (raw.length <= hardLimit) {
-      return { content: raw, truncated: false }
-    }
-
+  private buildLoadedFile(filename: string, raw: string): BootstrapFile {
+    const content = this.capContent(raw, this.maxPerFile)
     return {
-      content: `${raw.slice(0, hardLimit)}\n\n[...truncated]`,
-      truncated: true,
+      filename,
+      content,
+      chars: content.length,
+      truncated: content.length < raw.length,
+      missing: false,
     }
   }
 
-  private async resolve(filename: string): Promise<string | null> {
-    const direct = path.join(this.dir, filename)
+  private buildMissingFile(filename: string, reason: "not found" | "read error"): BootstrapFile {
+    const content = `[${filename}: ${reason}]`
+    return {
+      filename,
+      content,
+      chars: content.length,
+      truncated: false,
+      missing: true,
+    }
+  }
+
+  private capContent(content: string, limit: number): string {
+    if (limit <= 0) {
+      return ""
+    }
+    if (content.length <= limit) {
+      return content
+    }
+    if (limit <= TRUNCATION_MARKER.length) {
+      return content.slice(0, limit)
+    }
+    return `${content.slice(0, limit - TRUNCATION_MARKER.length)}${TRUNCATION_MARKER}`
+  }
+
+  private async resolvePath(filename: string): Promise<string | null> {
+    const direct = path.join(this.workspaceDir, filename)
     try {
       await fs.access(direct)
       return direct
     } catch {
       try {
-        const entries = await fs.readdir(this.dir)
+        const entries = await fs.readdir(this.workspaceDir)
         const match = entries.find((entry) => entry.toLowerCase() === filename.toLowerCase())
-        return match ? path.join(this.dir, match) : null
+        return match ? path.join(this.workspaceDir, match) : null
       } catch {
         return null
       }
     }
   }
 
-  private filesForMode(mode: SessionMode): string[] {
+  private format(files: BootstrapFile[], mode: SessionMode): string {
+    if (files.length === 0) {
+      return ""
+    }
+
+    const label = mode === "subagent" ? "Subagent Context" : "Project Context"
+    const blocks: string[] = [`# ${label}`]
+
+    for (const file of files) {
+      if (file.missing) {
+        blocks.push(`\n## ${file.filename}\n${file.content}`)
+        continue
+      }
+
+      blocks.push(`\n## ${file.filename}\n\n${file.content}`)
+    }
+
+    return blocks.join("\n")
+  }
+
+  private getFileListForMode(mode: SessionMode): string[] {
     switch (mode) {
       case "subagent":
         return SUBAGENT_INJECT
-      case "dm":
-        return [...ALWAYS_INJECT, ...DM_ONLY_INJECT]
       case "group":
         return ALWAYS_INJECT
+      case "dm":
+      default:
+        return [...ALWAYS_INJECT, ...DM_ONLY_INJECT]
     }
   }
 
+  invalidate(filename: string): void {
+    this.fileCache.delete(filename.toLowerCase())
+  }
+
+  invalidateAll(): void {
+    this.fileCache.clear()
+  }
+
   async updateUserMd(updates: Record<string, string>): Promise<void> {
-    const filepath = path.join(this.dir, "USER.md")
-    let content = ""
+    const existingPath = await this.resolvePath("USER.md")
+    const filepath = existingPath ?? path.join(this.workspaceDir, "USER.md")
+
+    let content: string
     try {
       content = await fs.readFile(filepath, "utf-8")
     } catch {
@@ -173,53 +252,45 @@ export class BootstrapLoader {
 
     for (const [key, value] of Object.entries(updates)) {
       const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      const pattern = new RegExp(`^(${escapedKey}:.*)$`, "im")
+      const pattern = new RegExp(`^(${escapedKey}:\\s*).*$`, "im")
       if (pattern.test(content)) {
-        content = content.replace(pattern, `${key}: ${value}`)
+        content = content.replace(pattern, `$1${value}`)
       } else {
         content += `\n${key}: ${value}`
       }
     }
 
-    const now = new Date().toISOString()
-    if (/^Last updated:.*$/im.test(content)) {
-      content = content.replace(/^Last updated:.*$/im, `Last updated: ${now}`)
-    } else {
-      content = `Last updated: ${now}\n${content}`
-    }
-
     await fs.writeFile(filepath, content, "utf-8")
-    this.cache.delete("user.md")
+    this.invalidate("USER.md")
     log.debug("USER.md updated", { keys: Object.keys(updates) })
   }
 
   async appendMemory(fact: string): Promise<void> {
-    const filepath = path.join(this.dir, "MEMORY.md")
-    const date = new Date().toISOString().slice(0, 10)
-    let content = ""
+    const existingPath = await this.resolvePath("MEMORY.md")
+    const filepath = existingPath ?? path.join(this.workspaceDir, "MEMORY.md")
 
     try {
-      content = await fs.readFile(filepath, "utf-8")
+      await fs.access(filepath)
     } catch {
-      content = "# Long-Term Memory\n\n---\n\n"
+      await fs.writeFile(filepath, "# Long-Term Memory\n\n---\n\n", "utf-8")
     }
 
-    await fs.writeFile(filepath, `${content}- [${date}] ${fact}\n`, "utf-8")
-    this.cache.delete("memory.md")
-  }
-
-  invalidate(filename?: string): void {
-    if (filename) {
-      this.cache.delete(filename.toLowerCase())
-      return
-    }
-    this.cache.clear()
+    const date = new Date().toISOString().slice(0, 10)
+    await fs.appendFile(filepath, `- [${date}] ${fact}\n`, "utf-8")
+    this.invalidate("MEMORY.md")
   }
 }
 
-const workspaceDir = process.env.ORION_WORKSPACE ?? path.resolve(process.cwd(), "workspace")
-export const bootstrapLoader = new BootstrapLoader(workspaceDir)
+let bootstrapLoader: BootstrapLoader | null = null
 
-void fs.mkdir(workspaceDir, { recursive: true }).catch(() => {})
-void fs.mkdir(path.join(workspaceDir, "skills"), { recursive: true }).catch(() => {})
-void fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true }).catch(() => {})
+export function getBootstrapLoader(): BootstrapLoader {
+  if (bootstrapLoader) {
+    return bootstrapLoader
+  }
+
+  const workspaceDir = process.env.ORION_WORKSPACE ?? path.resolve(process.cwd(), "workspace")
+  bootstrapLoader = new BootstrapLoader(workspaceDir)
+  return bootstrapLoader
+}
+
+export const bootstrapLoader = getBootstrapLoader()
