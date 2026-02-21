@@ -13,6 +13,7 @@ import { applyTaskScope, getScopeForTask, inferTaskType } from "../permissions/t
 import { responseCritic } from "../core/critic.js"
 import { taskPlanner, type TaskDAG } from "./task-planner.js"
 import { executionMonitor, type TaskResult } from "./execution-monitor.js"
+import { buildSystemPrompt } from "../core/system-prompt-builder.js"
 
 const logger = createLogger("runner")
 
@@ -85,16 +86,25 @@ export class AgentRunner {
         ? `Context: ${task.context}\n\nTask: ${task.task}`
         : task.task
 
+      const systemPrompt = await buildSystemPrompt({
+        sessionMode: "subagent",
+        includeSkills: true,
+        includeSafety: true,
+        includeTooling: true,
+        availableTools: Object.keys(reviewedTools),
+      })
+
       let output = ""
       try {
         const result = await generateText({
           model: engine as any,
+          system: systemPrompt,
           ...(Object.keys(reviewedTools).length > 0 ? { tools: reviewedTools as any } : {}),
           prompt,
         })
         output = result.text
       } catch {
-        output = await orchestrator.generate("reasoning", { prompt })
+        output = await orchestrator.generate("reasoning", { prompt, systemPrompt })
       }
 
       const critiqued = await responseCritic.critiqueAndRefine(task.task, output, 1)

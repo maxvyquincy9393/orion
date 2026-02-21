@@ -18,6 +18,12 @@ import { linkSummarizer } from "../link-understanding/summarizer.js"
 import { hookPipeline } from "../hooks/pipeline.js"
 import { outputScanner } from "../security/output-scanner.js"
 import { personaEngine } from "../core/persona.js"
+import { buildSystemPrompt } from "../core/system-prompt-builder.js"
+import {
+  authenticateWebSocket,
+  getAuthFailure,
+  type AuthContext,
+} from "./auth-middleware.js"
 import config from "../config.js"
 
 const logger = createLogger("gateway")
@@ -35,10 +41,29 @@ export class GatewayServer {
     this.app.register(websocketPlugin)
 
     this.app.register(async (app) => {
-      app.get("/ws", { websocket: true }, (socket) => {
+      app.get("/ws", { websocket: true }, async (socket: any, req: any) => {
+        const token = this.extractToken(req)
+        const auth = await authenticateWebSocket(token)
+        if (!auth) {
+          const failure = getAuthFailure(token)
+          socket.send(
+            JSON.stringify({
+              type: "error",
+              message: failure.message,
+              statusCode: failure.statusCode,
+              retryAfterSeconds: failure.retryAfterSeconds,
+            }),
+          )
+          socket.close(1008)
+          return
+        }
+
         const clientId = crypto.randomUUID()
         this.clients.set(clientId, socket)
-        logger.info(`client connected: ${clientId}`)
+        logger.info(`client connected: ${clientId}`, {
+          userId: auth.userId,
+          channel: auth.channel,
+        })
 
         socket.send(
           JSON.stringify({
@@ -53,7 +78,7 @@ export class GatewayServer {
         socket.on("message", async (raw: Buffer) => {
           try {
             const msg = JSON.parse(raw.toString())
-            const res = await this.handle(msg)
+            const res = await this.handle(msg, auth)
             socket.send(JSON.stringify(res))
           } catch (err) {
             socket.send(JSON.stringify({ type: "error", message: String(err) }))
@@ -84,10 +109,14 @@ export class GatewayServer {
     })
   }
 
-  private async handle(msg: any): Promise<any> {
-    const userId = msg.userId ?? config.DEFAULT_USER_ID
+  private async handle(msg: any, auth?: AuthContext): Promise<any> {
+    const userId = auth?.userId ?? msg.userId ?? config.DEFAULT_USER_ID
 
     await multiUser.getOrCreate(userId, "gateway")
+
+    if (auth && msg.userId && msg.userId !== auth.userId) {
+      return { type: "error", message: "Token user does not match request user" }
+    }
 
     if (!multiUser.isOwner(userId) && msg.type !== "message") {
       return { type: "error", message: "Unauthorized for this action" }
@@ -156,7 +185,7 @@ export class GatewayServer {
     const modelInput = linkContext.enrichedContext
 
     const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
-    let systemPrompt: string | undefined
+    let personaSystemPrompt: string | undefined
     if (config.PERSONA_ENABLED) {
       const [profile, profileSummary] = await Promise.all([
         profiler.getProfile(userId),
@@ -166,7 +195,7 @@ export class GatewayServer {
       const mood = personaEngine.detectMood(safePrompt, profile?.currentTopics ?? [])
       const expertise = personaEngine.detectExpertise(profile, safePrompt)
       const topicCategory = personaEngine.detectTopicCategory(safePrompt)
-      systemPrompt = personaEngine.buildSystemPrompt(
+      personaSystemPrompt = personaEngine.buildSystemPrompt(
         {
           userMood: mood,
           userExpertise: expertise,
@@ -176,6 +205,13 @@ export class GatewayServer {
         profileSummary,
       )
     }
+
+    const systemPrompt = await buildSystemPrompt({
+      sessionMode: "dm",
+      includeSkills: true,
+      includeSafety: true,
+      extraContext: personaSystemPrompt,
+    })
 
     const generatedResponse = await orchestrator.generate("reasoning", {
       prompt: systemContext ? `${systemContext}\n\nUser: ${modelInput}` : modelInput,
@@ -282,6 +318,20 @@ export class GatewayServer {
         continue
       }
     }
+  }
+
+  private extractToken(req: any): string | null {
+    const queryToken = req?.query?.token
+    if (typeof queryToken === "string" && queryToken.trim().length > 0) {
+      return queryToken.trim()
+    }
+
+    const authHeader = req?.headers?.authorization
+    if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+      return authHeader.slice(7).trim()
+    }
+
+    return null
   }
 }
 

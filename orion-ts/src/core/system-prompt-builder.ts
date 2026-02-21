@@ -31,6 +31,7 @@ export interface BuildPromptOptions {
   includeSkills?: boolean
   includeSafety?: boolean
   includeTooling?: boolean
+  availableTools?: string[]
   extraContext?: string
 }
 
@@ -60,6 +61,7 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
     includeSkills = true,
     includeSafety = true,
     includeTooling = true,
+    availableTools,
     extraContext,
   } = options
 
@@ -75,17 +77,17 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
     sections.push(SAFETY_BLOCK)
   }
 
-  if (includeSkills && resolvedSessionMode !== "subagent") {
-    const skillIndex = await skillLoader.getIndexForPrompt()
-    if (skillIndex.trim().length > 0) {
-      sections.push(skillIndex)
+  if (includeSkills) {
+    const alwaysActiveContent = await skillLoader.getAlwaysActiveContent({ availableTools })
+    if (alwaysActiveContent.trim().length > 0) {
+      sections.push(alwaysActiveContent)
     }
   }
 
   if (includeSkills) {
-    const alwaysActiveContent = await skillLoader.getAlwaysActiveContent()
-    if (alwaysActiveContent.trim().length > 0) {
-      sections.push(alwaysActiveContent)
+    const skillIndex = await skillLoader.getIndexForPrompt({ availableTools })
+    if (skillIndex.trim().length > 0) {
+      sections.push(skillIndex)
     }
   }
 

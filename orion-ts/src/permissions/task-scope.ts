@@ -20,19 +20,19 @@ export interface ScopedToolsResult {
 const TASK_SCOPES: Record<TaskScopeType, TaskScope> = {
   conversation: {
     taskType: "conversation",
-    allowedTools: ["searchTool", "memoryQueryTool", "fileReadTool"],
+    allowedTools: ["searchTool", "memoryQueryTool", "fileReadTool", "read_skill"],
     requiresExplicitApproval: false,
     reason: "General chat only needs read-only, low-risk tools.",
   },
   research: {
     taskType: "research",
-    allowedTools: ["searchTool", "memoryQueryTool", "fileReadTool", "fileListTool"],
+    allowedTools: ["searchTool", "memoryQueryTool", "fileReadTool", "fileListTool", "read_skill"],
     requiresExplicitApproval: false,
     reason: "Research can browse and inspect files without mutating state.",
   },
   coding: {
     taskType: "coding",
-    allowedTools: ["searchTool", "fileReadTool", "fileWriteTool", "fileListTool", "terminalTool"],
+    allowedTools: ["searchTool", "fileReadTool", "fileWriteTool", "fileListTool", "read_skill", "terminalTool"],
     requiresExplicitApproval: false,
     reason: "Coding requires read/write and terminal execution.",
   },
@@ -44,6 +44,7 @@ const TASK_SCOPES: Record<TaskScopeType, TaskScope> = {
       "fileReadTool",
       "fileWriteTool",
       "fileListTool",
+      "read_skill",
       "terminalTool",
       "calendarTool",
     ],

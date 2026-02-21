@@ -2,11 +2,13 @@ import { tool } from "ai"
 import { z } from "zod"
 import { execa } from "execa"
 import fs from "fs/promises"
+import path from "node:path"
 
 import { memory } from "../memory/store.js"
 import { filterToolResult } from "../security/prompt-filter.js"
 import { BLOCKED_COMMANDS, guardTerminal, guardFilePath } from "../security/tool-guard.js"
 import { createLogger } from "../logger.js"
+import { skillLoader } from "../skills/loader.js"
 
 const logger = createLogger("tools")
 
@@ -147,6 +149,27 @@ export const fileListTool = tool({
   },
 })
 
+export const readSkillTool = tool({
+  description:
+    "Read the full instructions for a skill. Use this for skills listed in <available_skills>.",
+  inputSchema: z.object({
+    location: z
+      .string()
+      .describe("Full path to the SKILL.md file from the <available_skills> index"),
+  }),
+  execute: async ({ location }) => {
+    const content = await skillLoader.loadSkillContent(location)
+    if (!content) {
+      return { error: `Skill not found or access denied: ${location}` }
+    }
+
+    return {
+      content,
+      skillName: path.basename(path.dirname(location)),
+    }
+  },
+})
+
 export const terminalTool = tool({
   description: "Run a terminal command",
   inputSchema: z.object({
@@ -212,6 +235,7 @@ export const orionTools = {
   fileReadTool,
   fileWriteTool,
   fileListTool,
+  read_skill: readSkillTool,
   terminalTool,
   calendarTool,
 }
