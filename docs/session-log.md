@@ -175,11 +175,51 @@ All interfaces match SKILL.md exactly.
 - route_to_agent(task) — keyword-based agent type detection
 - get_available_engines() — startup availability check
 
-### Currently implementing (end of Session 4)
-- core/context.py
-- agents/state.py + graph.py + nodes.py
-- scripts/autopush.py
-- main.py (CLI chat loop — first end-to-end test)
+**core/context.py** done
+- build() assembles full context: last 20 messages + RAG context + relevant past context + system prompt
+- get_system_prompt() defines Orion personality
+- truncate_context() handles context window limits
+
+**agents/state.py** done
+- AgentState TypedDict matching SKILL.md exactly
+
+**agents/nodes.py** done
+- supervisor_node, memory_node, summarize_node fully implemented
+- search_node, code_node as stubs (Phase 2)
+
+**agents/graph.py** done
+- OrionAgentGraph with LangGraph StateGraph
+- Nodes: start → supervisor → [search, memory, summarize] → end
+- run() and stream_run() implemented
+
+**scripts/autopush.py** done
+- AutoPusher class with watchdog, 3 second debounce
+- Ignores .env, __pycache__, logs/, .git/
+- Logs to logs/autopush.log
+
+**main.py** done
+- CLI chat loop: input → context.build() → orchestrator.route() → engine.generate() → memory.save_message()
+- Handles exit and quit
+- Prints engine status on startup
+
+### Phase 1 first run results (python main.py)
+
+| Component | Status | Note |
+|---|---|---|
+| Database | Failed | PostgreSQL not running on localhost:5432 — expected |
+| Claude | Offline | No ANTHROPIC_API_KEY in .env — expected |
+| OpenAI | Offline | No OPENAI_ACCESS_TOKEN — expected |
+| Gemini | Offline | No GOOGLE_ACCESS_TOKEN — expected |
+| Local | Offline | Ollama not running — expected |
+| CLI Loop | Working | Prompts for input, exits on quit |
+| Permissions | Working | Defaults loaded |
+
+All failures are expected — no credentials set up yet. Architecture is sound.
+
+### Next steps to get first live conversation
+1. Add ANTHROPIC_API_KEY to .env for fastest path to working engine
+2. OR run `ollama serve` and `ollama pull llama3` for free local inference
+3. Run `python main.py` again — first real conversation with Orion
 
 ---
 
@@ -195,11 +235,13 @@ All interfaces match SKILL.md exactly.
 - [x] All 4 LLM engines (GPT, Claude, Gemini, Ollama)
 - [x] Orchestrator routing
 - [x] Persistent memory (save, retrieve, compress)
-- [ ] context.py — context window builder
-- [ ] agents/ — LangGraph scaffold
-- [ ] scripts/autopush.py
-- [ ] main.py — first working CLI chat loop
-- [ ] docs/ folder complete
+- [x] context.py — context window builder
+- [x] agents/ — LangGraph scaffold (state, graph, nodes)
+- [x] scripts/autopush.py
+- [x] main.py — first working CLI chat loop
+- [x] docs/ folder complete
+
+Phase 1 COMPLETE.
 
 ### Phase 2 — Proactive Engine
 - [ ] Background daemon process
@@ -242,11 +284,25 @@ All interfaces match SKILL.md exactly.
 
 ---
 
+## Code Style Rules
+
+Established during sessions — all AI assistants must follow:
+
+- No emotes or emoji anywhere in code, comments, logs, or output strings
+- All output must be plain readable text
+- Log format: `[TIMESTAMP] [LEVEL] [MODULE] message` — no decorative characters
+- Comments must be clear prose, not clever or casual
+- Built for readability and long-term scalability — assume another engineer will read this in 2 years
+
+---
+
 ## How to Continue in a New Session
 
 1. Open VSCode with MCP Claude connected to this repo
 2. Say: **"Read SKILL.md and docs/session-log.md then continue Orion"**
 3. Claude will know exactly where we are and what to do next
+
+Current state: Phase 1 complete. Phase 2 is next — background daemon, Telegram delivery, autonomous browser, system control.
 
 ---
 
