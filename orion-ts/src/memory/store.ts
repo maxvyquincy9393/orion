@@ -8,6 +8,7 @@ import config from "../config.js"
 import { getHistory, saveMessage } from "../database/index.js"
 import { validateMemoryEntries, type MemoryEntry } from "../security/memory-validator.js"
 import { createLogger } from "../logger.js"
+import { sanitizeUserId, parseJsonSafe } from "../utils/string.js"
 import { hiMeS } from "./himes.js"
 import { memrlUpdater, type TaskFeedback } from "./memrl.js"
 import { proMem } from "./promem.js"
@@ -134,22 +135,6 @@ async function ollamaEmbed(text: string): Promise<number[] | null> {
   } catch (error) {
     log.warn("Ollama embedding request failed", error)
     return null
-  }
-}
-
-function sanitizeUserId(userId: string): string {
-  if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
-    log.warn("userId contains unexpected characters, sanitizing", { userId })
-    return userId.replace(/[^a-zA-Z0-9_-]/g, "_")
-  }
-  return userId
-}
-
-function parseMemoryMetadata(raw: string): Record<string, unknown> {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    return {}
   }
 }
 
@@ -297,7 +282,7 @@ export class MemoryStore {
     return filtered.map((row) => ({
       id: row.id,
       content: row.content,
-      metadata: parseMemoryMetadata(row.metadata),
+      metadata: parseJsonSafe(row.metadata),
       score: 1,
     }))
   }

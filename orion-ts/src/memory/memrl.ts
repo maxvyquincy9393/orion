@@ -21,6 +21,7 @@ import * as lancedb from "@lancedb/lancedb"
 import config from "../config.js"
 import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
+import { sanitizeUserId, clamp, parseJsonSafe } from "../utils/string.js"
 import type { SearchResult } from "./store.js"
 
 const log = createLogger("memory.memrl")
@@ -82,26 +83,6 @@ export interface TaskFeedback {
 }
 
 /**
- * Clamp a value between min and max bounds
- */
-function clamp(value: number, min: number, max: number): number {
-  if (Number.isNaN(value)) {
-    return min
-  }
-  return Math.min(max, Math.max(min, value))
-}
-
-/**
- * Sanitize user ID for safe use in queries
- */
-function sanitizeUserId(userId: string): string {
-  if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
-    return userId.replace(/[^a-zA-Z0-9_-]/g, "_")
-  }
-  return userId
-}
-
-/**
  * Safely convert unknown value to number or null
  */
 function asNumber(value: unknown): number | null {
@@ -109,21 +90,6 @@ function asNumber(value: unknown): number | null {
     return value
   }
   return null
-}
-
-/**
- * Parse JSON metadata safely
- */
-function parseMetadata(raw: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, unknown>
-    }
-    return {}
-  } catch {
-    return {}
-  }
 }
 
 /**
@@ -426,7 +392,7 @@ export class MemRLUpdater {
           id: candidate.row.id,
           content: candidate.row.content,
           metadata: {
-            ...parseMetadata(candidate.row.metadata),
+            ...parseJsonSafe(candidate.row.metadata),
             ieu: candidate.ieuTriplet,
             qValue: candidate.qValue,
             blendedScore: candidate.blendedScore,
