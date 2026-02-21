@@ -21,7 +21,7 @@ function toMessages(options: GenerateOptions): Array<{ role: "system" | "user" |
 export class OpenRouterEngine implements Engine {
   readonly name = "openrouter"
   readonly provider = "openrouter"
-  private readonly defaultModel = "anthropic/claude-3.5-sonnet"
+  readonly defaultModel = "anthropic/claude-3.5-sonnet"
 
   isAvailable(): boolean {
     return config.OPENROUTER_API_KEY.trim().length > 0

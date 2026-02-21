@@ -21,7 +21,7 @@ function toMessages(options: GenerateOptions): Array<{ role: "system" | "user" |
 export class GroqEngine implements Engine {
   readonly name = "groq"
   readonly provider = "groq"
-  private readonly defaultModel = "llama-3.3-70b-versatile"
+  readonly defaultModel = "llama-3.3-70b-versatile"
 
   isAvailable(): boolean {
     return config.GROQ_API_KEY.trim().length > 0

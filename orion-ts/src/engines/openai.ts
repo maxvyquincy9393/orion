@@ -21,7 +21,7 @@ function toMessages(options: GenerateOptions): Array<{ role: "system" | "user" |
 export class OpenAIEngine implements Engine {
   readonly name = "openai"
   readonly provider = "openai"
-  private readonly defaultModel = "gpt-4o"
+  readonly defaultModel = "gpt-4o"
 
   isAvailable(): boolean {
     return config.OPENAI_API_KEY.trim().length > 0

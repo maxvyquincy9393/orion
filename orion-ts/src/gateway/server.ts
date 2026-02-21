@@ -226,10 +226,13 @@ export class GatewayServer {
       const promptTokens = Math.ceil(preMessage.content.length / 4)
       const completionTokens = Math.ceil(responseText.length / 4)
       
+      // Get actual provider/model from orchestrator
+      const lastEngine = orchestrator.getLastUsedEngine()
+      
       void usageTracker.recordUsage({
         userId,
-        provider: "groq", // TODO: Get actual provider from orchestrator
-        model: "llama-3.3-70b-versatile", // TODO: Get actual model
+        provider: lastEngine?.provider ?? "unknown",
+        model: lastEngine?.model ?? "unknown",
         promptTokens,
         completionTokens,
         totalTokens: promptTokens + completionTokens,

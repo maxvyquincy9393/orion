@@ -20,7 +20,7 @@ function toSystemPrompt(options: GenerateOptions): string | undefined {
 export class AnthropicEngine implements Engine {
   readonly name = "anthropic"
   readonly provider = "anthropic"
-  private readonly defaultModel = "claude-3-5-sonnet-20241022"
+  readonly defaultModel = "claude-3-5-sonnet-20241022"
 
   isAvailable(): boolean {
     return config.ANTHROPIC_API_KEY.trim().length > 0

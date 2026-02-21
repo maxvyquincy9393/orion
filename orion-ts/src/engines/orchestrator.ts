@@ -40,6 +40,17 @@ const PRIORITY_MAP: Record<TaskType, string[]> = {
 export class Orchestrator {
   private readonly engines = new Map<string, Engine>()
 
+  /** The name and model of the most recently used engine. Updated after every generate() call. */
+  private lastUsed: { provider: string; model: string } | null = null
+
+  /**
+   * Returns the provider and model used for the most recent generate() call.
+   * Returns null if no generation has occurred yet.
+   */
+  getLastUsedEngine(): { provider: string; model: string } | null {
+    return this.lastUsed
+  }
+
   async init(): Promise<void> {
     this.engines.clear()
 
@@ -97,6 +108,12 @@ export class Orchestrator {
     const engine = this.route(task)
     const output = await engine.generate(options)
     const elapsedMs = Date.now() - startedAt
+
+    // Track which engine was used for telemetry
+    this.lastUsed = {
+      provider: engine.provider,
+      model: engine.defaultModel ?? options.model ?? "unknown",
+    }
 
     log.info("task handled", {
       task,

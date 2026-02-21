@@ -9,7 +9,7 @@ const log = createLogger("engines.gemini")
 export class GeminiEngine implements Engine {
   readonly name = "gemini"
   readonly provider = "google"
-  private readonly defaultModel = "gemini-1.5-pro"
+  readonly defaultModel = "gemini-1.5-pro"
 
   isAvailable(): boolean {
     return config.GEMINI_API_KEY.trim().length > 0

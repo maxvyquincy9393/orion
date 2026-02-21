@@ -22,7 +22,7 @@ const log = createLogger("observability.usage")
 /**
  * Supported LLM providers for usage tracking
  */
-type LLMProvider = "openai" | "anthropic" | "groq" | "google" | "ollama" | "openrouter"
+type LLMProvider = "openai" | "anthropic" | "groq" | "google" | "ollama" | "openrouter" | "unknown"
 
 /**
  * Usage record structure
@@ -31,7 +31,8 @@ interface UsageRecord {
   id: string
   userId: string
   sessionId?: string
-  provider: LLMProvider
+  /** LLM provider identifier (e.g., "groq", "anthropic", "openai") */
+  provider: string
   model: string
   
   // Token counts
@@ -288,7 +289,7 @@ export class UsageTracker {
    * @returns Estimated cost in USD
    */
   estimateCost(
-    provider: LLMProvider,
+    provider: string,
     model: string,
     promptTokens: number,
     completionTokens: number,
