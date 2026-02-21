@@ -14,11 +14,15 @@ export enum TriggerType {
   WEBHOOK = "webhook",
 }
 
+export type TriggerPriority = "low" | "normal" | "urgent"
+
 export interface Trigger {
   id: string
   name: string
   type: TriggerType
   enabled: boolean
+  priority?: TriggerPriority
+  confidence?: number
   schedule?: string
   inactivityMinutes?: number
   message: string

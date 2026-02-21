@@ -6,6 +6,7 @@ import * as lancedb from "@lancedb/lancedb"
 
 import config from "../config.js"
 import { getHistory } from "../database/index.js"
+import { validateMemoryEntries, type MemoryEntry } from "../security/memory-validator.js"
 import { createLogger } from "../logger.js"
 
 const log = createLogger("memory.store")
@@ -225,9 +226,16 @@ export class MemoryStore {
       const messages = await getHistory(userId, limit)
       const searchResults = await this.search(userId, query, 5)
 
+      const memoryEntries: MemoryEntry[] = searchResults.map((r) => ({
+        content: r.content,
+        metadata: r.metadata,
+      }))
+
+      const validated = validateMemoryEntries(memoryEntries)
+
       let systemContext = ""
-      if (searchResults.length > 0) {
-        const snippets = searchResults.map((r, i) => {
+      if (validated.clean.length > 0) {
+        const snippets = validated.clean.map((r, i) => {
           const source = String(r.metadata.source ?? "memory")
           return `[${i + 1}] (${source}) ${r.content}`
         })
