@@ -14,7 +14,8 @@ import { sandbox, PermissionAction } from "../permissions/sandbox.js"
 const log = createLogger("background.heartbeat")
 
 const HEARTBEAT_MD = path.resolve(process.cwd(), "workspace", "HEARTBEAT.md")
-const HEARTBEAT_OK_MARKER = "HEARTBEAT_OK"
+const HEARTBEAT_PASS_MARKER = "HEARTBEAT_PASS"
+const LEGACY_HEARTBEAT_OK_MARKER = "HEARTBEAT_OK"
 
 const INTERVAL_AFTER_RECENT_ACTIVITY = 2 * 60 * 1000
 const INTERVAL_NORMAL = 10 * 60 * 1000
@@ -32,7 +33,10 @@ function truncateContent(text: string, maxLength = 120): string {
 }
 
 function cleanHeartbeatResponse(response: string): string {
-  const withoutMarker = response.replace(/\bHEARTBEAT_OK\b/gi, "").trim()
+  const withoutMarker = response
+    .replace(new RegExp(`\\b${HEARTBEAT_PASS_MARKER}\\b`, "gi"), "")
+    .replace(new RegExp(`\\b${LEGACY_HEARTBEAT_OK_MARKER}\\b`, "gi"), "")
+    .trim()
   if (!withoutMarker) {
     return ""
   }
@@ -179,13 +183,13 @@ export class HeartbeatEngine {
       )
 
       const response = await orchestrator.generate("fast", {
-        systemPrompt: `You are Orion running a heartbeat reflection cycle.\n\n${heartbeatInstructions}\n\nIf nothing needs attention, reply with exactly ${HEARTBEAT_OK_MARKER}.\nIf something needs attention, respond only with the message to send.`,
+        systemPrompt: `You are Orion running a heartbeat reflection cycle.\n\n${heartbeatInstructions}\n\nIf nothing needs attention, reply with exactly ${HEARTBEAT_PASS_MARKER}.\nIf something needs attention, respond only with the message to send.`,
         prompt: `Current time: ${currentTime}\nTime since last user interaction: ${minutesSinceLastInteraction} minutes\n\nRecent conversation summary:\n${recentSummary || "(no recent conversations)"}`,
       })
 
       const proactiveMessage = cleanHeartbeatResponse(response)
       if (!proactiveMessage) {
-        this.noteSkip("model returned HEARTBEAT_OK")
+        this.noteSkip("model returned HEARTBEAT_PASS")
         return
       }
 
