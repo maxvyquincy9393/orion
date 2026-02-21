@@ -1,15 +1,21 @@
-"""
+﻿"""
 openai_engine.py
 
-GPT-4o engine implementation using OAuth2 authentication.
-Connects to OpenAI's API using tokens managed by auth/token_manager.py.
-Part of Orion — Persistent AI Companion System.
+OpenAI engine implementation for Orion with multi-auth support.
+Supports OpenAI OAuth bearer tokens and API keys via AuthManager.
+Part of Orion - Persistent AI Companion System.
 """
 
+from __future__ import annotations
+
+import json
 import logging
 from typing import Iterator
 
+import requests
+
 import config
+from engines.auth.manager import get_auth_manager
 from engines.base import BaseEngine
 
 _log = logging.getLogger("orion.engines.openai")
@@ -18,68 +24,145 @@ _handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-8s  %(message
 _log.addHandler(_handler)
 _log.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
 
+OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+
 
 class OpenAIEngine(BaseEngine):
     """
-    LLM engine for OpenAI GPT-4o.
-    Uses OAuth2 tokens for authentication instead of API keys.
-    Best suited for: reasoning, code generation, multimodal tasks.
+    LLM engine for OpenAI models with OAuth and API key auth support.
+
+    - OAuth token format from AuthManager: "Bearer <token>"
+    - API key format from AuthManager: "sk-..."
     """
 
-    def __init__(self, model: str = "gpt-4o") -> None:
+    def __init__(self, model: str = "gpt-5.2") -> None:
         """
         Initialize the OpenAI engine.
 
         Args:
-            model: The OpenAI model to use. Defaults to "gpt-4o".
+            model: OpenAI model name.
         """
         self.model = model
-        self._client = None
-
-    def _get_client(self):
-        """
-        Lazily create the OpenAI client using OAuth token.
-
-        Returns:
-            OpenAI client instance or None if unavailable.
-        """
-        if self._client is not None:
-            return self._client
-
-        token = config.OPENAI_ACCESS_TOKEN
-        if not token:
-            _log.debug("OpenAI access token not configured")
-            return None
-
-        try:
-            from openai import OpenAI
-
-            self._client = OpenAI(api_key=token)
-            _log.info("OpenAI client initialised with OAuth token")
-            return self._client
-        except Exception as exc:
-            _log.error("Failed to initialise OpenAI client: %s", exc)
-            return None
+        self.auth_manager = get_auth_manager()
+        self._api_client = None
+        self._api_client_key = ""
 
     def get_name(self) -> str:
         """Return the engine name identifier."""
         return "openai"
 
-    def generate(self, prompt: str, context: list[dict]) -> str:
+    def _resolve_token(self) -> tuple[str, str]:
         """
-        Generate a complete response from GPT-4o.
-
-        Args:
-            prompt: The user's message or instruction.
-            context: A list of prior message dicts (role, content).
+        Resolve OpenAI credential mode and token value.
 
         Returns:
-            The full response string from GPT-4o.
-        """
-        client = self._get_client()
-        if client is None:
-            return "[Error] OpenAI engine unavailable: no valid token"
+            Tuple of (mode, token_value), where mode is "oauth" or "api_key".
 
+        Raises:
+            RuntimeError: If no OpenAI credential is available.
+        """
+        token = self.auth_manager.get_token("openai")
+        if not token:
+            raise RuntimeError(
+                "OpenAI is not configured. Set OPENAI_API_KEY or login with OpenAI OAuth."
+            )
+
+        token = token.strip()
+
+        if token.startswith("Bearer "):
+            bearer_value = token[len("Bearer ") :].strip()
+            if not bearer_value:
+                raise RuntimeError("OpenAI OAuth token is invalid")
+            return "oauth", bearer_value
+
+        if token.startswith("sk-"):
+            return "api_key", token
+
+        raise RuntimeError(
+            "OpenAI credential format is unsupported. Expected OAuth Bearer token or sk- API key."
+        )
+
+    def _get_api_client(self, api_key: str):
+        """
+        Create or reuse OpenAI API-key client.
+
+        Args:
+            api_key: OpenAI API key.
+
+        Returns:
+            OpenAI client instance.
+        """
+        if self._api_client is not None and self._api_client_key == api_key:
+            return self._api_client
+
+        from openai import OpenAI
+
+        self._api_client = OpenAI(api_key=api_key)
+        self._api_client_key = api_key
+        return self._api_client
+
+    def _generate_with_oauth(self, prompt: str, context: list[dict], token: str) -> str:
+        """
+        Generate response using OpenAI REST API with OAuth bearer token.
+
+        Args:
+            prompt: User prompt.
+            context: Prior context messages.
+            token: OAuth access token (without Bearer prefix).
+
+        Returns:
+            Response text.
+        """
+        messages = self.format_messages(prompt, context)
+
+        try:
+            response = requests.post(
+                OPENAI_CHAT_COMPLETIONS_URL,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            result = (
+                payload.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            _log.info("OpenAI OAuth generate: %d chars returned", len(result))
+            return result
+        except requests.exceptions.RequestException as exc:
+            _log.error("OpenAI OAuth generate error: %s", exc)
+            return f"[Error] OpenAI OAuth API error: {exc}"
+        except Exception as exc:
+            _log.error("OpenAI OAuth generate parse error: %s", exc)
+            return f"[Error] OpenAI OAuth response parse error: {exc}"
+
+    def _generate_with_api_key(
+        self,
+        prompt: str,
+        context: list[dict],
+        api_key: str,
+    ) -> str:
+        """
+        Generate response using OpenAI SDK and API key.
+
+        Args:
+            prompt: User prompt.
+            context: Prior context messages.
+            api_key: OpenAI API key.
+
+        Returns:
+            Response text.
+        """
+        client = self._get_api_client(api_key)
         messages = self.format_messages(prompt, context)
 
         try:
@@ -88,28 +171,115 @@ class OpenAIEngine(BaseEngine):
                 messages=messages,
             )
             result = response.choices[0].message.content or ""
-            _log.info("OpenAI generate: %d chars returned", len(result))
+            _log.info("OpenAI API key generate: %d chars returned", len(result))
             return result
         except Exception as exc:
-            _log.error("OpenAI generate error: %s", exc)
+            _log.error("OpenAI API key generate error: %s", exc)
             return f"[Error] OpenAI API error: {exc}"
 
-    def stream(self, prompt: str, context: list[dict]) -> Iterator[str]:
+    def generate(self, prompt: str, context: list[dict]) -> str:
         """
-        Stream a response from GPT-4o token by token.
+        Generate a complete response from OpenAI.
 
         Args:
-            prompt: The user's message or instruction.
-            context: A list of prior message dicts (role, content).
+            prompt: User prompt.
+            context: Prior context messages.
+
+        Returns:
+            Response text.
+
+        Raises:
+            RuntimeError: If no valid OpenAI credential is configured.
+        """
+        mode, token = self._resolve_token()
+
+        if mode == "oauth":
+            return self._generate_with_oauth(prompt, context, token)
+
+        return self._generate_with_api_key(prompt, context, token)
+
+    def _stream_with_oauth(
+        self,
+        prompt: str,
+        context: list[dict],
+        token: str,
+    ) -> Iterator[str]:
+        """
+        Stream response using OpenAI REST API with OAuth bearer token.
+
+        Args:
+            prompt: User prompt.
+            context: Prior context messages.
+            token: OAuth access token.
 
         Yields:
-            String chunks of the response as they arrive.
+            Response chunks.
         """
-        client = self._get_client()
-        if client is None:
-            yield "[Error] OpenAI engine unavailable: no valid token"
-            return
+        messages = self.format_messages(prompt, context)
 
+        try:
+            response = requests.post(
+                OPENAI_CHAT_COMPLETIONS_URL,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": True,
+                },
+                timeout=120,
+                stream=True,
+            )
+            response.raise_for_status()
+
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+
+                line = raw_line.strip()
+                if not line.startswith("data:"):
+                    continue
+
+                payload = line[len("data:") :].strip()
+                if payload == "[DONE]":
+                    break
+
+                try:
+                    chunk = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+
+                delta = (
+                    chunk.get("choices", [{}])[0]
+                    .get("delta", {})
+                    .get("content", "")
+                )
+                if delta:
+                    yield delta
+        except Exception as exc:
+            _log.error("OpenAI OAuth stream error: %s", exc)
+            yield f"[Error] OpenAI OAuth API error: {exc}"
+
+    def _stream_with_api_key(
+        self,
+        prompt: str,
+        context: list[dict],
+        api_key: str,
+    ) -> Iterator[str]:
+        """
+        Stream response using OpenAI SDK and API key.
+
+        Args:
+            prompt: User prompt.
+            context: Prior context messages.
+            api_key: OpenAI API key.
+
+        Yields:
+            Response chunks.
+        """
+        client = self._get_api_client(api_key)
         messages = self.format_messages(prompt, context)
 
         try:
@@ -122,24 +292,58 @@ class OpenAIEngine(BaseEngine):
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
         except Exception as exc:
-            _log.error("OpenAI stream error: %s", exc)
+            _log.error("OpenAI API key stream error: %s", exc)
             yield f"[Error] OpenAI API error: {exc}"
+
+    def stream(self, prompt: str, context: list[dict]) -> Iterator[str]:
+        """
+        Stream a response from OpenAI.
+
+        Args:
+            prompt: User prompt.
+            context: Prior context messages.
+
+        Yields:
+            Response chunks.
+        """
+        try:
+            mode, token = self._resolve_token()
+        except RuntimeError as exc:
+            yield f"[Error] {exc}"
+            return
+
+        if mode == "oauth":
+            yield from self._stream_with_oauth(prompt, context, token)
+            return
+
+        yield from self._stream_with_api_key(prompt, context, token)
 
     def is_available(self) -> bool:
         """
-        Check if the OpenAI engine is available (valid token, API reachable).
+        Check if OpenAI credentials are configured and endpoint is reachable.
 
         Returns:
-            True if GPT-4o can accept requests, False otherwise.
+            True if OpenAI is usable, otherwise False.
         """
-        client = self._get_client()
-        if client is None:
+        try:
+            mode, token = self._resolve_token()
+        except RuntimeError:
             return False
 
+        if mode == "oauth":
+            try:
+                response = requests.get(
+                    OPENAI_MODELS_URL,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=15,
+                )
+                return response.ok
+            except requests.RequestException:
+                return False
+
         try:
+            client = self._get_api_client(token)
             client.models.list()
-            _log.debug("OpenAI engine is available")
             return True
-        except Exception as exc:
-            _log.warning("OpenAI availability check failed: %s", exc)
+        except Exception:
             return False
