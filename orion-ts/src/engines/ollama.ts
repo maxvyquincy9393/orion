@@ -58,6 +58,7 @@ export class OllamaEngine implements Engine {
         body: JSON.stringify({
           model,
           stream: false,
+          system: options.systemPrompt?.trim() || undefined,
           messages: toMessages(options),
           options: {
             temperature: options.temperature,

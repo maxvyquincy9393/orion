@@ -12,6 +12,11 @@ function toMessages(options: GenerateOptions): Array<{ role: "user" | "assistant
   return messages
 }
 
+function toSystemPrompt(options: GenerateOptions): string | undefined {
+  const prompt = options.systemPrompt?.trim()
+  return prompt && prompt.length > 0 ? prompt : undefined
+}
+
 export class AnthropicEngine implements Engine {
   readonly name = "anthropic"
   readonly provider = "anthropic"
@@ -31,6 +36,7 @@ export class AnthropicEngine implements Engine {
       const response = await client.messages.create({
         model: options.model ?? this.defaultModel,
         max_tokens: options.maxTokens ?? 4096,
+        system: toSystemPrompt(options),
         messages: toMessages(options),
       })
 

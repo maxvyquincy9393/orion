@@ -1,6 +1,7 @@
-﻿export interface GenerateOptions {
+export interface GenerateOptions {
   prompt: string
   context?: Array<{ role: "user" | "assistant"; content: string }>
+  systemPrompt?: string
   maxTokens?: number
   temperature?: number
   model?: string

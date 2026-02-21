@@ -22,7 +22,10 @@ export class GeminiEngine implements Engine {
 
     try {
       const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY)
-      const model = genAI.getGenerativeModel({ model: options.model ?? this.defaultModel })
+      const model = genAI.getGenerativeModel({
+        model: options.model ?? this.defaultModel,
+        systemInstruction: options.systemPrompt?.trim() || undefined,
+      })
 
       const history = options.context?.map((msg) => ({
         role: msg.role === "user" ? "user" : "model" as const,

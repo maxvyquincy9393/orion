@@ -6,8 +6,14 @@ import type { Engine, GenerateOptions } from "./types.js"
 
 const log = createLogger("engines.openai")
 
-function toMessages(options: GenerateOptions): Array<{ role: "user" | "assistant"; content: string }> {
-  const messages = [...(options.context ?? [])]
+function toMessages(options: GenerateOptions): Array<{ role: "system" | "user" | "assistant"; content: string }> {
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = []
+
+  if (options.systemPrompt?.trim()) {
+    messages.push({ role: "system", content: options.systemPrompt.trim() })
+  }
+
+  messages.push(...(options.context ?? []))
   messages.push({ role: "user", content: options.prompt })
   return messages
 }
