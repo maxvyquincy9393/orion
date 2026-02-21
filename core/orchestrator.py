@@ -245,10 +245,10 @@ def log_startup_status() -> None:
     for name in ["claude", "openai", "gemini", "local"]:
         engine = _get_engine_instance(name)
         if engine:
-            status = "✓ available" if engine.is_available() else "✗ unavailable"
+            status = "[OK] available" if engine.is_available() else "[--] unavailable"
             _log.info("  %s: %s", name, status)
         else:
-            _log.info("  %s: ✗ failed to initialise", name)
+            _log.info("  %s: [--] failed to initialise", name)
 
     _log.info("===================================")
 

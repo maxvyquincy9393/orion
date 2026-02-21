@@ -41,7 +41,7 @@ def print_engines(engines: list[str]) -> None:
     """Print available engines status."""
     print("Available Engines:")
     for name in ["claude", "openai", "gemini", "local"]:
-        status = "✓ online" if name in engines else "✗ offline"
+        status = "[OK] online" if name in engines else "[--] offline"
         print(f"  {name:10} {status}")
     print()
 
