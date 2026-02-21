@@ -14,8 +14,10 @@ import { temporalIndex } from "./temporal-index.js"
 
 const log = createLogger("memory.store")
 
-const VECTOR_DIMENSION = 1536
+const VECTOR_DIMENSION = 768
+const LEGACY_VECTOR_DIMENSION = 1536
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
 
 interface MemoryRow extends Record<string, unknown> {
   id: string
@@ -95,6 +97,43 @@ async function openAIEmbed(text: string): Promise<number[] | null> {
   }
 }
 
+async function ollamaEmbed(text: string): Promise<number[] | null> {
+  const baseUrl = config.OLLAMA_BASE_URL.trim().length > 0
+    ? config.OLLAMA_BASE_URL
+    : "http://localhost:11434"
+
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/embeddings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OLLAMA_EMBEDDING_MODEL,
+        prompt: text,
+      }),
+    })
+
+    if (!response.ok) {
+      log.warn("Ollama embedding API failed", { status: response.status })
+      return null
+    }
+
+    const data = (await response.json()) as { embedding?: number[] }
+    const embedding = data.embedding
+
+    if (!embedding || embedding.length !== VECTOR_DIMENSION) {
+      log.warn("Unexpected embedding dimension", { expected: VECTOR_DIMENSION, got: embedding?.length })
+      return null
+    }
+
+    return embedding
+  } catch (error) {
+    log.warn("Ollama embedding request failed", error)
+    return null
+  }
+}
+
 function sanitizeUserId(userId: string): string {
   if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
     log.warn("userId contains unexpected characters, sanitizing", { userId })
@@ -107,6 +146,26 @@ export class MemoryStore {
   private db: lancedb.Connection | null = null
   private table: lancedb.Table | null = null
   private initialized = false
+
+  private async createMemoryTable(): Promise<lancedb.Table> {
+    if (!this.db) {
+      throw new Error("memory database not initialized")
+    }
+
+    const dummyVector = new Array(VECTOR_DIMENSION).fill(0)
+    const initialRow: MemoryRow = {
+      id: randomUUID(),
+      userId: "__init__",
+      content: "__init__",
+      vector: dummyVector,
+      metadata: "{}",
+      createdAt: Date.now(),
+    }
+
+    const table = await this.db.createTable("memories", [initialRow])
+    await table.delete("userId = '__init__'")
+    return table
+  }
 
   async init(): Promise<void> {
     if (this.initialized) {
@@ -121,19 +180,29 @@ export class MemoryStore {
 
       const existing = await this.db.tableNames()
       if (existing.includes("memories")) {
-        this.table = await this.db.openTable("memories")
-      } else {
-        const dummyVector = new Array(VECTOR_DIMENSION).fill(0)
-        const initialRow: MemoryRow = {
-          id: randomUUID(),
-          userId: "__init__",
-          content: "__init__",
-          vector: dummyVector,
-          metadata: "{}",
-          createdAt: Date.now(),
+        const existingTable = await this.db.openTable("memories")
+        const sampleRows = (await existingTable.query().select(["vector"]).limit(1).toArray()) as Array<{
+          vector?: unknown
+        }>
+        const firstVector = sampleRows[0]?.vector
+        const firstVectorLength =
+          Array.isArray(firstVector)
+          || (typeof firstVector === "object" && firstVector !== null && "length" in firstVector)
+            ? Number((firstVector as { length: number }).length)
+            : null
+
+        if (firstVectorLength === LEGACY_VECTOR_DIMENSION) {
+          log.info("legacy memory table detected, recreating", {
+            fromDimension: firstVectorLength,
+            toDimension: VECTOR_DIMENSION,
+          })
+          await this.db.dropTable("memories")
+          this.table = await this.createMemoryTable()
+        } else {
+          this.table = existingTable
         }
-        this.table = await this.db.createTable("memories", [initialRow])
-        await this.table.delete("userId = '__init__'")
+      } else {
+        this.table = await this.createMemoryTable()
       }
 
       this.initialized = true
@@ -144,10 +213,10 @@ export class MemoryStore {
   }
 
   async embed(text: string): Promise<number[]> {
-    const openAIResult = await openAIEmbed(text)
+    const ollamaResult = await ollamaEmbed(text)
 
-    if (openAIResult) {
-      return openAIResult
+    if (ollamaResult) {
+      return ollamaResult
     }
 
     log.debug("using hash-based fallback embedding")
