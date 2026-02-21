@@ -1,3 +1,5 @@
+import crypto from "node:crypto"
+
 import { channelManager } from "../channels/manager.js"
 import config from "../config.js"
 import { logTrigger, getHistory } from "../database/index.js"
@@ -8,6 +10,8 @@ import { pairingManager } from "../pairing/manager.js"
 import { temporalIndex } from "../memory/temporal-index.js"
 import { contextPredictor } from "../core/context-predictor.js"
 import { voiCalculator } from "../core/voi.js"
+import { acpRouter } from "../acp/router.js"
+import { signMessage, type ACPMessage, type AgentCredential } from "../acp/protocol.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
@@ -24,6 +28,15 @@ export class OrionDaemon {
   private currentIntervalMs = INTERVAL_NORMAL_MS
   private lastActivityTime = Date.now()
   private lastTemporalMaintenanceAt = new Map<string, number>()
+  private readonly credential: AgentCredential
+
+  constructor() {
+    this.credential = acpRouter.registerAgent(
+      "daemon",
+      ["daemon.health", "daemon.start", "daemon.stop"],
+      async (message) => this.handleACPMessage(message),
+    )
+  }
 
   async start(): Promise<void> {
     if (this.running) {
@@ -175,6 +188,39 @@ export class OrionDaemon {
 
     await temporalIndex.runMaintenance(userId)
     this.lastTemporalMaintenanceAt.set(userId, now)
+  }
+
+  private async handleACPMessage(message: ACPMessage): Promise<ACPMessage> {
+    let payload: unknown
+
+    if (message.action === "daemon.health") {
+      payload = this.healthCheck()
+    } else if (message.action === "daemon.start") {
+      await this.start()
+      payload = { running: this.running }
+    } else if (message.action === "daemon.stop") {
+      this.stop()
+      payload = { running: this.running }
+    } else {
+      payload = { error: `unknown action: ${message.action}` }
+    }
+
+    const responseNoSignature = {
+      id: crypto.randomUUID(),
+      from: "daemon",
+      to: message.from,
+      type: "response" as const,
+      action: message.action,
+      payload,
+      correlationId: message.id,
+      timestamp: Date.now(),
+      state: "done" as const,
+    }
+
+    return {
+      ...responseNoSignature,
+      signature: signMessage(responseNoSignature, this.credential.secret),
+    }
   }
 }
 

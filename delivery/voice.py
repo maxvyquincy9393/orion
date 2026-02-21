@@ -9,14 +9,20 @@ Part of Orion — Persistent AI Companion System.
 import json
 import logging
 import os
+import base64
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable, Iterator
 
 import numpy as np
 
 import config
+
+try:
+    from qwen3_tts import Qwen3TTS  # type: ignore
+except Exception:
+    Qwen3TTS = None  # type: ignore
 
 _log = logging.getLogger("orion.voice")
 _log_file = config.LOGS_DIR / "voice.log"
@@ -37,6 +43,8 @@ _training_log.setLevel(logging.INFO)
 MODELS_DIR = config.PROJECT_ROOT / "models"
 VOICES_DIR = MODELS_DIR / "voices"
 RECORDINGS_DIR = MODELS_DIR / "recordings"
+QWEN3_MODE = os.getenv("QWEN3_MODE", "latency").strip().lower()
+TTS_BACKEND = "qwen3" if Qwen3TTS is not None else "xtts"
 
 TRAINING_SENTENCES = [
     "The quick brown fox jumps over the lazy dog.",
@@ -86,13 +94,14 @@ class VoicePipeline:
         """Initialize the voice pipeline."""
         self._whisper_model = None
         self._tts_model = None
+        self._qwen3_model = None
         self._sample_rate = 22050
         self._save_recordings = True
 
         VOICES_DIR.mkdir(parents=True, exist_ok=True)
         RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
-        _log.info("VoicePipeline initialized")
+        _log.info("VoicePipeline initialized (tts_backend=%s, qwen3_mode=%s)", TTS_BACKEND, QWEN3_MODE)
 
     def _get_whisper_model(self):
         """Lazily load Whisper model."""
@@ -125,6 +134,25 @@ class VoicePipeline:
                 _log.error("TTS not installed. Run: pip install TTS")
                 raise
         return self._tts_model
+
+    def _get_qwen3_model(self):
+        """Lazily load Qwen3-TTS model if available."""
+        if Qwen3TTS is None:
+            raise RuntimeError("Qwen3-TTS not available")
+
+        if self._qwen3_model is None:
+            try:
+                try:
+                    self._qwen3_model = Qwen3TTS(mode=QWEN3_MODE)  # type: ignore[misc]
+                except TypeError:
+                    self._qwen3_model = Qwen3TTS()  # type: ignore[misc]
+
+                _log.info("Qwen3-TTS model initialized (mode=%s)", QWEN3_MODE)
+            except Exception as exc:
+                _log.error("Failed to initialize Qwen3-TTS: %s", exc)
+                raise
+
+        return self._qwen3_model
 
     def listen(self, duration: int = 5) -> str:
         """
@@ -175,42 +203,174 @@ class VoicePipeline:
             _log.error("LISTEN | Error: %s", exc)
             return f"[Error] Failed to listen: {exc}"
 
-    def speak(self, text: str, voice_profile: str = "default") -> None:
+    def speak(self, text: str, voice_profile: str = "default") -> bytes:
         """
-        Synthesize speech and play audio.
+        Generate speech audio bytes.
 
-        Args:
-            text: Text to speak.
-            voice_profile: Voice profile name. Defaults to "default".
+        Backward compatible method used by bridge.ts.
         """
-        _log.info("SPEAK | text='%s' | voice=%s", text[:50], voice_profile)
+        _log.info("SPEAK | text='%s' | voice=%s | backend=%s", text[:50], voice_profile, TTS_BACKEND)
 
-        if voice_profile != "default":
-            self.speak_with_clone(text, voice_profile)
+        if TTS_BACKEND == "qwen3":
+            try:
+                audio = self._qwen3_generate(text, voice_profile)
+                self._try_playback(audio)
+                return audio
+            except Exception as exc:
+                _log.warning("SPEAK | Qwen3 failed, falling back to XTTS: %s", exc)
+
+        audio = self._xtts_generate(text, voice_profile)
+        self._try_playback(audio)
+        return audio
+
+    def speak_streaming(
+        self,
+        text: str,
+        voice_profile: str,
+        callback: Callable[[bytes], None],
+    ) -> None:
+        """
+        Stream speech audio chunks to callback.
+
+        Uses Qwen3 streaming when available; falls back to XTTS full-audio chunk.
+        """
+        _log.info("SPEAK_STREAMING | text='%s' | voice=%s | backend=%s", text[:50], voice_profile, TTS_BACKEND)
+
+        if TTS_BACKEND == "qwen3":
+            try:
+                for chunk in self._qwen3_stream(text, voice_profile):
+                    callback(chunk)
+                return
+            except Exception as exc:
+                _log.warning("SPEAK_STREAMING | Qwen3 streaming failed, fallback XTTS: %s", exc)
+
+        callback(self._xtts_generate(text, voice_profile))
+
+    def _resolve_voice_reference(self, voice_profile: str) -> Optional[str]:
+        if voice_profile == "default":
+            return None
+
+        candidate = VOICES_DIR / voice_profile / "reference.wav"
+        if candidate.exists():
+            return str(candidate)
+        return None
+
+    def _xtts_generate(self, text: str, voice_profile: str) -> bytes:
+        tts = self._get_tts_model()
+        speaker_wav = self._resolve_voice_reference(voice_profile)
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            output_path = f.name
+
+        try:
+            kwargs = {"text": text, "file_path": output_path}
+            if speaker_wav:
+                kwargs["speaker_wav"] = speaker_wav
+                kwargs["language"] = "en"
+            tts.tts_to_file(**kwargs)
+
+            with open(output_path, "rb") as f:
+                audio_bytes = f.read()
+            return audio_bytes
+        finally:
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+
+    def _qwen3_generate(self, text: str, voice_profile: str) -> bytes:
+        model = self._get_qwen3_model()
+        reference = self._resolve_voice_reference(voice_profile)
+
+        generate_fn = getattr(model, "generate", None) or getattr(model, "synthesize", None)
+        if generate_fn is None:
+            chunks = list(self._qwen3_stream(text, voice_profile))
+            return b"".join(chunks)
+
+        kwargs = {"text": text, "mode": "conversation" if QWEN3_MODE == "latency" else "quality"}
+        if reference:
+            kwargs["voice_profile"] = reference
+
+        output = generate_fn(**kwargs)
+        if isinstance(output, bytes):
+            return output
+        if isinstance(output, bytearray):
+            return bytes(output)
+        if isinstance(output, str):
+            if os.path.exists(output):
+                with open(output, "rb") as f:
+                    return f.read()
+            return output.encode("utf-8")
+        if isinstance(output, np.ndarray):
+            return output.astype(np.float32).tobytes()
+
+        return b"".join(self._iter_bytes_chunks(output))
+
+    def _qwen3_stream(self, text: str, voice_profile: str) -> Iterator[bytes]:
+        model = self._get_qwen3_model()
+        reference = self._resolve_voice_reference(voice_profile)
+
+        stream_fn = getattr(model, "stream", None) or getattr(model, "generate_stream", None)
+        if stream_fn is None:
+            yield self._qwen3_generate(text, voice_profile)
             return
 
+        kwargs = {"text": text, "mode": "conversation" if QWEN3_MODE == "latency" else "quality"}
+        if reference:
+            kwargs["voice_profile"] = reference
+
+        for chunk in stream_fn(**kwargs):
+            for raw in self._iter_bytes_chunks(chunk):
+                yield raw
+
+    def _iter_bytes_chunks(self, payload) -> Iterator[bytes]:
+        if payload is None:
+            return
+        if isinstance(payload, bytes):
+            yield payload
+            return
+        if isinstance(payload, bytearray):
+            yield bytes(payload)
+            return
+        if isinstance(payload, np.ndarray):
+            yield payload.astype(np.float32).tobytes()
+            return
+        if isinstance(payload, str):
+            if os.path.exists(payload):
+                with open(payload, "rb") as f:
+                    yield f.read()
+            else:
+                yield payload.encode("utf-8")
+            return
+        if isinstance(payload, (list, tuple)):
+            for item in payload:
+                yield from self._iter_bytes_chunks(item)
+            return
+
+        try:
+            if hasattr(payload, "__iter__"):
+                for item in payload:
+                    yield from self._iter_bytes_chunks(item)
+                return
+        except Exception:
+            pass
+
+        yield bytes(str(payload), "utf-8")
+
+    def _try_playback(self, audio_bytes: bytes) -> None:
         try:
             import sounddevice as sd
             import soundfile as sf
 
-            tts = self._get_tts_model()
-
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                output_path = f.name
+                temp_path = f.name
+                f.write(audio_bytes)
 
-            tts.tts_to_file(text=text, file_path=output_path)
-
-            data, sample_rate = sf.read(output_path)
+            data, sample_rate = sf.read(temp_path)
             sd.play(data, sample_rate)
             sd.wait()
 
-            os.unlink(output_path)
-
-            _log.info("SPEAK | Completed")
-
-        except Exception as exc:
-            _log.error("SPEAK | Error: %s", exc)
-            print(f"[Error] Failed to speak: {exc}")
+            os.unlink(temp_path)
+        except Exception:
+            return
 
     def conversation_loop(self) -> None:
         """
@@ -715,38 +875,13 @@ def synthesize_speech(
     Returns:
         Audio data as bytes.
     """
-    import soundfile as sf
-
     pipeline = VoicePipeline()
-    tts = pipeline._get_tts_model()
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        temp_path = f.name
-
-    if voice_id != "default":
-        profile_dir = VOICES_DIR / voice_id
-        reference_audio = profile_dir / "reference.wav"
-        if reference_audio.exists():
-            tts.tts_to_file(
-                text=text,
-                speaker_wav=str(reference_audio),
-                language="en",
-                file_path=temp_path,
-            )
-        else:
-            tts.tts_to_file(text=text, file_path=temp_path)
-    else:
-        tts.tts_to_file(text=text, file_path=temp_path)
-
-    data, sample_rate = sf.read(temp_path)
+    audio_bytes = pipeline.speak(text, voice_id)
 
     if output_path:
-        sf.write(output_path, data, sample_rate)
+        with open(output_path, "wb") as f:
+            f.write(audio_bytes)
 
-    with open(temp_path, "rb") as f:
-        audio_bytes = f.read()
-
-    os.unlink(temp_path)
     return audio_bytes
 
 
@@ -762,9 +897,9 @@ def stream_voice_response(text: str, voice_id: str = "default"):
         Audio data chunks as bytes.
     """
     pipeline = VoicePipeline()
-    tts = pipeline._get_tts_model()
-
-    for chunk in tts.tts(text=text):
+    chunks: list[bytes] = []
+    pipeline.speak_streaming(text, voice_id, lambda chunk: chunks.append(chunk))
+    for chunk in chunks:
         yield chunk
 
 

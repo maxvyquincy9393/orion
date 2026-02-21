@@ -3,6 +3,7 @@ import { linkExtractor } from "./extractor.js"
 import { createLogger } from "../logger.js"
 
 const log = createLogger("link-understanding.summarizer")
+const MAX_SUMMARIZED_LINKS = 5
 
 const SUMMARIZE_PROMPT = `Summarize this web page content in 2-3 sentences. Focus on the main points.
 
@@ -50,12 +51,19 @@ export class LinkSummarizer {
 
       const linkSummaries: Array<{ url: string; summary: string }> = []
 
-      for (const url of urls.slice(0, 3)) {
-        const content = await linkExtractor.fetchContent(url)
-        if (content) {
-          const summary = await this.summarize(content)
-          linkSummaries.push({ url, summary })
+      const fetched = await Promise.all(
+        urls.slice(0, MAX_SUMMARIZED_LINKS).map(async (url) => ({
+          url,
+          content: await linkExtractor.fetchContent(url),
+        })),
+      )
+
+      for (const item of fetched) {
+        if (!item.content) {
+          continue
         }
+        const summary = await this.summarize(item.content)
+        linkSummaries.push({ url: item.url, summary })
       }
 
       let enrichedContext = message

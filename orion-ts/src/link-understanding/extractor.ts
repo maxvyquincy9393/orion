@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js"
+import { guardUrl } from "../security/tool-guard.js"
 
 const log = createLogger("link-understanding.extractor")
 
@@ -31,6 +32,7 @@ const BLOCKED_DOMAINS = [
 const FETCH_TIMEOUT_MS = 10000
 const MAX_CONTENT_LENGTH = 10000
 const CACHE_TTL_MS = 60 * 60 * 1000
+const MAX_URLS_PER_MESSAGE = 10
 
 interface CacheEntry {
   content: { title: string; text: string; url: string } | null
@@ -56,7 +58,9 @@ export class LinkExtractor {
           (blocked) => hostname === blocked || hostname.startsWith(blocked)
         )
 
-        if (!isBlocked) {
+        const guard = guardUrl(url)
+
+        if (!isBlocked && guard.allowed) {
           validUrls.push(url)
         }
       } catch {
@@ -64,7 +68,7 @@ export class LinkExtractor {
       }
     }
 
-    return [...new Set(validUrls)]
+    return [...new Set(validUrls)].slice(0, MAX_URLS_PER_MESSAGE)
   }
 
   async fetchContent(url: string): Promise<{ title: string; text: string; url: string } | null> {
@@ -76,15 +80,17 @@ export class LinkExtractor {
 
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; OrionBot/1.0)",
-        },
-      })
-
-      clearTimeout(timeoutId)
+      let response: Response
+      try {
+        response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; OrionBot/1.0)",
+          },
+        })
+      } finally {
+        clearTimeout(timeoutId)
+      }
 
       if (!response.ok) {
         log.warn("fetchContent failed", { url, status: response.status })

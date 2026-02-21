@@ -1,5 +1,11 @@
 import type { BaseChannel } from "./base.js"
 import { WebChatChannel } from "./webchat.js"
+import { whatsAppChannel } from "./whatsapp.js"
+import { signalChannel } from "./signal.js"
+import { lineChannel } from "./line.js"
+import { matrixChannel } from "./matrix.js"
+import { teamsChannel } from "./teams.js"
+import { iMessageChannel } from "./imessage.js"
 import { createLogger } from "../logger.js"
 import config from "../config.js"
 import { sandbox } from "../permissions/sandbox.js"
@@ -17,14 +23,27 @@ export class ChannelManager {
 
     const webchat = new WebChatChannel()
     this.channels.set("webchat", webchat)
+    this.channels.set("whatsapp", whatsAppChannel)
+    this.channels.set("signal", signalChannel)
+    this.channels.set("line", lineChannel)
+    this.channels.set("matrix", matrixChannel)
+    this.channels.set("teams", teamsChannel)
+    this.channels.set("imessage", iMessageChannel)
 
-    await webchat.start()
+    for (const [name, channel] of this.channels) {
+      try {
+        await channel.start()
+      } catch (error) {
+        log.warn("channel failed to start", { name, error })
+      }
+    }
 
     sandbox.setChannelManager({
       sendWithConfirm: async (userId: string, message: string, action: string) => {
-        const channel = this.channels.get("webchat")
-        if (channel) {
-          return channel.sendWithConfirm(userId, message, action)
+        for (const [, channel] of this.channels) {
+          if (channel.isConnected()) {
+            return channel.sendWithConfirm(userId, message, action)
+          }
         }
         return false
       },
@@ -35,10 +54,19 @@ export class ChannelManager {
   }
 
   async send(userId: string, message: string): Promise<boolean> {
-    const webchat = this.channels.get("webchat")
-    if (webchat) {
-      return webchat.send(userId, message)
+    const priorityOrder = ["webchat", "whatsapp", "signal", "line", "matrix", "teams", "imessage"]
+    for (const name of priorityOrder) {
+      const channel = this.channels.get(name)
+      if (!channel || !channel.isConnected()) {
+        continue
+      }
+
+      const sent = await channel.send(userId, message)
+      if (sent) {
+        return true
+      }
     }
+
     return false
   }
 

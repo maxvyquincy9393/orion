@@ -1,4 +1,15 @@
-export type ChannelType = "discord" | "telegram" | "slack" | "whatsapp" | "webchat" | "cli"
+export type ChannelType =
+  | "discord"
+  | "telegram"
+  | "slack"
+  | "whatsapp"
+  | "webchat"
+  | "cli"
+  | "signal"
+  | "line"
+  | "matrix"
+  | "teams"
+  | "imessage"
 
 export class MarkdownProcessor {
   process(markdown: string, channel: ChannelType): string {
@@ -20,6 +31,13 @@ export class MarkdownProcessor {
 
       case "cli":
         return this.stripFormatting(markdown)
+
+      case "signal":
+      case "line":
+      case "matrix":
+      case "teams":
+      case "imessage":
+        return this.toSlack(markdown)
 
       default:
         return markdown

@@ -6,7 +6,7 @@ const log = createLogger("media-understanding.audio")
 export class AudioTranscriber {
   async transcribe(audioSource: string): Promise<string> {
     try {
-      const result = await voice.listen(10)
+      const result = await voice.transcribe(audioSource)
 
       if (!result) {
         return "Unable to transcribe audio"

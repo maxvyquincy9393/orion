@@ -4,6 +4,7 @@ import config from "../config.js"
 import { createLogger } from "../logger.js"
 import type { BaseChannel } from "./base.js"
 import { splitMessage, pollForConfirm } from "./base.js"
+import { markdownProcessor } from "../markdown/processor.js"
 
 const log = createLogger("whatsapp-channel")
 
@@ -118,7 +119,8 @@ export class WhatsAppChannel implements BaseChannel {
     }
 
     try {
-      const chunks = splitMessage(message, 4096)
+      const rendered = markdownProcessor.process(message, "whatsapp")
+      const chunks = splitMessage(rendered, 4096)
       
       for (const chunk of chunks) {
         await this.socket.sendMessage(userId, { text: chunk })

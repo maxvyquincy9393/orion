@@ -14,6 +14,7 @@ import { skillManager } from "./skills/manager.js"
 import { sessionStore } from "./sessions/session-store.js"
 import { causalGraph } from "./memory/causal-graph.js"
 import { profiler } from "./memory/profiler.js"
+import { pluginLoader } from "./plugin-sdk/loader.js"
 
 const log = createLogger("main")
 
@@ -32,6 +33,7 @@ async function start(): Promise<void> {
   await memory.init()
   await orchestrator.init()
   await skillManager.init()
+  await pluginLoader.loadAllFromDefaultDir()
   void agentRunner
 
   const available = orchestrator.getAvailableEngines()

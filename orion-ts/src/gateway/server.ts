@@ -14,6 +14,8 @@ import { createLogger } from "../logger.js"
 import { sessionStore } from "../sessions/session-store.js"
 import { causalGraph } from "../memory/causal-graph.js"
 import { profiler } from "../memory/profiler.js"
+import { linkSummarizer } from "../link-understanding/summarizer.js"
+import { hookPipeline } from "../hooks/pipeline.js"
 import config from "../config.js"
 
 const logger = createLogger("gateway")
@@ -115,13 +117,54 @@ export class GatewayServer {
   }
 
   private async handleUserMessage(userId: string, rawMessage: string, channel: string): Promise<string> {
-    const filtered = filterPrompt(rawMessage, userId)
+    const preMessage = await hookPipeline.run("pre_message", {
+      userId,
+      channel,
+      content: rawMessage,
+      metadata: {},
+    })
+
+    if (preMessage.abort) {
+      return preMessage.abortReason ?? "Message blocked by pre_message hook"
+    }
+
+    const filtered = filterPrompt(preMessage.content, userId)
     const safePrompt = filtered.sanitized
+    const linkContext = await linkSummarizer.processMessage(safePrompt)
+    const modelInput = linkContext.enrichedContext
+
     const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
-    const response = await orchestrator.generate("reasoning", {
-      prompt: systemContext ? `${systemContext}\n\nUser: ${safePrompt}` : safePrompt,
+    const generatedResponse = await orchestrator.generate("reasoning", {
+      prompt: systemContext ? `${systemContext}\n\nUser: ${modelInput}` : modelInput,
       context: messages,
     })
+
+    const postMessage = await hookPipeline.run("post_message", {
+      userId,
+      channel,
+      content: generatedResponse,
+      metadata: {
+        safePrompt,
+        systemContext,
+      },
+    })
+
+    if (postMessage.abort) {
+      return postMessage.abortReason ?? "Message blocked by post_message hook"
+    }
+
+    const preSend = await hookPipeline.run("pre_send", {
+      userId,
+      channel,
+      content: postMessage.content,
+      metadata: postMessage.metadata,
+    })
+
+    if (preSend.abort) {
+      return preSend.abortReason ?? "Message blocked by pre_send hook"
+    }
+
+    const response = preSend.content
 
     const now = Date.now()
     const userMeta = { role: "user", channel, category: "event", level: 0 }

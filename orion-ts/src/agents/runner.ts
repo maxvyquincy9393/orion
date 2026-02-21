@@ -1,8 +1,12 @@
+import crypto from "node:crypto"
+
 import { generateText } from "ai"
 
 import { orchestrator } from "../engines/orchestrator.js"
 import { orionTools } from "./tools.js"
 import { createLogger } from "../logger.js"
+import { acpRouter } from "../acp/router.js"
+import { signMessage, type ACPMessage, type AgentCredential } from "../acp/protocol.js"
 
 const logger = createLogger("runner")
 
@@ -20,6 +24,20 @@ export interface AgentResult {
 }
 
 export class AgentRunner {
+  private readonly credential: AgentCredential
+
+  constructor() {
+    this.credential = acpRouter.registerAgent(
+      "runner",
+      ["runner.execute", "runner.parallel", "runner.supervise", "runner.status"],
+      async (msg) => this.handleACPMessage(msg),
+    )
+  }
+
+  getCredential(): AgentCredential {
+    return this.credential
+  }
+
   async runSingle(task: AgentTask): Promise<AgentResult> {
     const start = Date.now()
 
@@ -103,6 +121,47 @@ export class AgentRunner {
     })
 
     return aggregate
+  }
+
+  private async handleACPMessage(message: ACPMessage): Promise<ACPMessage> {
+    const payload = (message.payload ?? {}) as Record<string, unknown>
+    let result: unknown
+
+    if (message.action === "runner.execute") {
+      const task: AgentTask = {
+        id: String(payload.id ?? `acp_${Date.now()}`),
+        task: String(payload.task ?? ""),
+        context: typeof payload.context === "string" ? payload.context : undefined,
+      }
+      result = await this.runSingle(task)
+    } else if (message.action === "runner.parallel") {
+      const tasks = Array.isArray(payload.tasks) ? (payload.tasks as AgentTask[]) : []
+      result = await this.runParallel(tasks)
+    } else if (message.action === "runner.supervise") {
+      result = await this.runWithSupervisor(
+        String(payload.goal ?? ""),
+        Number(payload.maxSubtasks ?? 5),
+      )
+    } else {
+      result = { error: `unknown action: ${message.action}` }
+    }
+
+    const responseNoSignature = {
+      id: crypto.randomUUID(),
+      from: "runner",
+      to: message.from,
+      type: "response" as const,
+      action: message.action,
+      payload: result,
+      correlationId: message.id,
+      timestamp: Date.now(),
+      state: "done" as const,
+    }
+
+    return {
+      ...responseNoSignature,
+      signature: signMessage(responseNoSignature, this.credential.secret),
+    }
   }
 }
 
