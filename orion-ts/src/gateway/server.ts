@@ -8,6 +8,7 @@ import { channelManager } from "../channels/manager.js"
 import { memory } from "../memory/store.js"
 import { daemon } from "../background/daemon.js"
 import { multiUser } from "../multiuser/manager.js"
+import { filterPrompt } from "../security/prompt-filter.js"
 import { createLogger } from "../logger.js"
 import config from "../config.js"
 
@@ -67,13 +68,15 @@ export class GatewayServer {
         "/message",
         async (req) => {
           const { message, userId = config.DEFAULT_USER_ID } = req.body
-          const context = await memory.buildContext(userId, message)
+          const filtered = filterPrompt(message, userId)
+          const safePrompt = filtered.sanitized
+          const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
           const response = await orchestrator.generate("reasoning", {
-            prompt: message,
-            context,
+            prompt: systemContext ? `${systemContext}\n\nUser: ${safePrompt}` : safePrompt,
+            context: messages,
           })
 
-          await memory.save(userId, message, { role: "user" })
+          await memory.save(userId, safePrompt, { role: "user" })
           await memory.save(userId, response, { role: "assistant" })
 
           return { response }
@@ -93,12 +96,14 @@ export class GatewayServer {
 
     switch (msg.type) {
       case "message": {
-        const context = await memory.buildContext(userId, msg.content)
+        const filtered = filterPrompt(msg.content, userId)
+        const safePrompt = filtered.sanitized
+        const { messages, systemContext } = await memory.buildContext(userId, safePrompt)
         const response = await orchestrator.generate("reasoning", {
-          prompt: msg.content,
-          context,
+          prompt: systemContext ? `${systemContext}\n\nUser: ${safePrompt}` : safePrompt,
+          context: messages,
         })
-        await memory.save(userId, msg.content, { role: "user" })
+        await memory.save(userId, safePrompt, { role: "user" })
         await memory.save(userId, response, { role: "assistant" })
         return { type: "response", content: response, requestId: msg.requestId }
       }

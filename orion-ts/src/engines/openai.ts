@@ -1,23 +1,15 @@
-﻿import { createOpenAI } from "@ai-sdk/openai"
-import { generateText } from "ai"
+import OpenAI from "openai"
 
 import config from "../config.js"
 import { createLogger } from "../logger.js"
 import type { Engine, GenerateOptions } from "./types.js"
 
 const log = createLogger("engines.openai")
-const openai = createOpenAI({ apiKey: config.OPENAI_API_KEY })
 
-function buildPrompt(options: GenerateOptions): string {
-  const contextText = (options.context ?? [])
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n")
-
-  if (!contextText) {
-    return options.prompt
-  }
-
-  return `${contextText}\nuser: ${options.prompt}`
+function toMessages(options: GenerateOptions): Array<{ role: "user" | "assistant"; content: string }> {
+  const messages = [...(options.context ?? [])]
+  messages.push({ role: "user", content: options.prompt })
+  return messages
 }
 
 export class OpenAIEngine implements Engine {
@@ -35,13 +27,15 @@ export class OpenAIEngine implements Engine {
     }
 
     try {
-      const result = await generateText({
-        model: openai(options.model ?? this.defaultModel),
-        prompt: buildPrompt(options),
-        maxOutputTokens: options.maxTokens,
+      const client = new OpenAI({ apiKey: config.OPENAI_API_KEY })
+      const response = await client.chat.completions.create({
+        model: options.model ?? this.defaultModel,
+        messages: toMessages(options),
         temperature: options.temperature,
+        max_tokens: options.maxTokens,
       })
-      return result.text
+
+      return response.choices[0]?.message?.content ?? ""
     } catch (error) {
       log.error("generate failed", error)
       return ""

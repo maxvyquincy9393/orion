@@ -1,5 +1,4 @@
-﻿import { createOpenAI } from "@ai-sdk/openai"
-import { generateText } from "ai"
+import OpenAI from "openai"
 
 import config from "../config.js"
 import { createLogger } from "../logger.js"
@@ -7,30 +6,16 @@ import type { Engine, GenerateOptions } from "./types.js"
 
 const log = createLogger("engines.openrouter")
 
-const openrouter = createOpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  headers: {
-    "HTTP-Referer": "https://github.com/orion",
-  },
-  apiKey: config.OPENROUTER_API_KEY,
-})
-
-function buildPrompt(options: GenerateOptions): string {
-  const contextText = (options.context ?? [])
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n")
-
-  if (!contextText) {
-    return options.prompt
-  }
-
-  return `${contextText}\nuser: ${options.prompt}`
+function toMessages(options: GenerateOptions): Array<{ role: "user" | "assistant"; content: string }> {
+  const messages = [...(options.context ?? [])]
+  messages.push({ role: "user", content: options.prompt })
+  return messages
 }
 
 export class OpenRouterEngine implements Engine {
   readonly name = "openrouter"
   readonly provider = "openrouter"
-  private readonly defaultModel = "openrouter/auto"
+  private readonly defaultModel = "anthropic/claude-3.5-sonnet"
 
   isAvailable(): boolean {
     return config.OPENROUTER_API_KEY.trim().length > 0
@@ -42,13 +27,19 @@ export class OpenRouterEngine implements Engine {
     }
 
     try {
-      const result = await generateText({
-        model: openrouter(options.model ?? this.defaultModel),
-        prompt: buildPrompt(options),
-        maxOutputTokens: options.maxTokens,
-        temperature: options.temperature,
+      const client = new OpenAI({
+        apiKey: config.OPENROUTER_API_KEY,
+        baseURL: "https://openrouter.ai/api/v1",
       })
-      return result.text
+
+      const response = await client.chat.completions.create({
+        model: options.model ?? this.defaultModel,
+        messages: toMessages(options),
+        temperature: options.temperature,
+        max_tokens: options.maxTokens,
+      })
+
+      return response.choices[0]?.message?.content ?? ""
     } catch (error) {
       log.error("generate failed", error)
       return ""

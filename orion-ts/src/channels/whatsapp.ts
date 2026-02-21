@@ -1,157 +1,175 @@
-import { BaseChannel } from "./base"
-import config from "../config"
+import type { WebSocket } from "ws"
 
-interface StoredMessage {
+import config from "../config.js"
+import { createLogger } from "../logger.js"
+import type { BaseChannel } from "./base.js"
+import { splitMessage, pollForConfirm } from "./base.js"
+
+const log = createLogger("whatsapp-channel")
+
+interface BaileysSocket {
+  user: { id: string } | null
+  on(event: string, callback: (...args: unknown[]) => void): void
+  sendMessage(jid: string, content: { text: string }): Promise<unknown>
+  end(): void
+}
+
+interface BaileysModule {
+  makeWASocket: (config: {
+    auth: { state: unknown; saveCreds: () => Promise<void> }
+    printQRInTerminal: boolean
+    getMessage: (key: unknown) => Promise<unknown>
+  }) => BaileysSocket
+  useMultiFileAuthState: (path: string) => Promise<{
+    state: unknown
+    saveCreds: () => Promise<void>
+  }>
+  DisconnectReason: Record<string, unknown>
+}
+
+interface QueuedMessage {
   content: string
   ts: number
 }
 
-let baileysLoaded = false
-let makeWASocket: any = null
-let useMultiFileAuthState: any = null
-let DisconnectReason: any = null
-
-try {
-  const baileys = require("@whiskeysockets/baileys")
-  makeWASocket = baileys.makeWASocket
-  useMultiFileAuthState = baileys.useMultiFileAuthState
-  DisconnectReason = baileys.DisconnectReason
-  baileysLoaded = true
-} catch (err) {
-  console.warn("[WhatsAppChannel] Baileys not available. WhatsApp channel will be disabled.")
-}
-
 export class WhatsAppChannel implements BaseChannel {
   readonly name = "whatsapp"
-  private sock: any = null
-  private latestMessages: Map<string, StoredMessage> = new Map()
-  private connected = false
-  private authPath = ".orion/auth/whatsapp"
-
-  constructor() {
-    if (!baileysLoaded) {
-      this.connected = false
-    }
-  }
+  private socket: BaileysSocket | null = null
+  private baileys: BaileysModule | null = null
+  private messageQueue = new Map<string, QueuedMessage[]>()
+  private running = false
 
   async start(): Promise<void> {
-    if (!baileysLoaded) {
-      console.warn("[WhatsAppChannel] Cannot start: Baileys not loaded")
+    if (!config.WHATSAPP_ENABLED) {
+      log.info("WhatsApp channel disabled")
       return
     }
 
     try {
-      const { state, saveCreds } = await useMultiFileAuthState(this.authPath)
+      this.baileys = await this.loadBaileys()
+      if (!this.baileys) {
+        log.warn("Baileys package not available, WhatsApp channel not started")
+        return
+      }
 
-      this.sock = makeWASocket({
-        auth: state,
+      const { state, saveCreds } = await this.baileys.useMultiFileAuthState(
+        ".orion/whatsapp-auth"
+      )
+
+      this.socket = this.baileys.makeWASocket({
+        auth: { state, saveCreds },
         printQRInTerminal: true,
+        getMessage: async () => undefined,
       })
 
-      this.sock.ev.on("connection.update", async (update: any) => {
-        const { connection, lastDisconnect, qr } = update
-
-        if (qr) {
-          console.log("[WhatsAppChannel] QR code generated. Scan with WhatsApp app.")
-        }
-
-        if (connection === "close") {
-          const shouldReconnect =
-            lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
-          this.connected = false
+      this.socket.on("connection.update", (update: unknown) => {
+        const connUpdate = update as { connection?: string; lastDisconnect?: { error?: { output?: { statusCode?: number } } } }
+        
+        if (connUpdate.connection === "close") {
+          const statusCode = connUpdate.lastDisconnect?.error?.output?.statusCode
+          const shouldReconnect = statusCode !== 401 && statusCode !== 403
+          
+          log.info("WhatsApp disconnected", { statusCode, shouldReconnect })
+          
           if (shouldReconnect) {
-            await this.start()
+            setTimeout(() => this.start(), 5000)
           }
-        } else if (connection === "open") {
-          this.connected = true
-          console.log("[WhatsAppChannel] Connected successfully")
+          this.running = false
+        } else if (connUpdate.connection === "open") {
+          log.info("WhatsApp connected")
+          this.running = true
         }
       })
 
-      this.sock.ev.on("messages.upsert", (msgUpdate: any) => {
-        for (const msg of msgUpdate.messages) {
-          if (!msg.key.fromMe && msg.message?.conversation) {
-            const jid = msg.key.remoteJid
-            this.latestMessages.set(jid, {
-              content: msg.message.conversation,
-              ts: Date.now(),
-            })
+      this.socket.on("messages.upsert", (msgUpdate: unknown) => {
+        const messages = (msgUpdate as { messages?: Array<{ key?: { remoteJid?: string; fromMe?: boolean }; message?: { conversation?: string } }> }).messages ?? []
+        
+        for (const msg of messages) {
+          if (msg.key?.fromMe) continue
+          
+          const from = msg.key?.remoteJid
+          const text = msg.message?.conversation
+          
+          if (from && text) {
+            const queue = this.messageQueue.get(from) ?? []
+            queue.push({ content: text, ts: Date.now() })
+            this.messageQueue.set(from, queue)
           }
         }
       })
+    } catch (error) {
+      log.error("failed to start WhatsApp channel", error)
+    }
+  }
 
-      this.sock.ev.on("creds.update", saveCreds)
-    } catch (err) {
-      console.error("[WhatsAppChannel] Failed to start:", err)
-      this.connected = false
+  private async loadBaileys(): Promise<BaileysModule | null> {
+    try {
+      const baileys = await import("baileys")
+      return baileys as unknown as BaileysModule
+    } catch (error) {
+      log.warn("Baileys package not installed", error)
+      return null
     }
   }
 
   async send(userId: string, message: string): Promise<boolean> {
-    if (!this.sock || !this.connected) {
+    if (!this.socket || !this.running) {
       return false
     }
 
     try {
-      await this.sock.sendMessage(userId, { text: message })
+      const chunks = splitMessage(message, 4096)
+      
+      for (const chunk of chunks) {
+        await this.socket.sendMessage(userId, { text: chunk })
+      }
+      
       return true
-    } catch (err) {
-      console.error("[WhatsAppChannel] Failed to send message:", err)
+    } catch (error) {
+      log.error("failed to send WhatsApp message", error)
       return false
     }
   }
 
-  async sendWithConfirm(
-    userId: string,
-    message: string,
-    action: string
-  ): Promise<boolean> {
-    const promptText = `${message}\n\n${action}\nReply with YES to confirm or NO to cancel.`
-    await this.send(userId, promptText)
+  async sendWithConfirm(userId: string, message: string, action: string): Promise<boolean> {
+    const prompt = `${message}\n\n${action}\nReply YES or NO`
+    await this.send(userId, prompt)
 
-    const startTime = Date.now()
-    const timeout = 60000
-
-    while (Date.now() - startTime < timeout) {
-      await this.sleep(2000)
-      const reply = await this.getLatestReply(userId, 60)
-      if (reply) {
-        const normalized = reply.trim().toLowerCase()
-        if (normalized.startsWith("yes")) {
-          return true
-        }
-        if (normalized.startsWith("no")) {
-          return false
-        }
-      }
-    }
-    return false
+    return pollForConfirm(
+      async () => this.getLatestReply(userId, 60),
+      60_000,
+      3000
+    )
   }
 
   async getLatestReply(userId: string, sinceSeconds = 60): Promise<string | null> {
-    const stored = this.latestMessages.get(userId)
-    if (!stored) {
+    const messages = this.messageQueue.get(userId)
+    if (!messages || messages.length === 0) {
       return null
     }
+
     const cutoff = Date.now() - sinceSeconds * 1000
-    if (stored.ts < cutoff) {
+    const recent = messages.filter((entry) => entry.ts >= cutoff)
+    if (recent.length === 0) {
       return null
     }
-    return stored.content
+
+    const latest = recent[recent.length - 1]
+    return latest.content
   }
 
   async stop(): Promise<void> {
-    if (this.sock) {
-      this.sock.end()
+    if (this.socket) {
+      this.socket.end()
+      this.socket = null
     }
-    this.connected = false
+    this.running = false
+    log.info("WhatsApp channel stopped")
   }
 
   isConnected(): boolean {
-    return this.connected
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+    return this.running && this.socket !== null
   }
 }
+
+export const whatsAppChannel = new WhatsAppChannel()

@@ -1,29 +1,21 @@
-﻿import { createAnthropic } from "@ai-sdk/anthropic"
-import { generateText } from "ai"
+import Anthropic from "@anthropic-ai/sdk"
 
 import config from "../config.js"
 import { createLogger } from "../logger.js"
 import type { Engine, GenerateOptions } from "./types.js"
 
 const log = createLogger("engines.anthropic")
-const anthropic = createAnthropic({ apiKey: config.ANTHROPIC_API_KEY })
 
-function buildPrompt(options: GenerateOptions): string {
-  const contextText = (options.context ?? [])
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n")
-
-  if (!contextText) {
-    return options.prompt
-  }
-
-  return `${contextText}\nuser: ${options.prompt}`
+function toMessages(options: GenerateOptions): Array<{ role: "user" | "assistant"; content: string }> {
+  const messages = [...(options.context ?? [])]
+  messages.push({ role: "user", content: options.prompt })
+  return messages
 }
 
 export class AnthropicEngine implements Engine {
   readonly name = "anthropic"
   readonly provider = "anthropic"
-  private readonly defaultModel = "claude-opus-4-6"
+  private readonly defaultModel = "claude-3-5-sonnet-20241022"
 
   isAvailable(): boolean {
     return config.ANTHROPIC_API_KEY.trim().length > 0
@@ -35,13 +27,15 @@ export class AnthropicEngine implements Engine {
     }
 
     try {
-      const result = await generateText({
-        model: anthropic(options.model ?? this.defaultModel),
-        prompt: buildPrompt(options),
-        maxOutputTokens: options.maxTokens,
-        temperature: options.temperature,
+      const client = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY })
+      const response = await client.messages.create({
+        model: options.model ?? this.defaultModel,
+        max_tokens: options.maxTokens ?? 4096,
+        messages: toMessages(options),
       })
-      return result.text
+
+      const textBlock = response.content.find((block: Anthropic.ContentBlock) => block.type === "text")
+      return textBlock?.type === "text" ? textBlock.text : ""
     } catch (error) {
       log.error("generate failed", error)
       return ""

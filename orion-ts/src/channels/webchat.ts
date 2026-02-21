@@ -1,18 +1,18 @@
 import fastify from "fastify"
 import websocket from "@fastify/websocket"
 import staticPlugin from "@fastify/static"
+import type { WebSocket } from "ws"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 import config from "../config.js"
 import { createLogger } from "../logger.js"
 import type { BaseChannel } from "./base.js"
+import { pollForConfirm } from "./base.js"
 
 const logger = createLogger("webchat-channel")
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-type WebSocket = import("@fastify/websocket").WebSocket
 
 interface QueuedMessage {
   content: string
@@ -45,9 +45,9 @@ export class WebChatChannel implements BaseChannel {
       return reply.sendFile("index.html")
     })
 
-    this.app.get("/ws/:userId", { websocket: true }, (connection, req) => {
+    this.app.get("/ws/:userId", { websocket: true }, (connection: any, req) => {
       const userId = (req.params as { userId: string }).userId
-      this.handleWebSocket(connection.socket, userId)
+      this.handleWebSocket(connection.socket as WebSocket, userId)
     })
 
     await this.app.listen({ host: this.host, port: this.port })
@@ -85,7 +85,7 @@ export class WebChatChannel implements BaseChannel {
       this.connections.delete(userId)
     })
 
-    ws.on("error", (error) => {
+    ws.on("error", (error: Error) => {
       logger.error("WebSocket error", error)
       this.connections.delete(userId)
     })

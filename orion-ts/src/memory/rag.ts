@@ -40,34 +40,17 @@ export class RAGEngine {
     try {
       const parentId = randomUUID()
       const chunks = chunkText(content, 500, 50)
-      const table = (memory as any).table
-
-      if (!table) {
-        log.warn("memory table unavailable, run memory.init first")
-        return null
-      }
 
       for (let index = 0; index < chunks.length; index += 1) {
         const chunk = chunks[index]
-        const vector = await memory.embed(chunk)
         const metadata = {
           parentId,
           title,
           source,
           chunkIndex: index,
-          userId,
         }
 
-        await table.add([
-          {
-            id: randomUUID(),
-            userId,
-            content: chunk,
-            vector,
-            metadata: JSON.stringify(metadata),
-            createdAt: Date.now(),
-          },
-        ])
+        await memory.save(userId, chunk, metadata)
       }
 
       await prisma.document.create({
@@ -147,12 +130,7 @@ export class RAGEngine {
 
   async deleteDocument(docId: string): Promise<void> {
     try {
-      const table = (memory as any).table
-      if (table) {
-        const escapedId = docId.replace(/'/g, "''")
-        await table.delete(`metadata LIKE '%\"parentId\":\"${escapedId}\"%'`)
-      }
-
+      await memory.delete(docId)
       await prisma.document.deleteMany({ where: { id: docId } })
       log.info("document deleted", { docId })
     } catch (error) {

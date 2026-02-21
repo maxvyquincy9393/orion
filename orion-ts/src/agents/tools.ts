@@ -4,6 +4,7 @@ import { execa } from "execa"
 import fs from "fs/promises"
 
 import { memory } from "../memory/store.js"
+import { filterToolResult } from "../security/prompt-filter.js"
 import { createLogger } from "../logger.js"
 
 const logger = createLogger("tools")
@@ -34,7 +35,7 @@ function decodeHtml(input: string): string {
 
 export const searchTool = tool({
   description: "Search the web for current information",
-  parameters: z.object({
+  inputSchema: z.object({
     query: z.string(),
     maxResults: z.number().default(5),
   }),
@@ -69,9 +70,12 @@ export const searchTool = tool({
         return "Search unavailable."
       }
 
-      return results
+      const rawOutput = results
         .map((item) => `${item.title}\n${item.url}\n${item.snippet}\n---`)
         .join("\n")
+
+      const filtered = filterToolResult(rawOutput)
+      return filtered.sanitized
     } catch (err) {
       logger.error("search failed", err)
       return "Search unavailable."
@@ -81,7 +85,7 @@ export const searchTool = tool({
 
 export const memoryQueryTool = tool({
   description: "Search Orion memory for past conversations",
-  parameters: z.object({
+  inputSchema: z.object({
     query: z.string(),
     userId: z.string().default("owner"),
   }),
@@ -96,7 +100,7 @@ export const memoryQueryTool = tool({
 
 export const fileReadTool = tool({
   description: "Read a file",
-  parameters: z.object({
+  inputSchema: z.object({
     path: z.string(),
   }),
   execute: async ({ path }) => {
@@ -110,7 +114,7 @@ export const fileReadTool = tool({
 
 export const fileWriteTool = tool({
   description: "Write content to a file",
-  parameters: z.object({
+  inputSchema: z.object({
     path: z.string(),
     content: z.string(),
   }),
@@ -126,7 +130,7 @@ export const fileWriteTool = tool({
 
 export const fileListTool = tool({
   description: "List files in a directory",
-  parameters: z.object({
+  inputSchema: z.object({
     path: z.string(),
   }),
   execute: async ({ path }) => {
@@ -143,7 +147,7 @@ export const fileListTool = tool({
 
 export const terminalTool = tool({
   description: "Run a terminal command",
-  parameters: z.object({
+  inputSchema: z.object({
     command: z.string(),
   }),
   execute: async ({ command }) => {
@@ -167,7 +171,7 @@ export const terminalTool = tool({
 
 export const calendarTool = tool({
   description: "Get or add calendar events",
-  parameters: z.object({
+  inputSchema: z.object({
     action: z.enum(["get", "add"]),
     title: z.string().optional(),
     date: z.string().optional(),

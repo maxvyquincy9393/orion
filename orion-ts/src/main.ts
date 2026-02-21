@@ -56,7 +56,7 @@ async function start(): Promise<void> {
   }
 
   if (mode === "gateway") {
-    await new Promise(() => {})
+    await new Promise(() => { })
   }
 
   if (mode === "text" || mode === "all") {
@@ -88,10 +88,10 @@ async function start(): Promise<void> {
 
         await saveMessage(userId, "user", text, "cli")
 
-        const context = await memory.buildContext(userId, text)
+        const { messages } = await memory.buildContext(userId, text)
         const response = await orchestrator.generate("reasoning", {
           prompt: text,
-          context,
+          context: messages,
         })
 
         output.write(`${response}\n`)
