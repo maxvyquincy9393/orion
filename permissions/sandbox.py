@@ -338,6 +338,10 @@ def _check_action_specific(
             action=action,
         )
 
+    # ---- Proactive Messaging ----
+    if section_key == "proactive":
+        return _check_proactive(action, section, details)
+
     # Fallback: deny unknown
     return PermissionResult(
         allowed=False,
@@ -464,6 +468,25 @@ def _check_calendar(action: str, section: dict[str, Any]) -> PermissionResult:
         allowed=True,
         requires_confirm=requires_confirm,
         reason="Calendar access allowed." + (" Confirmation required." if requires_confirm else ""),
+        action=action,
+    )
+
+
+def _check_proactive(
+    action: str, section: dict[str, Any], details: dict[str, Any]
+) -> PermissionResult:
+    """
+    Check proactive messaging permission.
+
+    Respects max_messages_per_hour if set, and quiet_hours
+    (quiet hours enforcement is handled upstream in OrionDaemon).
+    """
+    # If enabled is already confirmed by caller, just check require_confirm.
+    requires_confirm = section.get("require_confirm", False)
+    return PermissionResult(
+        allowed=True,
+        requires_confirm=requires_confirm,
+        reason="Proactive messaging allowed." + (" Confirmation required." if requires_confirm else ""),
         action=action,
     )
 

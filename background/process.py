@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from background.triggers import TriggerEngine
 import config
 
 _log = logging.getLogger("orion.daemon")
@@ -55,15 +56,20 @@ class OrionDaemon:
         self._start_time: Optional[datetime] = None
         self._cycle_count = 0
         self._last_trigger: Optional[str] = None
-        self._trigger_engine = None
+        self._trigger_engine: Optional[TriggerEngine] = None
         self._quiet_hours = self._load_quiet_hours()
 
     def _load_quiet_hours(self) -> dict:
-        """Load quiet hours config."""
-        try:
-            from permissions.config_loader import load_config, get
+        """
+        Load quiet hours from permissions.yaml proactive section.
 
-            load_config(config.PERMISSIONS_YAML_PATH)
+        Returns:
+            Dict with start and end keys (e.g. {"start": "22:00", "end": "08:00"}).
+        """
+        try:
+            from permissions.config_loader import load, get
+
+            load(config.PERMISSIONS_YAML_PATH)
             proactive = get("proactive")
             if proactive:
                 return proactive.get("quiet_hours", {"start": "22:00", "end": "08:00"})
@@ -72,23 +78,28 @@ class OrionDaemon:
         return {"start": "22:00", "end": "08:00"}
 
     def _is_quiet_hours(self) -> bool:
-        """Check if current time is within quiet hours."""
+        """
+        Check if current local time falls within the configured quiet hours.
+
+        Returns:
+            True if Orion should suppress proactive outreach.
+        """
         now = datetime.now()
         current_time = now.strftime("%H:%M")
 
         start = self._quiet_hours.get("start", "22:00")
         end = self._quiet_hours.get("end", "08:00")
 
-        if start <= end:
-            return start <= current_time < end
-        else:
+        # Handle overnight range (e.g. 22:00 to 08:00)
+        if start > end:
             return current_time >= start or current_time < end
+        return start <= current_time < end
 
     def start(self) -> None:
         """
-        Start the daemon loop in a separate thread.
+        Start the daemon loop in a separate background thread.
 
-        Never blocks main thread.
+        Never blocks the main thread.
 
         Example:
             daemon.start()
@@ -126,7 +137,7 @@ class OrionDaemon:
         _log.info("DAEMON STOPPED | cycles=%d", self._cycle_count)
 
     def _loop(self) -> None:
-        """Main daemon loop - runs every interval_seconds."""
+        """Main daemon loop. Runs every interval_seconds until stopped."""
         while self._running:
             try:
                 self.run_cycle()
@@ -140,10 +151,10 @@ class OrionDaemon:
         Execute a single daemon cycle.
 
         Steps:
-        1. Build context dict
-        2. Get fired triggers
-        3. For each trigger: check permission, send message
-        4. Check pending threads for follow-ups
+            1. Build context dict (time, pending threads, last message timestamp)
+            2. Evaluate all triggers via TriggerEngine
+            3. For each fired trigger: check sandbox permission, open thread, send message
+            4. Check all pending threads for follow-up eligibility
 
         Example:
             daemon.run_cycle()
@@ -154,15 +165,13 @@ class OrionDaemon:
         _log.debug("DAEMON CYCLE | cycle=%d", self._cycle_count)
 
         if self._is_quiet_hours():
-            _log.debug("DAEMON | Quiet hours - skipping proactive messages")
+            _log.debug("DAEMON | Quiet hours active - skipping proactive messages")
             self._check_follow_ups()
             return
 
         context = self._build_context()
 
         if self._trigger_engine is None:
-            from background.triggers import TriggerEngine
-
             self._trigger_engine = TriggerEngine()
 
         fired_triggers = self._trigger_engine.get_fired_triggers(context)
@@ -174,7 +183,7 @@ class OrionDaemon:
 
         cycle_duration = (datetime.now(timezone.utc) - cycle_start).total_seconds()
         _log.info(
-            "DAEMON CYCLE COMPLETE | cycle=%d | triggers=%d | duration=%.2fs",
+            "DAEMON CYCLE COMPLETE | cycle=%d | triggers_fired=%d | duration=%.2fs",
             self._cycle_count,
             len(fired_triggers),
             cycle_duration,
@@ -182,20 +191,16 @@ class OrionDaemon:
 
     def _build_context(self) -> dict[str, Any]:
         """
-        Build context dict for trigger evaluation.
+        Build context dict used by TriggerEngine for evaluation.
 
         Returns:
-            Context with current_time, day, last_message_time, pending_threads.
+            Dict with keys: current_time, day, hour, minute,
+            last_message_time, pending_threads.
         """
         now = datetime.now(timezone.utc)
         day_names = [
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-            "sunday",
+            "monday", "tuesday", "wednesday", "thursday",
+            "friday", "saturday", "sunday",
         ]
 
         context: dict[str, Any] = {
@@ -209,9 +214,7 @@ class OrionDaemon:
 
         try:
             import core.memory as memory
-
-            user_id = config.DEFAULT_USER_ID
-            history = memory.get_history(user_id, limit=1)
+            history = memory.get_history(config.DEFAULT_USER_ID, limit=1)
             if history:
                 last_msg = history[-1]
                 if last_msg.get("timestamp"):
@@ -223,25 +226,26 @@ class OrionDaemon:
 
         try:
             from background.thread_manager import get_pending_threads
-
             context["pending_threads"] = get_pending_threads(config.DEFAULT_USER_ID)
         except Exception:
             pass
 
         return context
 
-    def _process_trigger(self, trigger, context: dict) -> None:
+    def _process_trigger(self, trigger: Any, context: dict) -> None:
         """
-        Process a fired trigger.
+        Process a single fired trigger.
+
+        Checks sandbox permission, opens a thread, sends the message, and
+        marks the trigger as fired on success.
 
         Args:
-            trigger: The Trigger that fired.
-            context: Context dict.
+            trigger: The Trigger dataclass instance that fired.
+            context: The current daemon context dict.
         """
         try:
             from permissions.permission_types import PermissionAction
             from permissions import sandbox
-            from background.triggers import TriggerEngine
 
             result = sandbox.check(
                 PermissionAction.PROACTIVE_MESSAGE.value,
@@ -259,19 +263,20 @@ class OrionDaemon:
 
             thread_id = open_thread(
                 config.DEFAULT_USER_ID,
-                f"Trigger: {trigger.id}",
+                f"trigger:{trigger.id}",
             )
 
-            engine = TriggerEngine()
-            message = engine.build_message(trigger, context)
+            message = self._trigger_engine.build_message(trigger, context)
 
             chat_id = getattr(config, "TELEGRAM_CHAT_ID", config.DEFAULT_USER_ID)
             success = send(chat_id, message)
 
             if success:
-                engine.mark_fired(trigger.id)
+                self._trigger_engine.mark_fired(trigger.id)
                 self._last_trigger = trigger.id
-                _log.info("TRIGGER SENT | id=%s | thread=%s", trigger.id, thread_id)
+                _log.info(
+                    "TRIGGER SENT | id=%s | thread=%s", trigger.id, thread_id
+                )
             else:
                 _log.error("TRIGGER SEND FAILED | id=%s", trigger.id)
 
@@ -279,13 +284,14 @@ class OrionDaemon:
             _log.error("TRIGGER PROCESS ERROR | id=%s | error=%s", trigger.id, exc)
 
     def _check_follow_ups(self) -> None:
-        """Check pending threads for follow-ups."""
+        """
+        Check all pending threads to determine if a follow-up message should be sent.
+
+        A follow-up is sent when a thread has been in WAITING state for more than
+        1 hour with no user response.
+        """
         try:
-            from background.thread_manager import (
-                get_pending_threads,
-                should_follow_up,
-                set_thread_waiting,
-            )
+            from background.thread_manager import get_pending_threads, should_follow_up
             from delivery.messenger import send
 
             pending = get_pending_threads(config.DEFAULT_USER_ID)
@@ -294,24 +300,27 @@ class OrionDaemon:
                 thread_id = thread.get("thread_id")
                 state = thread.get("state")
 
-                if state == "waiting":
-                    if should_follow_up(thread_id):
-                        message = f"Following up on: {thread.get('trigger', 'our conversation')}. Still need help?"
-                        chat_id = getattr(
-                            config, "TELEGRAM_CHAT_ID", config.DEFAULT_USER_ID
-                        )
-                        send(chat_id, message)
-                        _log.info("FOLLOW-UP SENT | thread_id=%s", thread_id)
+                if state == "waiting" and should_follow_up(thread_id):
+                    message = (
+                        f"Following up on: {thread.get('trigger', 'our conversation')}. "
+                        "Still need help?"
+                    )
+                    chat_id = getattr(
+                        config, "TELEGRAM_CHAT_ID", config.DEFAULT_USER_ID
+                    )
+                    send(chat_id, message)
+                    _log.info("FOLLOW-UP SENT | thread_id=%s", thread_id)
 
         except Exception as exc:
             _log.error("FOLLOW-UP CHECK ERROR | %s", exc)
 
     def get_status(self) -> dict[str, Any]:
         """
-        Get daemon status.
+        Return current daemon status.
 
         Returns:
-            Status dict with running, uptime, cycle_count, etc.
+            Dict with keys: running, uptime_seconds, cycle_count,
+            interval_seconds, last_trigger, quiet_hours.
         """
         uptime = 0
         if self._start_time:
@@ -329,7 +338,7 @@ class OrionDaemon:
 
 def start_daemon() -> OrionDaemon:
     """
-    Start the Orion background daemon process.
+    Start the Orion background daemon if not already running.
 
     Returns:
         The OrionDaemon instance.
@@ -363,10 +372,10 @@ def stop_daemon() -> None:
 
 def health_check() -> dict:
     """
-    Check the health status of the background daemon.
+    Return health status of the background daemon.
 
     Returns:
-        A dict with status info: running, uptime_seconds, cycle_count, etc.
+        Dict with keys: status, uptime_seconds, cycle_count, active_threads.
 
     Example:
         status = health_check()
@@ -381,7 +390,6 @@ def health_check() -> dict:
 
     try:
         from background.thread_manager import get_pending_threads
-
         pending = get_pending_threads(config.DEFAULT_USER_ID)
         status["active_threads"] = len(pending)
     except Exception:
@@ -392,9 +400,9 @@ def health_check() -> dict:
 
 def get_daemon() -> Optional[OrionDaemon]:
     """
-    Get the current daemon instance.
+    Return the current daemon instance, or None if not started.
 
     Returns:
-        OrionDaemon instance or None if not started.
+        OrionDaemon instance or None.
     """
     return _daemon_instance

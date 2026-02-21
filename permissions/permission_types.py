@@ -47,9 +47,14 @@ class PermissionAction(Enum):
     # --- System Info ---
     SYSTEM_INFO = "system.info"
 
+    # --- Proactive Messaging ---
+    # Used by the background daemon when initiating outreach to the user.
+    # Must pass through sandbox.check() before any proactive message is sent.
+    PROACTIVE_MESSAGE = "proactive.message"
+
 
 # ---------------------------------------------------------------------------
-# Mapping from PermissionAction.value → permissions.yaml section key
+# Mapping from PermissionAction.value to permissions.yaml section key.
 # Used by the sandbox to look up the correct config section.
 # ---------------------------------------------------------------------------
 ACTION_TO_SECTION: dict[str, str] = {
@@ -64,6 +69,7 @@ ACTION_TO_SECTION: dict[str, str] = {
     PermissionAction.BROWSER_NAVIGATE.value: "browsing",
     PermissionAction.BROWSER_SEARCH.value: "search",
     PermissionAction.SYSTEM_INFO.value: "system_info",
+    PermissionAction.PROACTIVE_MESSAGE.value: "proactive",
 }
 
 

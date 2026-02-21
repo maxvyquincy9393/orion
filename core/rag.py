@@ -21,6 +21,10 @@ _handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-8s  %(message
 _log.addHandler(_handler)
 _log.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
 
+# Maximum number of chunks to attempt deletion per document.
+# Chunk IDs are deterministic: {parent_doc_id}_chunk_{0..MAX_CHUNKS-1}
+_MAX_CHUNKS_PER_DOC = 500
+
 
 def _get_text_splitter():
     """
@@ -43,6 +47,9 @@ def ingest(text: str, source: str, user_id: str, metadata: dict | None = None) -
     """
     Ingest text into the RAG pipeline: chunk, embed, and store.
 
+    Chunk IDs follow a deterministic format: {parent_doc_id}_chunk_{index}
+    This format is relied upon by delete_document() for reliable cleanup.
+
     Args:
         text: The raw text to ingest.
         source: The source identifier (e.g., file path, URL, conversation ID).
@@ -50,7 +57,7 @@ def ingest(text: str, source: str, user_id: str, metadata: dict | None = None) -
         metadata: Optional additional metadata.
 
     Returns:
-        The document ID of the first chunk (or parent document).
+        The parent document ID string, or empty string on failure.
 
     Example:
         doc_id = ingest("Long text content...", "chat_123", "owner")
@@ -75,6 +82,7 @@ def ingest(text: str, source: str, user_id: str, metadata: dict | None = None) -
     meta["total_chunks"] = len(chunks)
 
     for i, chunk in enumerate(chunks):
+        # Chunk ID format is deterministic — delete_document() relies on this.
         chunk_id = f"{parent_doc_id}_chunk_{i}"
         chunk_meta = dict(meta)
         chunk_meta["chunk_index"] = i
@@ -97,17 +105,17 @@ def ingest_file(path: str, user_id: str) -> list[str]:
     Load a file, chunk its content, and ingest all chunks.
 
     Detects file type by extension and uses the appropriate LangChain loader:
-        - .pdf  → PyPDFLoader
-        - .txt  → TextLoader
-        - .md   → UnstructuredMarkdownLoader
-        - .docx → Docx2txtLoader
+        .pdf  -> PyPDFLoader
+        .txt  -> TextLoader
+        .md   -> UnstructuredMarkdownLoader
+        .docx -> Docx2txtLoader
 
     Args:
         path: The file path to ingest.
         user_id: The user ID for access control.
 
     Returns:
-        A list of document IDs (one per top-level document/chunk group).
+        A list of parent document IDs, one per loaded document.
 
     Example:
         doc_ids = ingest_file("~/Documents/report.pdf", "owner")
@@ -160,33 +168,23 @@ def _load_file(file_path: Path, suffix: str) -> list[Any]:
     """
     if suffix == ".pdf":
         from langchain_community.document_loaders import PyPDFLoader
-
-        loader = PyPDFLoader(str(file_path))
-        return loader.load()
+        return PyPDFLoader(str(file_path)).load()
 
     if suffix == ".txt":
         from langchain_community.document_loaders import TextLoader
-
-        loader = TextLoader(str(file_path), encoding="utf-8")
-        return loader.load()
+        return TextLoader(str(file_path), encoding="utf-8").load()
 
     if suffix == ".md":
         from langchain_community.document_loaders import UnstructuredMarkdownLoader
-
-        loader = UnstructuredMarkdownLoader(str(file_path))
-        return loader.load()
+        return UnstructuredMarkdownLoader(str(file_path)).load()
 
     if suffix == ".docx":
         from langchain_community.document_loaders import Docx2txtLoader
-
-        loader = Docx2txtLoader(str(file_path))
-        return loader.load()
+        return Docx2txtLoader(str(file_path)).load()
 
     _log.warning("Unsupported file type: %s, treating as plain text", suffix)
     from langchain_community.document_loaders import TextLoader
-
-    loader = TextLoader(str(file_path), encoding="utf-8")
-    return loader.load()
+    return TextLoader(str(file_path), encoding="utf-8").load()
 
 
 def query(question: str, user_id: str, top_k: int = 5) -> list[dict]:
@@ -199,18 +197,12 @@ def query(question: str, user_id: str, top_k: int = 5) -> list[dict]:
         top_k: Maximum number of results to return.
 
     Returns:
-        A list of dicts, each containing:
-            - "text": The matched text content
-            - "score": Similarity score (0-1)
-            - "metadata": Associated metadata dict
+        A list of dicts with keys: text, score, metadata.
 
     Example:
         results = query("What is OAuth?", "owner", top_k=3)
-        for r in results:
-            print(r["text"])
     """
     filters = {"user_id": user_id}
-
     results = vector_store.search(question, top_k=top_k, filters=filters)
 
     formatted = []
@@ -246,11 +238,11 @@ def build_context(question: str, user_id: str) -> str:
         user_id: The user ID for access control.
 
     Returns:
-        A formatted context string with source attribution.
+        A formatted context string with source attribution, or empty string
+        if no relevant context is found.
 
     Example:
         context = build_context("Explain the auth system", "owner")
-        prompt = f"Context:\n{context}\n\nQuestion: {question}"
     """
     results = query(question, user_id, top_k=5)
 
@@ -266,10 +258,7 @@ def build_context(question: str, user_id: str) -> str:
         source = meta.get("source", "unknown")
         chunk_idx = meta.get("chunk_index", "")
 
-        source_label = source
-        if chunk_idx != "":
-            source_label = f"{source} (chunk {chunk_idx})"
-
+        source_label = f"{source} (chunk {chunk_idx})" if chunk_idx != "" else source
         context_parts.append(
             f"[{i}] Source: {source_label} (relevance: {score:.2f})\n{text}"
         )
@@ -285,24 +274,39 @@ def delete_document(doc_id: str) -> None:
     """
     Delete a document and all its chunks from the vector store.
 
+    Uses deterministic chunk ID construction rather than semantic search,
+    which is unreliable for exact document lookup.
+
+    Chunk IDs follow the format: {parent_doc_id}_chunk_{index}
+    This matches exactly how ingest() creates them.
+
+    The function attempts deletion of up to _MAX_CHUNKS_PER_DOC chunk IDs
+    in a single batch call. The vector store ignores IDs that do not exist,
+    so over-generating IDs is safe and preferable to under-generating.
+
     Args:
-        doc_id: The parent document ID to delete.
+        doc_id: The parent document ID returned by ingest().
 
     Example:
-        delete_document("abc123")
+        doc_id = ingest("some text", "source", "owner")
+        delete_document(doc_id)
     """
-    all_docs = vector_store.search(doc_id, top_k=100)
-    chunk_ids = []
-    for doc in all_docs:
-        meta = doc.get("metadata", {})
-        if isinstance(meta, dict):
-            if meta.get("parent_doc_id") == doc_id:
-                chunk_ids.append(doc.get("id", ""))
-            elif doc.get("id", "").startswith(f"{doc_id}_chunk_"):
-                chunk_ids.append(doc.get("id", ""))
+    if not doc_id:
+        _log.warning("delete_document called with empty doc_id, skipping")
+        return
 
-    if chunk_ids:
-        vector_store.delete(chunk_ids)
-        _log.info("Deleted document %s with %d chunks", doc_id, len(chunk_ids))
-    else:
-        _log.warning("No chunks found for document %s", doc_id)
+    # Build the full list of possible chunk IDs deterministically.
+    # The vector store will silently ignore IDs that do not exist.
+    candidate_ids = [
+        f"{doc_id}_chunk_{i}" for i in range(_MAX_CHUNKS_PER_DOC)
+    ]
+
+    try:
+        vector_store.delete(candidate_ids)
+        _log.info(
+            "Deleted document %s (attempted %d chunk IDs)",
+            doc_id,
+            len(candidate_ids),
+        )
+    except Exception as exc:
+        _log.error("Failed to delete document %s: %s", doc_id, exc)
