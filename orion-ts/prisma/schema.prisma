@@ -103,6 +103,9 @@ model MemoryNode {
   validUntil DateTime?
   category   String
   embedding  Bytes?
+  utilityScore   Float @default(0.5)
+  retrievalCount Int   @default(0)
+  successCount   Int   @default(0)
 
   @@index([userId, level])
   @@index([userId, validUntil])

@@ -26,6 +26,7 @@ interface MemoryRow extends Record<string, unknown> {
   vector: number[]
   metadata: string
   createdAt: number
+  utilityScore: number
 }
 
 export interface SearchResult {
@@ -160,6 +161,7 @@ export class MemoryStore {
       vector: dummyVector,
       metadata: "{}",
       createdAt: Date.now(),
+      utilityScore: 0.5,
     }
 
     const table = await this.db.createTable("memories", [initialRow])
@@ -243,6 +245,7 @@ export class MemoryStore {
         vector,
         metadata: JSON.stringify(metadata),
         createdAt: Date.now(),
+        utilityScore: 0.5,
       }
 
       await this.table.add([row])
