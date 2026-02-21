@@ -301,6 +301,7 @@ export class GatewayServer {
         model: "llama-3.3-70b-versatile", // TODO: Get actual model
         promptTokens,
         completionTokens,
+        totalTokens: promptTokens + completionTokens,
         latencyMs,
         requestType: "chat",
         success: usageSuccess,

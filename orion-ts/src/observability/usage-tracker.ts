@@ -220,28 +220,28 @@ export class UsageTracker {
     this.ringBuffer = []
 
     try {
-      // Batch insert using Prisma
-      await prisma.$transaction(
-        batch.map((record) =
-          prisma.usageEvent.create({
-            data: {
-              userId: record.userId,
-              sessionId: record.sessionId,
-              provider: record.provider,
-              model: record.model,
-              promptTokens: record.promptTokens,
-              completionTokens: record.completionTokens,
-              totalTokens: record.totalTokens,
-              estimatedCostUsd: record.estimatedCostUsd,
-              latencyMs: record.latencyMs,
-              requestType: record.requestType,
-              success: record.success,
-              errorType: record.errorType,
-              timestamp: record.timestamp,
-            },
-          }),
-        ),
+      // Batch insert using Prisma - create array of promises
+      const promises = batch.map((rec) =>
+        prisma.usageEvent.create({
+          data: {
+            userId: rec.userId,
+            sessionId: rec.sessionId,
+            provider: rec.provider,
+            model: rec.model,
+            promptTokens: rec.promptTokens,
+            completionTokens: rec.completionTokens,
+            totalTokens: rec.totalTokens,
+            estimatedCostUsd: rec.estimatedCostUsd,
+            latencyMs: rec.latencyMs,
+            requestType: rec.requestType,
+            success: rec.success,
+            errorType: rec.errorType,
+            timestamp: rec.timestamp,
+          },
+        }),
       )
+      
+      await prisma.$transaction(promises)
       
       log.debug(`Flushed ${batch.length} usage records`)
     } catch (error) {

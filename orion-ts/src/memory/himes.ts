@@ -202,15 +202,14 @@ export class HiMeSCoordinator {
   }
 
   /**
-   * Pre-fetch relevant documents using hybrid retrieval (OC-10)
+   * Pre-fetch relevant documents using temporal index
    *
-   * Combines:
+   * Future enhancement (OC-10):
    * - Full-text search (FTS) for keyword matching
    * - Vector search for semantic similarity
    * - RRF (Reciprocal Rank Fusion) for optimal ranking
    *
-   * Falls back to temporal index if hybrid retrieval fails or
-   * if query complexity indicates temporal relevance is more important.
+   * Currently uses temporal index for all queries.
    */
   private async preFetchDocs(
     userId: string,
@@ -219,18 +218,7 @@ export class HiMeSCoordinator {
     try {
       const complexity = detectQueryComplexity(query)
 
-      // For high temporal relevance queries, use temporal index
-      if (complexity.temporalWeight > 0.7) {
-        const results = await temporalIndex.retrieve(userId, query, complexity)
-        return results.slice(0, 5).map((result, index) => ({
-          content: result.content,
-          relevanceScore: Math.max(0.2, 1 - index * 0.12),
-        }))
-      }
-
-      // Use hybrid retrieval for semantic + lexical search
-      // Note: queryVector would be generated from the query text
-      // For now, we fall back to temporal index if vector not available
+      // Use temporal index for retrieval
       const results = await temporalIndex.retrieve(userId, query, complexity)
 
       return results.slice(0, 5).map((result, index) => ({
