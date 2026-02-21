@@ -154,10 +154,11 @@ SEARXNG_URL: str = _get_optional("SEARXNG_URL", "http://localhost:8888")
 DUCKDUCKGO_ENABLED: bool = _get_bool("DUCKDUCKGO_ENABLED", default=True)
 
 # ===========================================================================
-# Section 4 — Delivery
+# Section 4 - Delivery
 # ===========================================================================
 
 TELEGRAM_BOT_TOKEN: str = _get_optional("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID: str = _get_optional("TELEGRAM_CHAT_ID")
 
 # ===========================================================================
 # Section 5 — Voice (free local options)
@@ -172,7 +173,9 @@ ELEVENLABS_API_KEY: str = _get_optional("ELEVENLABS_API_KEY")
 # ===========================================================================
 
 VISION_ENGINE: str = _get_optional("VISION_ENGINE", "gemini")  # gemini | openai
-VISION_MODE: str = _get_optional("VISION_MODE", "passive")     # passive | active | on-demand | screen
+VISION_MODE: str = _get_optional(
+    "VISION_MODE", "passive"
+)  # passive | active | on-demand | screen
 FRAME_SAMPLE_INTERVAL: int = _get_int("FRAME_SAMPLE_INTERVAL", 2)
 MOTION_THRESHOLD: float = _get_float("MOTION_THRESHOLD", 0.15)
 
@@ -199,15 +202,17 @@ LOG_LEVEL: str = _get_optional("LOG_LEVEL", "INFO")
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parent
 LOGS_DIR: Path = PROJECT_ROOT / "logs"
+DATA_DIR: Path = PROJECT_ROOT / "data"
 PERMISSIONS_YAML_PATH: Path = PROJECT_ROOT / PERMISSIONS_CONFIG
 
-# Ensure logs directory exists
 LOGS_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True)
 
 
 # ===========================================================================
 # Validation helpers
 # ===========================================================================
+
 
 def validate_required_for_engine(engine: str) -> None:
     """
