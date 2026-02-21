@@ -1,4 +1,4 @@
-﻿import readline from "node:readline/promises"
+import readline from "node:readline/promises"
 import { stdin as input, stdout as output } from "node:process"
 
 import config from "./config.js"
@@ -6,8 +6,17 @@ import { prisma, saveMessage } from "./database/index.js"
 import { orchestrator } from "./engines/orchestrator.js"
 import { createLogger } from "./logger.js"
 import { memory } from "./memory/store.js"
+import { gateway } from "./gateway/server.js"
+import { channelManager } from "./channels/manager.js"
+import { daemon } from "./background/daemon.js"
+import { agentRunner } from "./agents/runner.js"
+import { skillManager } from "./skills/manager.js"
 
 const log = createLogger("main")
+
+const mode = process.argv.includes("--mode")
+  ? process.argv[process.argv.indexOf("--mode") + 1]
+  : "text"
 
 async function start(): Promise<void> {
   log.info("starting orion-ts")
@@ -19,6 +28,8 @@ async function start(): Promise<void> {
 
   await memory.init()
   await orchestrator.init()
+  await skillManager.init()
+  void agentRunner
 
   const available = orchestrator.getAvailableEngines()
   if (available.length > 0) {
@@ -27,50 +38,73 @@ async function start(): Promise<void> {
     log.warn("no engines available")
   }
 
-  const rl = readline.createInterface({ input, output })
+  console.log("=== Orion TS ===")
+  console.log(`Mode: ${mode}`)
+  console.log(`Engines: ${available.join(", ") || "none"}`)
 
-  const shutdown = async () => {
-    log.info("shutting down")
-    rl.close()
-    await prisma.$disconnect()
-    process.exit(0)
+  if (mode === "gateway" || mode === "all") {
+    await channelManager.init()
+    await daemon.start()
+    await gateway.start()
+    console.log("Gateway: ws://127.0.0.1:18789")
+    console.log("WebChat: http://127.0.0.1:8080")
   }
 
-  process.on("SIGINT", () => {
-    void shutdown()
-  })
+  if (mode !== "text") {
+    console.log(`Channels: ${channelManager.getConnectedChannels().join(", ") || "none"}`)
+    console.log(`Daemon: ${daemon.isRunning() ? "running" : "stopped"}`)
+  }
 
-  const userId = config.DEFAULT_USER_ID
+  if (mode === "gateway") {
+    await new Promise(() => {})
+  }
 
-  while (true) {
-    try {
-      const text = (await rl.question("> ")).trim()
-      if (!text) {
-        continue
-      }
+  if (mode === "text" || mode === "all") {
+    const rl = readline.createInterface({ input, output })
 
-      if (["exit", "quit", "bye"].includes(text.toLowerCase())) {
-        await shutdown()
-      }
+    const shutdown = async () => {
+      log.info("shutting down")
+      rl.close()
+      await prisma.$disconnect()
+      process.exit(0)
+    }
 
-      await saveMessage(userId, "user", text, "cli")
+    process.on("SIGINT", () => {
+      void shutdown()
+    })
 
-      const context = await memory.buildContext(userId, text)
-      const response = await orchestrator.generate("reasoning", {
-        prompt: text,
-        context,
-      })
+    const userId = config.DEFAULT_USER_ID
 
-      output.write(`${response}\n`)
-      await saveMessage(userId, "assistant", response, "cli")
-    } catch (error) {
-      if (error instanceof Error) {
-        const lowered = error.message.toLowerCase()
-        if (lowered.includes("aborted") || lowered.includes("closed")) {
+    while (true) {
+      try {
+        const text = (await rl.question("> ")).trim()
+        if (!text) {
+          continue
+        }
+
+        if (["exit", "quit", "bye"].includes(text.toLowerCase())) {
           await shutdown()
         }
+
+        await saveMessage(userId, "user", text, "cli")
+
+        const context = await memory.buildContext(userId, text)
+        const response = await orchestrator.generate("reasoning", {
+          prompt: text,
+          context,
+        })
+
+        output.write(`${response}\n`)
+        await saveMessage(userId, "assistant", response, "cli")
+      } catch (error) {
+        if (error instanceof Error) {
+          const lowered = error.message.toLowerCase()
+          if (lowered.includes("aborted") || lowered.includes("closed")) {
+            await shutdown()
+          }
+        }
+        log.error("cli loop failed", error)
       }
-      log.error("cli loop failed", error)
     }
   }
 }
