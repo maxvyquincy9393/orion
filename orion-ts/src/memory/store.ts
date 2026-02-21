@@ -173,7 +173,8 @@ export class MemoryStore {
         }
         dedup.add(message.content)
 
-        const role = message.role === "assistant" ? "assistant" : "user"
+        const role: "assistant" | "user" =
+          message.role === "assistant" ? "assistant" : "user"
         context.push({ role, content: message.content })
       }
 
@@ -193,10 +194,14 @@ export class MemoryStore {
 
       const oldest = history.slice(-50).reverse()
       const compressContext: GenerateOptions["context"] = oldest
-        .map((message) => ({
-          role: message.role === "assistant" ? "assistant" : "user",
-          content: message.content,
-        }))
+        .map((message) => {
+          const role: "assistant" | "user" =
+            message.role === "assistant" ? "assistant" : "user"
+          return {
+            role,
+            content: message.content,
+          }
+        })
         .slice(0, 40)
 
       const summary = await orchestrator.generate("reasoning", {
