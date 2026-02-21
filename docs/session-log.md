@@ -344,14 +344,23 @@ Phase 2 COMPLETE.
 - get_all_tools() - Returns all tools
 - register_tools_with_graph() - Registers with LangGraph agent
 
+Phase 2 COMPLETE.
+
 ### Phase 3 — Vision + Intelligence
 - [ ] Live camera capture (OpenCV)
 - [ ] Frame sampling and motion detection
-- [ ] Vision engine integration
+- [ ] Vision engine integration (Gemini Vision / GPT-4V)
 - [ ] Screen capture mode
-- [ ] Voice pipeline (Whisper local + Coqui TTS)
-- [ ] Long-term memory compression
-- [ ] Proactive trigger intelligence (research phase)
+- [ ] Voice pipeline — STT via Whisper local, TTS via Coqui local
+- [ ] Wake word detection
+- [ ] Real-time voice conversation loop (low latency)
+- [ ] Long-term memory compression (improve existing compress_old_sessions)
+- [ ] Proactive trigger intelligence — pattern detection from conversation history
+- [ ] vision/stream.py — camera capture + frame sampling
+- [ ] vision/processor.py — vision engine integration
+- [ ] delivery/voice.py — full voice pipeline
+- [ ] Update agents/nodes.py search_node and code_node (stubs from Phase 1)
+- [ ] Integration test: end-to-end conversation with engine online
 
 ---
 
@@ -392,8 +401,10 @@ Established during sessions — all AI assistants must follow:
 2. Say: **"Read SKILL.md and docs/session-log.md then continue Orion"**
 3. Claude will know exactly where we are and what to do next
 
-Current state: Phase 2 complete. Phase 3 is next - live camera capture, vision engine, voice pipeline.
+Current state: Phase 2 complete. Phase 3 is next — vision layer (camera + screen capture), voice pipeline (Whisper + Coqui), and proactive pattern intelligence.
+
+Phase 3 priority order: voice pipeline first (fastest to test), then vision layer, then proactive pattern intelligence.
 
 ---
 
-*Last updated: February 2026*
+*Last updated: February 2026 — Phase 2 complete, Phase 3 starting*
