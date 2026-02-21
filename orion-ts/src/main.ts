@@ -64,6 +64,12 @@ async function start(): Promise<void> {
       output.write(`${response}\n`)
       await saveMessage(userId, "assistant", response, "cli")
     } catch (error) {
+      if (error instanceof Error) {
+        const lowered = error.message.toLowerCase()
+        if (lowered.includes("aborted") || lowered.includes("closed")) {
+          await shutdown()
+        }
+      }
       log.error("cli loop failed", error)
     }
   }
