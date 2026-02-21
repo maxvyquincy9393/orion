@@ -87,7 +87,7 @@ model ApprovedUser {
 
 model DeviceToken {
   id         String   @id @default(cuid())
-  tokenHash  String   @unique
+  tokenHash  String   @unique  // SHA-256 hashed
   userId     String
   channel    String
   deviceName String   @default("unknown")
