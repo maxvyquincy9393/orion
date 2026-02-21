@@ -116,6 +116,14 @@ model UserProfile {
   updatedAt  DateTime @updatedAt
 }
 
+/**
+ * Memory Node with IEU (Intent-Experience-Utility) triplet support
+ * 
+ * Stores memories with:
+ * - Q-value for Bellman Q-learning updates
+ * - Utility score for ranking
+ * - Metadata for intent tracking and experience context
+ */
 model MemoryNode {
   id         String   @id @default(cuid())
   userId     String
@@ -125,12 +133,22 @@ model MemoryNode {
   validUntil DateTime?
   category   String
   embedding  Bytes?
-  utilityScore   Float @default(0.5)
-  retrievalCount Int   @default(0)
-  successCount   Int   @default(0)
+  
+  // IEU Triplet components
+  utilityScore   Float  @default(0.5)  // U: Utility score for ranking
+  qValue         Float  @default(0.5)  // Q-value for Bellman updates
+  
+  // Metadata stores intent, experience context, feedback history
+  metadata       Json?
+  
+  // Statistics
+  retrievalCount Int    @default(0)
+  successCount   Int    @default(0)
 
   @@index([userId, level])
   @@index([userId, validUntil])
+  @@index([userId, qValue])      // Index for Q-value based retrieval
+  @@index([userId, utilityScore]) // Index for utility-based ranking
 }
 
 model CausalNode {
