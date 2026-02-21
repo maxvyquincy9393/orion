@@ -38,24 +38,64 @@ from sqlalchemy import (
     Text,
     create_engine,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship, Session as SASession
 
 import config
+
+
+_IS_SQLITE = None
+
+
+def _is_sqlite() -> bool:
+    """
+    Detect if the database backend is SQLite.
+
+    Returns:
+        True if DATABASE_URL starts with 'sqlite', False otherwise.
+    """
+    global _IS_SQLITE
+    if _IS_SQLITE is None:
+        db_url = getattr(config, "DATABASE_URL", "")
+        _IS_SQLITE = db_url.startswith("sqlite")
+    return _IS_SQLITE
+
+
+def UUIDColumn(as_uuid: bool = True, **kwargs):
+    """
+    Create a UUID column appropriate for the current database dialect.
+
+    SQLite does not support native UUID, so we use String(36) instead.
+    PostgreSQL uses the native UUID type.
+
+    Args:
+        as_uuid: Whether to return Python UUID objects (PostgreSQL only).
+        **kwargs: Additional column arguments.
+
+    Returns:
+        SQLAlchemy Column instance.
+    """
+    if _is_sqlite():
+        return Column(String(36), **kwargs)
+    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+    return Column(PG_UUID(as_uuid=as_uuid), **kwargs)
 
 
 # ---------------------------------------------------------------------------
 # Declarative base
 # ---------------------------------------------------------------------------
 
+
 class Base(DeclarativeBase):
     """Shared declarative base for all Orion ORM models."""
+
     pass
 
 
 # ---------------------------------------------------------------------------
 # Enum types
 # ---------------------------------------------------------------------------
+
 
 class MessageRole(str, enum.Enum):
     """
@@ -91,6 +131,7 @@ class ThreadState(str, enum.Enum):
 # Helper
 # ---------------------------------------------------------------------------
 
+
 def _utcnow() -> datetime:
     """Return the current UTC datetime (timezone-aware)."""
     return datetime.now(timezone.utc)
@@ -104,6 +145,7 @@ def _new_uuid() -> uuid.UUID:
 # ===========================================================================
 # User
 # ===========================================================================
+
 
 class User(Base):
     """
@@ -119,9 +161,7 @@ class User(Base):
 
     __tablename__ = "users"
 
-    id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[uuid.UUID] = UUIDColumn(primary_key=True, default=_new_uuid)
     name: Mapped[str] = Column(String(255), nullable=False)
     created_at: Mapped[datetime] = Column(
         DateTime(timezone=True), default=_utcnow, nullable=False
@@ -159,6 +199,7 @@ class User(Base):
 # Message
 # ===========================================================================
 
+
 class Message(Base):
     """
     A single chat message stored permanently for cross-session memory.
@@ -169,18 +210,16 @@ class Message(Base):
         role: One of user / assistant / system (MessageRole enum).
         content: Full message text.
         timestamp: When the message was created (UTC).
-        session_id: FK to sessions (nullable — legacy messages may lack this).
+        session_id: FK to sessions (nullable - legacy messages may lack this).
         thread_id: FK to threads (nullable).
         metadata_: Additional JSON (engine used, token count, etc.).
     """
 
     __tablename__ = "messages"
 
-    id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), primary_key=True, default=_new_uuid
-    )
-    user_id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[uuid.UUID] = UUIDColumn(primary_key=True, default=_new_uuid)
+    user_id: Mapped[uuid.UUID] = UUIDColumn(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     role: Mapped[MessageRole] = Column(
         Enum(MessageRole, name="message_role", create_constraint=True),
@@ -190,13 +229,11 @@ class Message(Base):
     timestamp: Mapped[datetime] = Column(
         DateTime(timezone=True), default=_utcnow, nullable=False, index=True
     )
-    session_id: Mapped[uuid.UUID | None] = Column(
-        UUID(as_uuid=True),
+    session_id: Mapped[uuid.UUID | None] = UUIDColumn(
         ForeignKey("sessions.id", ondelete="SET NULL"),
         nullable=True,
     )
-    thread_id: Mapped[uuid.UUID | None] = Column(
-        UUID(as_uuid=True),
+    thread_id: Mapped[uuid.UUID | None] = UUIDColumn(
         ForeignKey("threads.id", ondelete="SET NULL"),
         nullable=True,
     )
@@ -209,15 +246,11 @@ class Message(Base):
     session: Mapped["Session | None"] = relationship(
         "Session", back_populates="messages"
     )
-    thread: Mapped["Thread | None"] = relationship(
-        "Thread", back_populates="messages"
-    )
+    thread: Mapped["Thread | None"] = relationship("Thread", back_populates="messages")
 
     # DECISION: Composite index on (user_id, timestamp) for efficient history queries
     # WHY: get_history() always filters by user and orders by timestamp
-    __table_args__ = (
-        Index("ix_messages_user_timestamp", "user_id", "timestamp"),
-    )
+    __table_args__ = (Index("ix_messages_user_timestamp", "user_id", "timestamp"),)
 
     def __repr__(self) -> str:
         return (
@@ -230,6 +263,7 @@ class Message(Base):
 # Session
 # ===========================================================================
 
+
 class Session(Base):
     """
     Groups messages into logical conversation sessions.
@@ -240,25 +274,21 @@ class Session(Base):
         id: UUID primary key.
         user_id: FK to users.
         started_at: Session start time (UTC).
-        ended_at: Session end time (nullable — None while active).
+        ended_at: Session end time (nullable - None while active).
         summary: LLM-generated summary after compression (nullable).
         message_count: Running count of messages in this session.
     """
 
     __tablename__ = "sessions"
 
-    id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), primary_key=True, default=_new_uuid
-    )
-    user_id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[uuid.UUID] = UUIDColumn(primary_key=True, default=_new_uuid)
+    user_id: Mapped[uuid.UUID] = UUIDColumn(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     started_at: Mapped[datetime] = Column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
-    ended_at: Mapped[datetime | None] = Column(
-        DateTime(timezone=True), nullable=True
-    )
+    ended_at: Mapped[datetime | None] = Column(DateTime(timezone=True), nullable=True)
     summary: Mapped[str | None] = Column(Text, nullable=True)
     message_count: Mapped[int] = Column(Integer, default=0, nullable=False)
 
@@ -268,9 +298,7 @@ class Session(Base):
         "Message", back_populates="session"
     )
 
-    __table_args__ = (
-        Index("ix_sessions_user_started", "user_id", "started_at"),
-    )
+    __table_args__ = (Index("ix_sessions_user_started", "user_id", "started_at"),)
 
     def __repr__(self) -> str:
         return (
@@ -283,6 +311,7 @@ class Session(Base):
 # Memory  (key-value long-term store)
 # ===========================================================================
 
+
 class Memory(Base):
     """
     Key-value long-term memory entries with importance scoring.
@@ -294,7 +323,7 @@ class Memory(Base):
         user_id: FK to users.
         key: Topic / label (e.g. "favorite_language", "birthday").
         value: The stored information as text.
-        importance: Float 0.0–1.0 indicating retrieval priority.
+        importance: Float 0.0-1.0 indicating retrieval priority.
         created_at: When this memory was first created (UTC).
         last_accessed: Last time this memory was retrieved (UTC).
         access_count: How many times this memory was read.
@@ -302,11 +331,9 @@ class Memory(Base):
 
     __tablename__ = "memories"
 
-    id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), primary_key=True, default=_new_uuid
-    )
-    user_id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[uuid.UUID] = UUIDColumn(primary_key=True, default=_new_uuid)
+    user_id: Mapped[uuid.UUID] = UUIDColumn(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     key: Mapped[str] = Column(String(255), nullable=False)
     value: Mapped[str] = Column(Text, nullable=False)
@@ -329,8 +356,7 @@ class Memory(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<Memory id={self.id!s} key={self.key!r} "
-            f"importance={self.importance:.2f}>"
+            f"<Memory id={self.id!s} key={self.key!r} importance={self.importance:.2f}>"
         )
 
 
@@ -338,10 +364,11 @@ class Memory(Base):
 # Thread
 # ===========================================================================
 
+
 class Thread(Base):
     """
     A stateful conversation thread.
-    Tracks lifecycle: open → waiting → resolved.
+    Tracks lifecycle: open -> waiting -> resolved.
 
     Attributes:
         id: UUID primary key.
@@ -355,11 +382,9 @@ class Thread(Base):
 
     __tablename__ = "threads"
 
-    id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), primary_key=True, default=_new_uuid
-    )
-    user_id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[uuid.UUID] = UUIDColumn(primary_key=True, default=_new_uuid)
+    user_id: Mapped[uuid.UUID] = UUIDColumn(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     trigger: Mapped[str] = Column(String(255), nullable=False)
     state: Mapped[ThreadState] = Column(
@@ -377,13 +402,9 @@ class Thread(Base):
 
     # relationships
     user: Mapped["User"] = relationship("User", back_populates="threads")
-    messages: Mapped[list["Message"]] = relationship(
-        "Message", back_populates="thread"
-    )
+    messages: Mapped[list["Message"]] = relationship("Message", back_populates="thread")
 
-    __table_args__ = (
-        Index("ix_threads_user_state", "user_id", "state"),
-    )
+    __table_args__ = (Index("ix_threads_user_state", "user_id", "state"),)
 
     def __repr__(self) -> str:
         return (
@@ -395,6 +416,7 @@ class Thread(Base):
 # ===========================================================================
 # CompressedMemory
 # ===========================================================================
+
 
 class CompressedMemory(Base):
     """
@@ -414,8 +436,20 @@ class CompressedMemory(Base):
 
     __tablename__ = "compressed_memories"
 
-    id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), primary_key=True, default=_new_uuid
+    id: Mapped[uuid.UUID] = UUIDColumn(primary_key=True, default=_new_uuid)
+    user_id: Mapped[uuid.UUID] = UUIDColumn(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[uuid.UUID | None] = UUIDColumn(
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    summary: Mapped[str] = Column(Text, nullable=False)
+    original_message_count: Mapped[int] = Column(Integer, nullable=False)
+    date_range_start: Mapped[datetime] = Column(DateTime(timezone=True), nullable=False)
+    date_range_end: Mapped[datetime] = Column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = Column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     user_id: Mapped[uuid.UUID] = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
@@ -427,12 +461,8 @@ class CompressedMemory(Base):
     )
     summary: Mapped[str] = Column(Text, nullable=False)
     original_message_count: Mapped[int] = Column(Integer, nullable=False)
-    date_range_start: Mapped[datetime] = Column(
-        DateTime(timezone=True), nullable=False
-    )
-    date_range_end: Mapped[datetime] = Column(
-        DateTime(timezone=True), nullable=False
-    )
+    date_range_start: Mapped[datetime] = Column(DateTime(timezone=True), nullable=False)
+    date_range_end: Mapped[datetime] = Column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = Column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
@@ -441,9 +471,7 @@ class CompressedMemory(Base):
     user: Mapped["User"] = relationship("User", back_populates="compressed_memories")
     session: Mapped["Session | None"] = relationship("Session")
 
-    __table_args__ = (
-        Index("ix_compressed_user_date", "user_id", "date_range_start"),
-    )
+    __table_args__ = (Index("ix_compressed_user_date", "user_id", "date_range_start"),)
 
     def __repr__(self) -> str:
         return (
@@ -456,6 +484,7 @@ class CompressedMemory(Base):
 # TriggerLog
 # ===========================================================================
 
+
 class TriggerLog(Base):
     """
     Audit log for proactive trigger events.
@@ -467,18 +496,16 @@ class TriggerLog(Base):
         user_id: FK to users.
         trigger_type: Category of the trigger (e.g. "reminder", "anomaly").
         reason: Human-readable explanation of why the trigger fired.
-        urgency: Priority tag — low / medium / high / critical.
+        urgency: Priority tag - low / medium / high / critical.
         acted_on: Whether Orion actually delivered a message for this trigger.
         created_at: When the trigger event occurred (UTC).
     """
 
     __tablename__ = "trigger_logs"
 
-    id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), primary_key=True, default=_new_uuid
-    )
-    user_id: Mapped[uuid.UUID] = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[uuid.UUID] = UUIDColumn(primary_key=True, default=_new_uuid)
+    user_id: Mapped[uuid.UUID] = UUIDColumn(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     trigger_type: Mapped[str] = Column(String(100), nullable=False)
     reason: Mapped[str] = Column(Text, nullable=False)
@@ -491,9 +518,7 @@ class TriggerLog(Base):
     # relationships
     user: Mapped["User"] = relationship("User", back_populates="trigger_logs")
 
-    __table_args__ = (
-        Index("ix_trigger_logs_user_created", "user_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_trigger_logs_user_created", "user_id", "created_at"),)
 
     def __repr__(self) -> str:
         return (
