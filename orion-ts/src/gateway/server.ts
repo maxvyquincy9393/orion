@@ -7,6 +7,7 @@ import { orchestrator } from "../engines/orchestrator.js"
 import { channelManager } from "../channels/manager.js"
 import { memory } from "../memory/store.js"
 import { daemon } from "../background/daemon.js"
+import { multiUser } from "../multiuser/manager.js"
 import { createLogger } from "../logger.js"
 import config from "../config.js"
 
@@ -59,6 +60,7 @@ export class GatewayServer {
         uptime: process.uptime(),
         engines: orchestrator.getAvailableEngines(),
         channels: channelManager.getConnectedChannels(),
+        users: multiUser.listUsers().length,
       }))
 
       app.post<{ Body: { message: string; userId?: string } }>(
@@ -81,9 +83,16 @@ export class GatewayServer {
   }
 
   private async handle(msg: any): Promise<any> {
+    const userId = msg.userId ?? config.DEFAULT_USER_ID
+
+    await multiUser.getOrCreate(userId, "gateway")
+
+    if (!multiUser.isOwner(userId) && msg.type !== "message") {
+      return { type: "error", message: "Unauthorized for this action" }
+    }
+
     switch (msg.type) {
       case "message": {
-        const userId = msg.userId ?? config.DEFAULT_USER_ID
         const context = await memory.buildContext(userId, msg.content)
         const response = await orchestrator.generate("reasoning", {
           prompt: msg.content,
