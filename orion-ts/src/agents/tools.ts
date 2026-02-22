@@ -10,6 +10,17 @@ import { BLOCKED_COMMANDS, guardTerminal, guardFilePath } from "../security/tool
 import { createLogger } from "../logger.js"
 import { skillLoader } from "../skills/loader.js"
 
+// Phase T-1: New Super-Tools
+import { browserTool } from "./tools/browser.js"
+import { httpTool } from "./tools/http.js"
+import { emailTool } from "./tools/email.js"
+import { systemTool } from "./tools/system.js"
+import { notesTool } from "./tools/notes.js"
+import { channelSendTool, channelStatusTool } from "./tools/channel.js"
+import { screenshotAnalyzeTool } from "./tools/screenshot.js"
+import { codeRunnerTool } from "./tools/code-runner.js"
+import { weatherTimeTool } from "./tools/weather-time.js"
+
 const logger = createLogger("tools")
 
 function stripHtml(input: string): string {
@@ -230,6 +241,7 @@ export const calendarTool = tool({
 })
 
 export const orionTools = {
+  // Existing tools
   searchTool,
   memoryQueryTool,
   fileReadTool,
@@ -238,4 +250,15 @@ export const orionTools = {
   read_skill: readSkillTool,
   terminalTool,
   calendarTool,
+  // Phase T-1: Super-Tools
+  browserTool,
+  httpTool,
+  emailTool,
+  systemTool,
+  notesTool,
+  channelSendTool,
+  channelStatusTool,
+  screenshotAnalyzeTool,
+  codeRunnerTool,
+  weatherTimeTool,
 }

@@ -81,6 +81,21 @@ const ConfigSchema = z.object({
   GATEWAY_PORT: intFromEnv.default(18789),
   GATEWAY_HOST: z.string().default("127.0.0.1"),
   AUTO_START_GATEWAY: boolFromEnv.default(false),
+  // Email configuration (T-1.3)
+  EMAIL_HOST: z.string().default(""),
+  EMAIL_PORT: z.string().default("993"),
+  EMAIL_USER: z.string().default(""),
+  EMAIL_PASS: z.string().default(""),
+  EMAIL_SMTP_HOST: z.string().default(""),
+  EMAIL_SMTP_PORT: z.string().default("587"),
+  // Vision configuration (T-1.7)
+  VISION_ENGINE: z.string().default("gemini"),
+  // Voice configuration (T-3)
+  VOICE_WHISPER_MODEL: z.string().default("base"),
+  VOICE_PROFILE: z.string().default("default"),
+  VOICE_LANGUAGE: z.string().default(""),
+  // Channel Send permission (T-1.6)
+  ALLOW_PROACTIVE_CHANNEL_SEND: boolFromEnv.default(false),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
