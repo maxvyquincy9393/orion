@@ -19,6 +19,8 @@ import { causalGraph } from "../memory/causal-graph.js"
 import { pluginLoader } from "../plugin-sdk/loader.js"
 import { eventBus } from "./event-bus.js"
 import { processMessage } from "./message-pipeline.js"
+import { mcpClient, type MCPServerConfig } from "../mcp/client.js"
+import { bootstrapLoader } from "./bootstrap.js"
 
 const log = createLogger("startup")
 
@@ -70,6 +72,20 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   void agentRunner
   initializeEventHandlers()
 
+  // Initialize MCP Client with configuration from orion.json (T-2)
+  try {
+    const orionJsonPath = path.join(workspaceDir, "..", "orion.json")
+    const orionJson = await fs.readFile(orionJsonPath, "utf-8").catch(() => "{}")
+    const orionConfig = JSON.parse(orionJson) as Record<string, unknown>
+    const mcpServers: MCPServerConfig[] = (orionConfig?.mcp as { servers?: MCPServerConfig[] })?.servers || []
+    if (mcpServers.length > 0) {
+      await mcpClient.init(mcpServers)
+      log.info("MCP client initialized", { servers: mcpServers.length })
+    }
+  } catch (mcpError) {
+    log.warn("MCP client initialization failed", { error: String(mcpError) })
+  }
+
   const available = orchestrator.getAvailableEngines()
   if (available.length > 0) {
     log.info("engines loaded", { engines: available })
@@ -82,6 +98,8 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
     if (daemon.isRunning()) {
       daemon.stop()
     }
+    // Shutdown MCP clients
+    await mcpClient.shutdown().catch((err) => log.warn("MCP shutdown error", err))
     await prisma.$disconnect()
   }
 

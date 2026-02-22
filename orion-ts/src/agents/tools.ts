@@ -20,6 +20,8 @@ import { channelSendTool, channelStatusTool } from "./tools/channel.js"
 import { screenshotAnalyzeTool } from "./tools/screenshot.js"
 import { codeRunnerTool } from "./tools/code-runner.js"
 import { weatherTimeTool } from "./tools/weather-time.js"
+// Phase T-2: MCP Tools
+import { mcpCallTool, mcpListTool } from "./tools/mcp.js"
 
 const logger = createLogger("tools")
 
@@ -261,4 +263,7 @@ export const orionTools = {
   screenshotAnalyzeTool,
   codeRunnerTool,
   weatherTimeTool,
+  // Phase T-2: MCP Tools
+  mcpCallTool,
+  mcpListTool,
 }
