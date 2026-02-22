@@ -1,9 +1,19 @@
 /**
- * bootstrap.ts — Workspace file loader with integrity verification.
+ * Bootstrap loader — workspace file reader with integrity verification.
  *
- * Loads the set of markdown "bootstrap files" from the workspace directory
- * into the system prompt. These files define Orion's identity, soul, memory,
- * and operating instructions.
+ * Loads all identity-defining markdown files from the workspace/ directory:
+ * SOUL.md, AGENTS.md, IDENTITY.md, USER.md, TOOLS.md, HEARTBEAT.md, MEMORY.md
+ *
+ * Security guarantees:
+ *   - SHA-256 integrity hash computed on every load
+ *   - Content is security-scanned for steganographic injections (zero-width chars,
+ *     base64 blobs, hidden Markdown instructions)
+ *   - Results are cached with TTL; cache is invalidated on file change
+ *   - Missing files inject a short marker string instead of crashing
+ *
+ * Why file-based and not code-based: workspace files are the source of truth
+ * for identity. Users can edit SOUL.md without touching TypeScript.
+ * This enables personality customization without code deployment.
  *
  * Key features:
  *   - mtime-based file caching (avoids redundant disk reads)
@@ -15,6 +25,9 @@
  * Bootstrap file load order (DM mode):
  *   AGENTS.md → SOUL.md → TOOLS.md → IDENTITY.md → USER.md →
  *   HEARTBEAT.md → BOOTSTRAP.md → MEMORY.md
+ *
+ * Design inspired by: arXiv 2511.14972 (harmful AI companion traits),
+ * arXiv 2508.16609 (social identity as design choice, not accident)
  *
  * @module core/bootstrap
  */

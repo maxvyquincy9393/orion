@@ -11,15 +11,30 @@ import { detectQueryComplexity, temporalIndex } from "./temporal-index.js"
 const log = createLogger("memory.himes")
 
 /**
- * HiMeS (Hierarchical Memory System) Coordinator
+ * HiMeS — Hierarchical Memory System.
  *
- * Manages short-term and long-term context retrieval with OC-10 enhancements:
- * - Hybrid retrieval (FTS + Vector + RRF) via HybridRetriever
- * - Temporal index for time-sensitive queries
- * - Causal graph for relationship tracking
- * - User profiling for personalization
+ * Fuses short-term session context with long-term persistent memory to
+ * assemble the most relevant context for each agent turn.
  *
- * Based on: Hybrid Search + RAG Survey (arXiv 2506.00054)
+ * Architecture:
+ *   Short-term: recent N turns from current session (lossless)
+ *   Long-term: vector + FTS hybrid retrieval via HybridRetriever
+ *   Fusion: RRF-ranked merge of short and long term results
+ *
+ * Memory retrieval uses HybridRetriever (vector + FTS + RRF reranking)
+ * rather than pure semantic search. This handles:
+ *   - Exact matches (names, dates, IDs) → FTS
+ *   - Semantic similarity (concepts, intent) → vector
+ *   - Final ranking → MemRL Q-value weighting
+ *
+ * Additional features:
+ *   - Temporal index for time-sensitive queries
+ *   - Causal graph for relationship tracking
+ *   - User profiling for personalization
+ *
+ * Research basis: arXiv 2601.06152 (HiMeS),
+ * arXiv 2512.13564 (Memory in the Age of AI Agents — taxonomy),
+ * arXiv 2506.00054 (Hybrid Search + RAG Survey)
  */
 
 type ContextMessage = Pick<Message, "role" | "content" | "createdAt">

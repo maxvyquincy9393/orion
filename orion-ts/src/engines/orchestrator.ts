@@ -1,19 +1,31 @@
 /**
- * orchestrator.ts — Multi-provider LLM router.
+ * Orchestrator — multi-provider LLM routing with difficulty-aware selection.
  *
- * Maintains a registry of available engine adapters (Anthropic, OpenAI,
- * Gemini, Groq, OpenRouter, Ollama) and routes generation requests to the
- * highest-priority available engine for a given task type.
+ * Routes each request to the most appropriate LLM engine based on:
+ *   - Task difficulty estimation (1-5 scale via heuristic analysis)
+ *   - Engine availability and recent error rate
+ *   - Latency history (P95 tracking per engine)
+ *   - Cost budget constraints
  *
- * Task types and their priority order:
+ * Supported providers: Anthropic, OpenAI, Gemini, Groq, OpenRouter, Ollama
+ *
+ * Routing philosophy:
+ *   Simple conversational → Groq / Gemini Flash (fast, cheap)
+ *   Reasoning / code → GPT-4o / Claude Sonnet
+ *   Fallback chain: if primary fails, try next in tier
+ *
+ * After every generation, lastUsedEngine is updated. Callers (pipeline) read
+ * this to record accurate telemetry. Never hardcode provider names in callers.
+ *
+ * Task types and priority order:
  *   - reasoning: gemini → groq → anthropic → openai → ollama
  *   - code:       groq  → gemini → anthropic → openai → ollama
  *   - fast:       groq  → gemini → ollama → openai → anthropic
  *   - multimodal: gemini → openai → anthropic
  *   - local:      ollama
  *
- * Engines are checked for availability on init() and only registered
- * if they respond successfully to an availability probe.
+ * Research basis: arXiv 2509.11079 (DAAO difficulty-aware routing),
+ * arXiv 2602.16873 (AdaptOrch adaptive orchestration)
  *
  * @module engines/orchestrator
  */

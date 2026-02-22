@@ -1,10 +1,25 @@
 /**
- * Gateway Server with Observability (OC-11)
+ * Gateway server — WebSocket + HTTP transport layer.
  *
- * Enhanced with:
- * - Usage tracking via UsageTracker
- * - /api/usage/summary endpoint
- * - Request instrumentation
+ * Handles incoming connections from WebChat, external webhooks, and the
+ * REST API. All message processing is delegated to MessagePipeline.
+ * This file is responsible ONLY for:
+ *   - WebSocket connection lifecycle (connect, disconnect, heartbeat)
+ *   - HTTP route definitions
+ *   - Auth/pairing checks (before message reaches pipeline)
+ *   - Channel-specific formatting (markdown adaptation per channel)
+ *   - Usage summary API endpoint (/api/usage/summary)
+ *
+ * What this file does NOT do:
+ *   - Message processing logic (lives in message-pipeline.ts)
+ *   - Memory retrieval (lives in himes.ts, memrl.ts)
+ *   - LLM calls (lives in orchestrator.ts)
+ *   - Security checks beyond pairing (lives in security/)
+ *
+ * OC-11 telemetry: all LLM calls are tracked via usageTracker (singleton).
+ * Usage data is written to data/usage.db asynchronously.
+ * Provider and model are read from orchestrator.getLastUsedEngine() to ensure
+ * accurate tracking (never hardcoded).
  *
  * Based on: Portkey/Maxim/Braintrust observability patterns
  */

@@ -1,20 +1,26 @@
 /**
- * memrl.ts — Memory Reinforcement Learning (MemRL) engine.
+ * MemRL — Memory Reinforcement Learning via Intent-Experience-Utility triplets.
  *
- * Implements two key algorithms:
+ * Implements the two-phase retrieval + Bellman Q-update architecture from:
+ * arXiv 2601.03192 (MemRL: Self-Evolving Memory via Episodic RL)
  *
- * 1. Two-phase retrieval (twoPhaseRetrieve):
- *    Phase 1 — Vector similarity filter (threshold-based)
- *    Phase 2 — Utility/Q-value re-ranking using IEU triplets
- *    Result  — Memories ranked by blended score (50% sim + 30% Q + 20% utility)
+ * Phase A (retrieval): Semantic similarity filter — candidates from vector search
+ * Phase B (ranking): Q-value reranking — high-utility memories surface first
  *
- * 2. Bellman Q-value update (updateFromFeedback):
- *    Q(s,a) = Q(s,a) + α * [r + γ * maxQ(s') - Q(s,a)]
- *    Called after each user turn with the estimated reward signal.
+ * After every agent response, updateFromFeedback() is called to update Q-values:
+ *   Q_new = Q_old + α * (r + γ * max_Q_next - Q_old)    [Bellman equation]
  *
- * Based on research papers:
- *   - MemRL:  arXiv 2601.03192 — experience-based memory optimization
- *   - Mem-α:  arXiv 2509.25911 — intent-aware retrieval with Bellman updates
+ * Over time, memories that reliably lead to good outcomes get higher Q-values
+ * and are retrieved more often. The agent learns what to remember.
+ *
+ * CRITICAL: updateFromFeedback() must be called after EVERY response.
+ * If it is not called, the agent does not learn. This is wired in message-pipeline.ts
+ * Stage 11. Do not bypass the pipeline.
+ *
+ * Memory format: Intent-Experience-Utility triplets
+ *   intent: What was the user trying to achieve?
+ *   experience: What did the agent do, and what happened?
+ *   utility: Q-value [-1.0, 1.0] — learned from outcomes over time
  *
  * @module memory/memrl
  */
