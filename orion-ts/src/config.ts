@@ -100,6 +100,11 @@ const ConfigSchema = z.object({
   VOICE_LANGUAGE: z.string().default(""),
   // Channel Send permission (T-1.6)
   ALLOW_PROACTIVE_CHANNEL_SEND: boolFromEnv.default(false),
+  // Phase I-3: Session Compaction
+  SESSION_COMPACTION_ENABLED: boolFromEnv.default(true),
+  SESSION_CONTEXT_WINDOW_TOKENS: intFromEnv.default(32_000),
+  // Phase I-4: Engine Stats
+  ENGINE_STATS_ENABLED: boolFromEnv.default(true),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)

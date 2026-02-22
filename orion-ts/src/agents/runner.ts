@@ -14,6 +14,7 @@ import { responseCritic } from "../core/critic.js"
 import { taskPlanner, type TaskDAG } from "./task-planner.js"
 import { executionMonitor, type TaskResult } from "./execution-monitor.js"
 import { buildSystemPrompt } from "../core/system-prompt-builder.js"
+import { LoopDetector } from "../core/loop-detector.js"
 
 const logger = createLogger("runner")
 
@@ -154,6 +155,9 @@ export class AgentRunner {
 
     const timeoutMs = 120_000
     let timeoutHandle: NodeJS.Timeout | undefined
+    
+    // Phase I-2: Create LoopDetector instance per supervisor call
+    const loopDetector = new LoopDetector()
 
     const supervisorRun = async (): Promise<string> => {
       const dag = await taskPlanner.plan(goal)
@@ -164,12 +168,23 @@ export class AgentRunner {
       for (const wave of executionWaves) {
         logger.info("executing wave", { tasks: wave.map((node) => node.id) })
 
+        // Phase I-2: Pass loopDetector to executeNode
         const waveResults = await Promise.all(
-          wave.map((node) => executionMonitor.executeNode(node, completedResults)),
+          wave.map((node) => executionMonitor.executeNode(node, completedResults, loopDetector)),
         )
 
         for (const result of waveResults) {
           completedResults.set(result.nodeId, result)
+          
+          // Phase I-2: Check for loop break signal
+          if (result.loopBreak) {
+            logger.warn("supervisor halted by loop detector", { 
+              nodeId: result.nodeId, 
+              signal: result.loopSignal 
+            })
+            // Synthesize with completed results so far
+            break
+          }
         }
       }
 

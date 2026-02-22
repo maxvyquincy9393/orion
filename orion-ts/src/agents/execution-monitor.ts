@@ -1,6 +1,7 @@
 import { createLogger } from "../logger.js"
 import type { TaskNode } from "./task-planner.js"
 import { runSpecializedAgent } from "./specialized-agents.js"
+import { LoopDetector, type LoopSignal } from "../core/loop-detector.js"
 
 const log = createLogger("agents.execution-monitor")
 
@@ -10,14 +11,23 @@ export interface TaskResult {
   output: string
   attempts: number
   errorHistory: string[]
+  loopBreak?: boolean      // true if circuit break triggered
+  loopSignal?: LoopSignal  // signal yang memicu break
 }
 
 export class ExecutionMonitor {
   async executeNode(
     node: TaskNode,
     completedResults: Map<string, TaskResult>,
+    loopDetector?: LoopDetector,  // optional untuk backward compat
   ): Promise<TaskResult> {
-    const depContext = node.dependsOn
+    // Phase I-5: Multi-Agent Memory — reviewer/analyst get full context
+    const contextScope =
+      node.agentType === "reviewer" || node.agentType === "analyst"
+        ? [...completedResults.keys()]
+        : node.dependsOn
+
+    const depContext = contextScope
       .map((depId) => {
         const result = completedResults.get(depId)
         if (!result) {
@@ -40,6 +50,32 @@ export class ExecutionMonitor {
           : depContext || node.context
 
         const output = await runSpecializedAgent(node.agentType, node.task, context || undefined)
+
+        // Phase I-2: Loop Detection — record tool call after successful execution
+        if (loopDetector) {
+          // Extract tool info from output if available
+          const toolInfo = this.extractToolInfo(output)
+          const signal = loopDetector.record(
+            toolInfo.tool,
+            toolInfo.params,
+            output,
+          )
+          if (signal?.shouldStop) {
+            log.warn("loop detector circuit break", { nodeId: node.id, signal })
+            return {
+              nodeId: node.id,
+              success: false,
+              output: `Loop detected: ${signal.message}`,
+              attempts,
+              errorHistory,
+              loopBreak: true,
+              loopSignal: signal,
+            }
+          }
+          if (signal?.severity === "warning") {
+            log.info("loop detector warning", { nodeId: node.id, message: signal.message })
+          }
+        }
 
         log.info("node completed", {
           nodeId: node.id,
@@ -84,6 +120,26 @@ export class ExecutionMonitor {
       output: "Task failed due to unexpected monitor state.",
       attempts,
       errorHistory,
+    }
+  }
+
+  /**
+   * Extract tool information from agent output.
+   * This is a heuristic — in production, tool calls would be instrumented directly.
+   */
+  private extractToolInfo(output: string): { tool: string; params: Record<string, unknown> } {
+    // Look for tool call patterns in output
+    const toolMatch = output.match(/(\w+Tool)\s*\(/)
+    if (toolMatch) {
+      return {
+        tool: toolMatch[1],
+        params: { outputLength: output.length },
+      }
+    }
+    // Default to generic task info
+    return {
+      tool: "specializedAgent",
+      params: { outputLength: output.length },
     }
   }
 }

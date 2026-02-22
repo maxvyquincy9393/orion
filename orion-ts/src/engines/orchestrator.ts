@@ -38,6 +38,8 @@ import { ollamaEngine } from "./ollama.js"
 import { openAIEngine } from "./openai.js"
 import { openRouterEngine } from "./openrouter.js"
 import type { Engine, GenerateOptions, TaskType } from "./types.js"
+import { engineStats } from "./engine-stats.js"
+import config from "../config.js"
 
 const log = createLogger("engines.orchestrator")
 
@@ -117,24 +119,49 @@ export class Orchestrator {
 
   async generate(task: TaskType, options: GenerateOptions): Promise<string> {
     const startedAt = Date.now()
-    const engine = this.route(task)
-    const output = await engine.generate(options)
-    const elapsedMs = Date.now() - startedAt
-
-    // Track which engine was used for telemetry
-    this.lastUsed = {
-      provider: engine.provider,
-      model: engine.defaultModel ?? options.model ?? "unknown",
+    let engine: Engine
+    
+    // Phase I-4: Adaptive routing based on engine stats
+    if (config.ENGINE_STATS_ENABLED) {
+      const candidates = PRIORITY_MAP[task] ?? PRIORITY_MAP.reasoning
+      const availableCandidates = candidates.filter((name) => this.engines.has(name))
+      if (availableCandidates.length === 0) {
+        throw new Error(`No engine available for task '${task}'.`)
+      }
+      const bestEngineName = engineStats.getBestEngine(availableCandidates)
+      engine = this.engines.get(bestEngineName)!
+      if (!engine) {
+        // Fallback to static routing if best engine not found
+        engine = this.route(task)
+      }
+    } else {
+      engine = this.route(task)
     }
+    
+    try {
+      const output = await engine.generate(options)
+      const elapsedMs = Date.now() - startedAt
+      
+      // Track stats and telemetry
+      engineStats.record(engine.name, elapsedMs, true)
+      this.lastUsed = {
+        provider: engine.provider,
+        model: engine.defaultModel ?? options.model ?? "unknown",
+      }
 
-    log.info("task handled", {
-      task,
-      engine: engine.name,
-      latencyMs: elapsedMs,
-      hasSystemPrompt: Boolean(options.systemPrompt?.trim()),
-    })
+      log.info("task handled", {
+        task,
+        engine: engine.name,
+        latencyMs: elapsedMs,
+        hasSystemPrompt: Boolean(options.systemPrompt?.trim()),
+      })
 
-    return output
+      return output
+    } catch (error) {
+      // Track failure
+      engineStats.record(engine.name, Date.now() - startedAt, false)
+      throw error
+    }
   }
 }
 

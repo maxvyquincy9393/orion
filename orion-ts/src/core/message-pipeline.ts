@@ -33,6 +33,7 @@ import { memory } from "../memory/store.js"
 import { profiler } from "../memory/profiler.js"
 import { causalGraph } from "../memory/causal-graph.js"
 import { sessionStore } from "../sessions/session-store.js"
+import { sessionSummarizer } from "../memory/session-summarizer.js"
 import { createLogger } from "../logger.js"
 
 const log = createLogger("core.pipeline")
@@ -92,6 +93,36 @@ export async function processMessage(
   sessionStore.addMessage(userId, channel, {
     role: "user", content: safeText, timestamp: Date.now(),
   })
+
+  // ── Stage 2.5: Session Compaction (if needed) ─────────────────────────────
+  // Phase I-3: Multimodal-safe token estimation with 75% context window trigger
+  if (config.SESSION_COMPACTION_ENABLED) {
+    try {
+      const currentSession = sessionStore.getOrCreateSession(userId, channel)
+      const sessionHistory = await sessionStore.getSessionHistory(userId, channel, 100)
+      
+      if (sessionHistory?.length > 0) {
+        // Phase I-3: Multimodal-safe token estimate
+        // Uses 3 chars per token (conservative, handles non-English)
+        const estimatedTokens = sessionHistory.reduce((sum, msg) => {
+          const chars = typeof msg.content === "string" ? msg.content.length : 0
+          return sum + Math.ceil(chars / 3)
+        }, 0)
+
+        const contextWindowLimit = config.SESSION_CONTEXT_WINDOW_TOKENS ?? 32_000
+        const fillRatio = estimatedTokens / contextWindowLimit
+
+        if (fillRatio >= 0.75) {
+          log.info("session compaction triggered", {
+            userId, channel, estimatedTokens, fillRatio: fillRatio.toFixed(2),
+          })
+          await sessionSummarizer.compress(userId, channel, 6) // keep last 6 turns verbatim
+        }
+      }
+    } catch (err) {
+      log.warn("session compaction failed, continuing with full session", { userId, err })
+    }
+  }
 
   // ── Stage 3 + 4: Persona detection + system prompt assembly ───────────────
   let dynamicContext: string | undefined
