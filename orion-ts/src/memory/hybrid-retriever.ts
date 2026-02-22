@@ -416,6 +416,34 @@ export class HybridRetriever {
   getConfig(): HybridConfig {
     return { ...this.config }
   }
+
+  /**
+   * Simplified retrieve method that auto-generates embeddings.
+   * 
+   * This is a convenience wrapper around search() that handles
+   * embedding generation internally. Use this when you just have
+   * a text query and don't want to manage embeddings yourself.
+   *
+   * @param userId - User identifier
+   * @param query - Search query text
+   * @param embedFn - Function to generate embeddings (pass memory.embed)
+   * @param limit - Maximum results to return
+   * @returns Fused search results sorted by RRF score
+   */
+  async retrieve(
+    userId: string,
+    query: string,
+    embedFn: (text: string) => Promise<number[]>,
+    limit?: number,
+  ): Promise<SearchResult[]> {
+    try {
+      const queryVector = await embedFn(query)
+      return await this.search(userId, query, queryVector, limit)
+    } catch (error) {
+      log.error("retrieve failed (embedding generation error)", { userId, query: query.slice(0, 100), error })
+      return []
+    }
+  }
 }
 
 // Export singleton instance

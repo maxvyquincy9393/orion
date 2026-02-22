@@ -5,8 +5,10 @@ import { createLogger } from "../logger.js"
 import { sessionStore } from "../sessions/session-store.js"
 import { causalGraph } from "./causal-graph.js"
 import { hybridRetriever } from "./hybrid-retriever.js"
+import { memory } from "./store.js"
 import { profiler } from "./profiler.js"
 import { detectQueryComplexity, temporalIndex } from "./temporal-index.js"
+import config from "../config.js"
 
 const log = createLogger("memory.himes")
 
@@ -217,23 +219,53 @@ export class HiMeSCoordinator {
   }
 
   /**
-   * Pre-fetch relevant documents using temporal index
+   * Pre-fetch relevant documents using hybrid retrieval (FTS + Vector + RRF).
    *
-   * Future enhancement (OC-10):
-   * - Full-text search (FTS) for keyword matching
-   * - Vector search for semantic similarity
+   * Falls back to temporal index if HYBRID_SEARCH_ENABLED=false or on error.
+   *
+   * Architecture:
+   * - Full-text search (FTS) for keyword matching using SQLite FTS5
+   * - Vector search for semantic similarity using LanceDB
    * - RRF (Reciprocal Rank Fusion) for optimal ranking
    *
-   * Currently uses temporal index for all queries.
+   * Refs: arXiv 2312.10997 (Hybrid Search + RAG Survey)
    */
   private async preFetchDocs(
     userId: string,
     query: string,
   ): Promise<Array<{ content: string; relevanceScore: number }>> {
+    if (!config.HYBRID_SEARCH_ENABLED) {
+      return this.preFetchDocsLegacy(userId, query)
+    }
+
+    try {
+      const results = await hybridRetriever.retrieve(
+        userId,
+        query,
+        (text) => memory.embed(text),
+        8, // topK
+      )
+
+      return results.map((result) => ({
+        content: result.content,
+        relevanceScore: result.score,
+      }))
+    } catch (err) {
+      log.warn("hybrid retrieval failed, falling back to temporal index", { userId, query: query.slice(0, 100), err })
+      return this.preFetchDocsLegacy(userId, query)
+    }
+  }
+
+  /**
+   * Legacy pre-fetch using temporal index only.
+   * Used as fallback when hybrid search is disabled or fails.
+   */
+  private async preFetchDocsLegacy(
+    userId: string,
+    query: string,
+  ): Promise<Array<{ content: string; relevanceScore: number }>> {
     try {
       const complexity = detectQueryComplexity(query)
-
-      // Use temporal index for retrieval
       const results = await temporalIndex.retrieve(userId, query, complexity)
 
       return results.slice(0, 5).map((result, index) => ({
@@ -241,7 +273,7 @@ export class HiMeSCoordinator {
         relevanceScore: Math.max(0.2, 1 - index * 0.12),
       }))
     } catch (error) {
-      log.error("preFetchDocs failed", error)
+      log.error("preFetchDocsLegacy failed", error)
       return []
     }
   }

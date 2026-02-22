@@ -393,6 +393,12 @@ export class MemoryStore {
       const systemContext = validated.clean.map((item) => item.content).join("\n\n")
       const retrievedMemoryIds = Array.from(new Set(adaptiveMemories.map((item) => item.id)))
 
+      // Register pending MemRL feedback (Fix 0.3)
+      // Gateway will consume this on next user turn
+      if (retrievedMemoryIds.length > 0) {
+        this.registerPendingFeedback(userId, retrievedMemoryIds, 0.5) // provisional reward
+      }
+
       return { systemContext, messages: contextMessages, retrievedMemoryIds }
     } catch (error) {
       log.error("buildContext failed", error)
@@ -459,6 +465,44 @@ export class MemoryStore {
     } catch (error) {
       log.error("compress failed", error)
     }
+  }
+
+  // ============== MemRL Feedback Side-Channel (Fix 0.3) ==============
+
+  /** Pending feedback data per userId, set after each retrieval. */
+  private readonly pendingFeedback = new Map<string, {
+    retrievedIds: string[]
+    provisionalReward: number
+    timestamp: number
+  }>()
+
+  /**
+   * Called internally after each retrieve() to register pending feedback.
+   * Gateway/pipeline calls consumePendingFeedback() on next turn.
+   */
+  registerPendingFeedback(userId: string, retrievedIds: string[], provisionalReward: number): void {
+    this.pendingFeedback.set(userId, {
+      retrievedIds,
+      provisionalReward,
+      timestamp: Date.now(),
+    })
+  }
+
+  /**
+   * Consume and clear pending feedback for a user.
+   * Returns null if no pending feedback exists.
+   */
+  consumePendingFeedback(userId: string): { retrievedIds: string[]; provisionalReward: number; timestamp: number } | null {
+    const data = this.pendingFeedback.get(userId) ?? null
+    this.pendingFeedback.delete(userId)
+    return data
+  }
+
+  /**
+   * Clear feedback for a user (call on disconnect/cleanup).
+   */
+  clearFeedback(userId: string): void {
+    this.pendingFeedback.delete(userId)
   }
 }
 

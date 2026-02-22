@@ -92,6 +92,8 @@ const ConfigSchema = z.object({
   VISION_ENGINE: z.string().default("gemini"),
   // Voice configuration (T-3)
   VOICE_WHISPER_MODEL: z.string().default("base"),
+  // Phase I-0: Hybrid Search
+  HYBRID_SEARCH_ENABLED: boolFromEnv.default(true),
   VOICE_PROFILE: z.string().default("default"),
   VOICE_LANGUAGE: z.string().default(""),
   // Channel Send permission (T-1.6)

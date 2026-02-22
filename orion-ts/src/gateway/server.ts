@@ -39,6 +39,7 @@ import { hookPipeline } from "../hooks/pipeline.js"
 import { usageTracker } from "../observability/usage-tracker.js"
 import { processMessage } from "../core/message-pipeline.js"
 import { voice } from "../voice/bridge.js"
+import { memory } from "../memory/store.js"
 import {
   authenticateWebSocket,
   getAuthFailure,
@@ -105,6 +106,8 @@ export class GatewayServer {
 
         socket.on("close", () => {
           this.clients.delete(clientId)
+          // Clear pending MemRL feedback for this user (Fix 0.3)
+          memory.clearFeedback(auth.userId)
         })
       })
 
@@ -220,6 +223,20 @@ export class GatewayServer {
   }
 
   private async handleUserMessage(userId: string, rawMessage: string, channel: string): Promise<string> {
+    // Fix 0.3: Consume and process pending MemRL feedback from previous turn
+    const pending = memory.consumePendingFeedback(userId)
+    if (pending) {
+      const followUpSignal = pending.provisionalReward
+        + (rawMessage.length > 20 ? 0.2 : 0)
+        + (Date.now() - pending.timestamp < 10_000 ? 0.1 : 0)
+
+      void memory.provideFeedback({
+        memoryIds: pending.retrievedIds,
+        taskSuccess: followUpSignal >= 0.5,
+        reward: followUpSignal,
+      }).catch((err) => logger.warn("gateway MemRL feedback failed", { userId, err }))
+    }
+
     // Run pre-message hook
     const preMessage = await hookPipeline.run("pre_message", {
       userId,
