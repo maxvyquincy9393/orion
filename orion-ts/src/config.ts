@@ -94,6 +94,8 @@ const ConfigSchema = z.object({
   VOICE_WHISPER_MODEL: z.string().default("base"),
   // Phase I-0: Hybrid Search
   HYBRID_SEARCH_ENABLED: boolFromEnv.default(true),
+  // Phase I-1: VoI Chat Gating
+  VOI_CHAT_ENABLED: boolFromEnv.default(true),
   VOICE_PROFILE: z.string().default("default"),
   VOICE_LANGUAGE: z.string().default(""),
   // Channel Send permission (T-1.6)

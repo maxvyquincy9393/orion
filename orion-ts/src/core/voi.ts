@@ -1,5 +1,6 @@
-﻿import { createLogger } from "../logger.js"
+import { createLogger } from "../logger.js"
 import type { MultiDimContext } from "./context-predictor.js"
+import { sessionStore } from "../sessions/session-store.js"
 
 const log = createLogger("core.voi")
 
@@ -185,6 +186,60 @@ export class VoICalculator {
     }
 
     return parts.join("; ")
+  }
+
+  /**
+   * Score a single chat turn for VoI-based response calibration.
+   *
+   * Uses session history to detect rapid-fire pattern (multiple short messages
+   * in quick succession), not just the current message alone.
+   *
+   * Phase I-1: Corrected implementation with session history awareness
+   *
+   * @param userId  - User ID (used for session history lookup)
+   * @param message - Current user message text
+   * @param channel - Channel (used for session lookup)
+   * @returns VoI signals for response calibration
+   */
+  async scoreForChatTurn(
+    userId: string,
+    message: string,
+    channel: string,
+  ): Promise<{ score: number; conciseSignal: boolean; expandSignal: boolean }> {
+    const wordCount = message.trim().split(/\s+/).length
+    const isCurrentShort = wordCount < 8
+    const expandSignal = wordCount > 40
+
+    // Check recent session history for rapid-fire pattern
+    let isRapidFire = false
+    try {
+      // getSessionHistory is async — use await
+      const history = await sessionStore.getSessionHistory(userId, channel, 10)
+      if (history && history.length >= 3) {
+        const recentUserMessages = history
+          .filter((m: { role: string }) => m.role === "user")
+          .slice(-3) // last 3 user messages
+
+        const allShort = recentUserMessages.every((m: { content: string }) => {
+          const content = typeof m.content === "string" ? m.content : ""
+          return content.trim().split(/\s+/).length < 8
+        })
+
+        isRapidFire = allShort && isCurrentShort
+      }
+    } catch {
+      // sessionStore unavailable — fall back to single-message heuristic
+      isRapidFire = isCurrentShort
+    }
+
+    const conciseSignal = isRapidFire
+    const score = conciseSignal ? 0.3 : expandSignal ? 0.9 : 0.6
+
+    log.debug("VoI chat score", {
+      userId, channel, wordCount, isRapidFire, expandSignal, score,
+    })
+
+    return { score, conciseSignal, expandSignal }
   }
 }
 
