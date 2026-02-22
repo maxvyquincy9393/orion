@@ -38,6 +38,7 @@ import { createLogger } from "../logger.js"
 import { hookPipeline } from "../hooks/pipeline.js"
 import { usageTracker } from "../observability/usage-tracker.js"
 import { processMessage } from "../core/message-pipeline.js"
+import { voice } from "../voice/bridge.js"
 import {
   authenticateWebSocket,
   getAuthFailure,
@@ -48,6 +49,7 @@ const logger = createLogger("gateway")
 export class GatewayServer {
   private app = Fastify({ logger: false })
   private clients = new Map<string, any>()
+  private voiceSessions = new Map<string, () => void>() // userId -> stop function
 
   constructor(private port = 18789) {
     this.registerRoutes()
@@ -94,7 +96,7 @@ export class GatewayServer {
         socket.on("message", async (raw: Buffer) => {
           try {
             const msg = JSON.parse(raw.toString())
-            const res = await this.handle(msg, auth)
+            const res = await this.handle(msg, auth, socket)
             socket.send(JSON.stringify(res))
           } catch (err) {
             socket.send(JSON.stringify({ type: "error", message: String(err) }))
@@ -168,7 +170,7 @@ export class GatewayServer {
     })
   }
 
-  private async handle(msg: any, auth?: AuthContext): Promise<any> {
+  private async handle(msg: any, auth?: AuthContext, socket?: any): Promise<any> {
     const userId = auth?.userId ?? msg.userId ?? config.DEFAULT_USER_ID
 
     await multiUser.getOrCreate(userId, "gateway")
@@ -197,6 +199,16 @@ export class GatewayServer {
       case "broadcast":
         await channelManager.broadcast(msg.content)
         return { type: "ok", requestId: msg.requestId }
+      // T-3: Voice Mode Handlers
+      case "voice_start": {
+        return await this.handleVoiceStart(userId, msg, socket)
+      }
+      case "voice_stop": {
+        return await this.handleVoiceStop(userId)
+      }
+      case "voice_wake_word": {
+        return await this.handleWakeWord(userId, msg)
+      }
       default:
         return { type: "error", message: `unknown type: ${msg.type}` }
     }
@@ -286,7 +298,103 @@ export class GatewayServer {
     return preSend.content
   }
 
+  // T-3: Voice Mode Handlers
+  private async handleVoiceStart(userId: string, msg: any, socket: any): Promise<any> {
+    // Check if voice is already active for this user
+    if (this.voiceSessions.has(userId)) {
+      return { type: "error", message: "Voice session already active", requestId: msg.requestId }
+    }
+
+    try {
+      const stopVoice = await voice.startStreamingConversation(
+        (transcript) => {
+          // User spoke — send transcript to client
+          socket.send(JSON.stringify({ type: "voice_transcript", text: transcript }))
+          
+          // Process through pipeline and get response
+          void processMessage(userId, transcript, { channel: "voice" })
+            .then((result) => {
+              // Send assistant transcript (text response)
+              socket.send(JSON.stringify({ 
+                type: "assistant_transcript", 
+                text: result.response,
+                requestId: msg.requestId 
+              }))
+            })
+            .catch((err) => {
+              logger.error("voice pipeline error", err)
+              socket.send(JSON.stringify({ 
+                type: "error", 
+                message: "Failed to process voice input",
+                requestId: msg.requestId 
+              }))
+            })
+        },
+        (audioChunk) => {
+          // Stream TTS audio chunk to frontend (base64)
+          socket.send(JSON.stringify({ 
+            type: "voice_audio", 
+            data: audioChunk,
+            requestId: msg.requestId 
+          }))
+        },
+      )
+
+      // Store stop function for cleanup
+      this.voiceSessions.set(userId, stopVoice)
+      
+      logger.info("voice session started", { userId })
+      return { type: "voice_started", requestId: msg.requestId }
+    } catch (err) {
+      logger.error("voice_start failed", { userId, error: String(err) })
+      return { type: "error", message: `Failed to start voice: ${String(err)}`, requestId: msg.requestId }
+    }
+  }
+
+  private async handleVoiceStop(userId: string): Promise<any> {
+    const stopFn = this.voiceSessions.get(userId)
+    if (stopFn) {
+      stopFn()
+      this.voiceSessions.delete(userId)
+      logger.info("voice session stopped", { userId })
+    }
+    return { type: "voice_stopped" }
+  }
+
+  private async handleWakeWord(userId: string, msg: any): Promise<any> {
+    const keyword = msg.keyword ?? "orion"
+    const windowSeconds = msg.windowSeconds ?? 2
+    
+    try {
+      const detected = await voice.checkWakeWord(keyword, windowSeconds)
+      return { 
+        type: "wake_word_result", 
+        detected,
+        keyword,
+        requestId: msg.requestId 
+      }
+    } catch (err) {
+      logger.error("wake_word check failed", { userId, error: String(err) })
+      return { 
+        type: "error", 
+        message: `Wake word check failed: ${String(err)}`,
+        requestId: msg.requestId 
+      }
+    }
+  }
+
   async stop(): Promise<void> {
+    // Stop all voice sessions
+    for (const [userId, stopFn] of this.voiceSessions.entries()) {
+      try {
+        stopFn()
+        logger.info("voice session stopped on shutdown", { userId })
+      } catch (err) {
+        logger.warn("error stopping voice session", { userId, error: String(err) })
+      }
+    }
+    this.voiceSessions.clear()
+    
     await this.app.close()
   }
 
