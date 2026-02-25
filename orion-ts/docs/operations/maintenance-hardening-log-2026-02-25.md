@@ -77,3 +77,15 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - raw Prisma `userId` parameter and short-token FTS query generation
 - Added schema migration plan for DB-level graph dedupe constraints:
   - `docs/migrations/causal-graph-dedupe-plan.md`
+
+## Follow-up Notes (pass 4)
+
+- Added executable maintenance CLI for graph dedupe (dry-run by default):
+  - `src/cli/causal-graph-dedupe.ts`
+  - `pnpm dedupe:causal-graph:dry-run`
+  - `pnpm dedupe:causal-graph`
+- Added pure dedupe utility module + unit tests:
+  - `src/memory/causal-graph-dedupe-utils.ts`
+  - `src/memory/__tests__/causal-graph-dedupe-utils.test.ts`
+- Added CI workflow (Ubuntu + Windows) to run `typecheck` and `test:ci` outside sandbox:
+  - `.github/workflows/ci.yml`

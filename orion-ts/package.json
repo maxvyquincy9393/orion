@@ -8,8 +8,11 @@
     "build": "tsup src/main.ts --format esm --dts --external playwright",
     "start": "node dist/main.js",
     "test": "vitest run",
+    "test:ci": "vitest run --reporter=basic",
     "typecheck": "tsc --noEmit",
-    "doctor": "tsx src/cli/doctor.ts"
+    "doctor": "tsx src/cli/doctor.ts",
+    "dedupe:causal-graph": "tsx src/cli/causal-graph-dedupe.ts --apply",
+    "dedupe:causal-graph:dry-run": "tsx src/cli/causal-graph-dedupe.ts --dry-run"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",

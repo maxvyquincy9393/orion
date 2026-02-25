@@ -95,6 +95,7 @@ Suggested helper ownership:
 
 1. Deploy code that can read/write new nullable columns.
 2. Run backfill + dedupe script in maintenance window (or batched online job).
+   - CLI added: `pnpm dedupe:causal-graph:dry-run` / `pnpm dedupe:causal-graph`
 3. Verify metrics:
    - duplicate node count = 0
    - duplicate hyperedge count = 0
