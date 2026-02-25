@@ -22,7 +22,8 @@ Without schema-level guarantees, retries/concurrency/import jobs can still creat
 
 Status:
 - Stage 1 schema/migration scaffold added in `prisma/migrations/20260225133000_add_causal_graph_dedupe_keys_stage1/`
-- Backfill and unique constraints are still pending (Stages 2-3)
+- Writer now populates `eventKey` / `memberSetHash` at runtime (`src/memory/causal-graph.ts`)
+- Backfill + unique constraints are still pending completion (Stages 2-3)
 
 ### Stage 1: Add columns/indexes (non-breaking)
 

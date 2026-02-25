@@ -24,6 +24,7 @@ interface CliOptions {
 
 interface DedupeStats {
   scannedNodes: number
+  nodeEventKeysBackfilled: number
   duplicateNodeGroups: number
   duplicateNodesRemoved: number
   edgeRefsUpdated: number
@@ -32,6 +33,7 @@ interface DedupeStats {
   membershipsRepointed: number
   membershipsDeduped: number
   scannedHyperEdges: number
+  hyperEdgeHashesBackfilled: number
   duplicateHyperEdgeGroups: number
   duplicateHyperEdgesRemoved: number
   hyperEdgesMerged: number
@@ -108,6 +110,7 @@ function printHelp(): void {
 function initStats(): DedupeStats {
   return {
     scannedNodes: 0,
+    nodeEventKeysBackfilled: 0,
     duplicateNodeGroups: 0,
     duplicateNodesRemoved: 0,
     edgeRefsUpdated: 0,
@@ -116,6 +119,7 @@ function initStats(): DedupeStats {
     membershipsRepointed: 0,
     membershipsDeduped: 0,
     scannedHyperEdges: 0,
+    hyperEdgeHashesBackfilled: 0,
     duplicateHyperEdgeGroups: 0,
     duplicateHyperEdgesRemoved: 0,
     hyperEdgesMerged: 0,
@@ -255,6 +259,76 @@ async function repointDuplicateNodeReferences(
   }
 }
 
+async function backfillNodeEventKeysPhase(
+  client: PrismaClient,
+  options: CliOptions,
+  stats: DedupeStats,
+): Promise<void> {
+  const nodes = await client.causalNode.findMany({
+    where: options.userId ? { userId: options.userId } : undefined,
+    select: {
+      id: true,
+      event: true,
+      eventKey: true,
+    },
+    orderBy: {
+      id: "asc",
+    },
+  })
+
+  for (const node of nodes) {
+    const nextEventKey = normalizeCausalEventKey(node.event)
+    if (!nextEventKey || node.eventKey === nextEventKey) {
+      continue
+    }
+
+    stats.nodeEventKeysBackfilled += 1
+    if (!options.apply) {
+      continue
+    }
+
+    await client.causalNode.update({
+      where: { id: node.id },
+      data: { eventKey: nextEventKey },
+    })
+  }
+}
+
+async function backfillHyperEdgeHashesPhase(
+  client: PrismaClient,
+  options: CliOptions,
+  stats: DedupeStats,
+): Promise<void> {
+  const edges = await client.hyperEdge.findMany({
+    where: options.userId ? { userId: options.userId } : undefined,
+    include: {
+      members: {
+        select: { nodeId: true },
+      },
+    },
+    orderBy: {
+      id: "asc",
+    },
+  })
+
+  for (const edge of edges) {
+    const nextHash = computeHyperEdgeMemberSetHash(edge.relation, edge.members.map((member) => member.nodeId))
+    if (edge.memberSetHash === nextHash) {
+      continue
+    }
+
+    stats.hyperEdgeHashesBackfilled += 1
+    if (!options.apply) {
+      continue
+    }
+
+    await client.hyperEdge.update({
+      where: { id: edge.id },
+      data: { memberSetHash: nextHash },
+    })
+  }
+}
+
 async function dedupeCausalNodesPhase(
   client: PrismaClient,
   options: CliOptions,
@@ -389,12 +463,14 @@ async function dedupeHyperEdgesPhase(
         canonical.context,
         ...duplicates.map((item) => item.context),
       ])
+      const memberSetHash = computeHyperEdgeMemberSetHash(canonical.relation, canonical.memberNodeIds)
 
       await tx.hyperEdge.update({
         where: { id: canonical.id },
         data: {
           weight: mergedWeight,
           context: normalizeHyperEdgeContextForMerge(mergedContext),
+          memberSetHash,
         },
       })
 
@@ -472,6 +548,7 @@ function printSummary(options: CliOptions, stats: DedupeStats): void {
   }
   console.log("")
   console.log(`Nodes scanned: ${stats.scannedNodes}`)
+  console.log(`Node eventKey backfilled (or planned): ${stats.nodeEventKeysBackfilled}`)
   console.log(`Duplicate node groups: ${stats.duplicateNodeGroups}`)
   console.log(`Duplicate nodes removed (or planned): ${stats.duplicateNodesRemoved}`)
   console.log(`Causal edge refs updated: ${stats.edgeRefsUpdated}`)
@@ -481,6 +558,7 @@ function printSummary(options: CliOptions, stats: DedupeStats): void {
   console.log(`HyperEdge memberships deduped: ${stats.membershipsDeduped}`)
   console.log("")
   console.log(`HyperEdges scanned: ${stats.scannedHyperEdges}`)
+  console.log(`HyperEdge memberSetHash backfilled (or planned): ${stats.hyperEdgeHashesBackfilled}`)
   console.log(`Duplicate hyperedge groups: ${stats.duplicateHyperEdgeGroups}`)
   console.log(`Duplicate hyperedges removed (or planned): ${stats.duplicateHyperEdgesRemoved}`)
   console.log(`Hyperedge merges applied (or planned): ${stats.hyperEdgesMerged}`)
@@ -498,7 +576,9 @@ async function main(): Promise<void> {
 
   try {
     await prisma.$connect()
+    await backfillNodeEventKeysPhase(prisma, options, stats)
     await dedupeCausalNodesPhase(prisma, options, stats)
+    await backfillHyperEdgeHashesPhase(prisma, options, stats)
     await dedupeHyperEdgesPhase(prisma, options, stats)
     await summarizePotentialNewColumns(prisma, options)
     printSummary(options, stats)

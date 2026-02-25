@@ -48,6 +48,7 @@ vi.mock("../../logger.js", () => ({
 
 import { prisma } from "../../database/index.js"
 import { orchestrator } from "../../engines/orchestrator.js"
+import { computeHyperEdgeMemberSetHash, normalizeCausalEventKey } from "../causal-graph-dedupe-utils.js"
 import { CausalGraph } from "../causal-graph.js"
 
 type MockFn<T extends (...args: any[]) => any> = ReturnType<typeof vi.fn<T>>
@@ -89,6 +90,12 @@ describe("CausalGraph integration (mocked)", () => {
 
   it("extractAndUpdate persists parsed hyperedge weight and dedupes repeated hyperedges in one response", async () => {
     const graph = new CausalGraph()
+    prismaMock.causalNode.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: "node-a", event: "Late sleep", eventKey: "late sleep", createdAt: new Date() },
+        { id: "node-b", event: "Missed meeting", eventKey: "missed meeting", createdAt: new Date() },
+      ])
 
     orchestratorMock.generate.mockResolvedValueOnce(`
 \`\`\`json
@@ -105,12 +112,24 @@ describe("CausalGraph integration (mocked)", () => {
 
     await graph.extractAndUpdate("user-1", "I slept late and missed a meeting this morning.")
 
+    expect(prismaMock.causalNode.create).toHaveBeenCalledTimes(2)
+    const createdNodeCalls = prismaMock.causalNode.create.mock.calls.map((call) => call[0] as { data?: Record<string, unknown> })
+    expect(createdNodeCalls[0]?.data).toMatchObject({
+      event: "Late sleep",
+      eventKey: normalizeCausalEventKey("Late sleep"),
+    })
+    expect(createdNodeCalls[1]?.data).toMatchObject({
+      event: "Missed meeting",
+      eventKey: normalizeCausalEventKey("Missed meeting"),
+    })
+
     expect(prismaMock.hyperEdge.create).toHaveBeenCalledTimes(1)
     const createCall = prismaMock.hyperEdge.create.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined
     expect(createCall?.data).toMatchObject({
       userId: "user-1",
       relation: "routine",
       weight: 0.9,
+      memberSetHash: computeHyperEdgeMemberSetHash("routine", ["node-a", "node-b"]),
     })
     expect(prismaMock.hyperEdgeMembership.createMany).toHaveBeenCalledTimes(1)
   })
@@ -135,7 +154,11 @@ describe("CausalGraph integration (mocked)", () => {
     expect(prismaMock.hyperEdge.update).toHaveBeenCalledTimes(1)
     expect(prismaMock.hyperEdge.update.mock.calls[0]?.[0]).toMatchObject({
       where: { id: "hyper-existing" },
-      data: { weight: 0.8, context: "weekday" },
+      data: {
+        weight: 0.8,
+        context: "weekday",
+        memberSetHash: computeHyperEdgeMemberSetHash("routine", ["node-a", "node-b"]),
+      },
     })
     expect(prismaMock.hyperEdge.create).not.toHaveBeenCalled()
   })

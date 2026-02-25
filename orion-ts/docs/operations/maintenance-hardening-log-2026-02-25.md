@@ -108,3 +108,15 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
 - Post-verification fixes:
   - `workspace-resolver` now falls back to `user` when sanitized ID contains no alphanumeric chars (e.g. `!!!`)
   - prompt-filter delimiter-abuse test now asserts stable contract (`injection pattern detected`) instead of brittle rule-order exact reason
+
+## Follow-up Notes (pass 7)
+
+- `causal-graph` writer now populates Stage-1 dedupe keys:
+  - `CausalNode.eventKey`
+  - `HyperEdge.memberSetHash`
+- Node resolution now also matches by normalized `eventKey` (reduces duplicates across casing/spacing variants).
+- Dedupe CLI now backfills dedupe key columns during run:
+  - node `eventKey` backfill phase
+  - hyperedge `memberSetHash` backfill phase (after node dedupe repoints memberships)
+- Runtime verification re-run after writer/backfill patch:
+  - `pnpm test:ci` => `15` test files passed / `45` tests passed

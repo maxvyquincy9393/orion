@@ -1,6 +1,7 @@
 ﻿import { prisma } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
+import { computeHyperEdgeMemberSetHash, normalizeCausalEventKey } from "./causal-graph-dedupe-utils.js"
 import { detectQueryComplexity, temporalIndex } from "./temporal-index.js"
 
 const log = createLogger("memory.causal-graph")
@@ -270,12 +271,27 @@ export class CausalGraph {
     }
 
     const resolved = new Map<string, string>()
+    const resolvedByEventKey = new Map<string, string>()
+    const normalizedEventKeys = Array.from(
+      new Set(normalizedNames.map((name) => normalizeCausalEventKey(name)).filter(Boolean)),
+    )
     const existingNodes = await prisma.causalNode.findMany({
       where: {
         userId,
-        event: {
-          in: normalizedNames,
-        },
+        OR: [
+          {
+            event: {
+              in: normalizedNames,
+            },
+          },
+          ...(normalizedEventKeys.length > 0
+            ? [{
+              eventKey: {
+                in: normalizedEventKeys,
+              },
+            }]
+            : []),
+        ],
       },
       orderBy: {
         createdAt: "asc",
@@ -285,6 +301,20 @@ export class CausalGraph {
     for (const node of existingNodes) {
       if (!resolved.has(node.event)) {
         resolved.set(node.event, node.id)
+      }
+      const eventKey = normalizeCausalEventKey(node.event)
+      if (eventKey && !resolvedByEventKey.has(eventKey)) {
+        resolvedByEventKey.set(eventKey, node.id)
+      }
+    }
+
+    for (const nodeName of normalizedNames) {
+      if (resolved.has(nodeName)) {
+        continue
+      }
+      const existingId = resolvedByEventKey.get(normalizeCausalEventKey(nodeName))
+      if (existingId) {
+        resolved.set(nodeName, existingId)
       }
     }
 
@@ -297,10 +327,15 @@ export class CausalGraph {
         data: {
           userId,
           event: nodeName,
+          eventKey: normalizeCausalEventKey(nodeName),
           category: normalizeCategory(categoryHints.get(nodeName)),
         },
       })
       resolved.set(nodeName, created.id)
+      const eventKey = normalizeCausalEventKey(nodeName)
+      if (eventKey && !resolvedByEventKey.has(eventKey)) {
+        resolvedByEventKey.set(eventKey, created.id)
+      }
     }
 
     return resolved
@@ -481,6 +516,7 @@ export class CausalGraph {
       const normalizedRelation = normalizeText(relation, MAX_RELATION_LENGTH) || "related_events"
       const normalizedContext = normalizeText(context, MAX_CONTEXT_LENGTH)
       const normalizedWeight = clamp(weight)
+      const memberSetHash = computeHyperEdgeMemberSetHash(normalizedRelation, resolvedNodeIds)
 
       // Best-effort runtime dedupe: schema has no unique constraint for hyperedge member sets yet.
       const existingCandidates = await prisma.hyperEdge.findMany({
@@ -511,6 +547,7 @@ export class CausalGraph {
           where: { id: matchingEdge.id },
           data: {
             weight: Math.max(matchingEdge.weight, normalizedWeight),
+            memberSetHash,
             ...(normalizedContext ? { context: normalizedContext } : {}),
           },
         })
@@ -522,6 +559,7 @@ export class CausalGraph {
           userId,
           relation: normalizedRelation,
           context: normalizedContext,
+          memberSetHash,
           weight: normalizedWeight,
         },
       })
