@@ -23,7 +23,11 @@ Without schema-level guarantees, retries/concurrency/import jobs can still creat
 Status:
 - Stage 1 schema/migration scaffold added in `prisma/migrations/20260225133000_add_causal_graph_dedupe_keys_stage1/`
 - Writer now populates `eventKey` / `memberSetHash` at runtime (`src/memory/causal-graph.ts`)
-- Backfill + unique constraints are still pending completion (Stages 2-3)
+- Dedupe CLI backfills both dedupe key columns during maintenance runs (`src/cli/causal-graph-dedupe.ts`)
+- Dedupe CLI now prints explicit Stage-3 readiness counts (missing keys + duplicate groups)
+- Stage 3 schema/migration scaffold added in `prisma/migrations/20260225163000_enforce_causal_graph_dedupe_keys_stage3/`
+- Stage 3 migration verified locally on empty SQLite dataset (safe syntax/runtime check)
+- Stage 3 deploy remains blocked until real environment backfill/dedupe verification is complete
 
 ### Stage 1: Add columns/indexes (non-breaking)
 
@@ -77,7 +81,7 @@ Reason:
 
 ## Stage 3: Enforce constraints (breaking if skipped backfill)
 
-After app writes are updated and backfill completes:
+After app writes are updated and backfill completes (and preflight counts are zero):
 
 - `CausalNode.eventKey` => non-null
 - `HyperEdge.memberSetHash` => non-null
@@ -105,6 +109,7 @@ Suggested helper ownership:
    - duplicate node count = 0
    - duplicate hyperedge count = 0
 4. Add unique constraints in migration.
+   - Stage-3 migration scaffold now exists: `20260225163000_enforce_causal_graph_dedupe_keys_stage3`
 5. Monitor write errors for conflict spikes.
 
 ## Verification queries (examples)

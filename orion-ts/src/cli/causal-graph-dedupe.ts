@@ -39,7 +39,19 @@ interface DedupeStats {
   hyperEdgesMerged: number
 }
 
+interface Stage3Readiness {
+  missingNodeEventKeys: number
+  remainingDuplicateNodeGroups: number
+  missingHyperEdgeMemberSetHashes: number
+  remainingDuplicateHyperEdgeGroups: number
+  ready: boolean
+}
+
 type TxClient = Prisma.TransactionClient
+
+interface CountRow {
+  count: number | bigint
+}
 
 function parseCliArgs(argv: string[]): CliOptions {
   let apply = false
@@ -132,6 +144,83 @@ function chooseMergedStrength(a: number, b: number): number {
 
 function chooseMergedEvidence(a: number, b: number): number {
   return Math.max(1, (Number.isFinite(a) ? a : 0) + (Number.isFinite(b) ? b : 0))
+}
+
+function coerceCount(rows: CountRow[]): number {
+  const value = rows[0]?.count ?? 0
+  if (typeof value === "bigint") {
+    return Number(value)
+  }
+  return Number.isFinite(value) ? value : 0
+}
+
+async function collectStage3Readiness(client: PrismaClient, options: CliOptions): Promise<Stage3Readiness> {
+  const nodeFilter = options.userId
+    ? Prisma.sql` AND "userId" = ${options.userId}`
+    : Prisma.empty
+  const edgeFilter = options.userId
+    ? Prisma.sql` AND "userId" = ${options.userId}`
+    : Prisma.empty
+
+  const missingNodeEventKeys = coerceCount(
+    await client.$queryRaw<CountRow[]>(Prisma.sql`
+      SELECT COUNT(*) AS count
+      FROM "CausalNode"
+      WHERE ("eventKey" IS NULL OR TRIM("eventKey") = '')
+      ${nodeFilter}
+    `),
+  )
+
+  const remainingDuplicateNodeGroups = coerceCount(
+    await client.$queryRaw<CountRow[]>(Prisma.sql`
+      SELECT COUNT(*) AS count
+      FROM (
+        SELECT 1
+        FROM "CausalNode"
+        WHERE "eventKey" IS NOT NULL AND TRIM("eventKey") <> ''
+        ${nodeFilter}
+        GROUP BY "userId", "eventKey"
+        HAVING COUNT(*) > 1
+      ) AS duplicate_groups
+    `),
+  )
+
+  const missingHyperEdgeMemberSetHashes = coerceCount(
+    await client.$queryRaw<CountRow[]>(Prisma.sql`
+      SELECT COUNT(*) AS count
+      FROM "HyperEdge"
+      WHERE ("memberSetHash" IS NULL OR TRIM("memberSetHash") = '')
+      ${edgeFilter}
+    `),
+  )
+
+  const remainingDuplicateHyperEdgeGroups = coerceCount(
+    await client.$queryRaw<CountRow[]>(Prisma.sql`
+      SELECT COUNT(*) AS count
+      FROM (
+        SELECT 1
+        FROM "HyperEdge"
+        WHERE "memberSetHash" IS NOT NULL AND TRIM("memberSetHash") <> ''
+        ${edgeFilter}
+        GROUP BY "userId", "relation", "memberSetHash"
+        HAVING COUNT(*) > 1
+      ) AS duplicate_groups
+    `),
+  )
+
+  const ready =
+    missingNodeEventKeys === 0 &&
+    remainingDuplicateNodeGroups === 0 &&
+    missingHyperEdgeMemberSetHashes === 0 &&
+    remainingDuplicateHyperEdgeGroups === 0
+
+  return {
+    missingNodeEventKeys,
+    remainingDuplicateNodeGroups,
+    missingHyperEdgeMemberSetHashes,
+    remainingDuplicateHyperEdgeGroups,
+    ready,
+  }
 }
 
 async function repointDuplicateNodeReferences(
@@ -535,7 +624,7 @@ async function summarizePotentialNewColumns(
   }
 }
 
-function printSummary(options: CliOptions, stats: DedupeStats): void {
+function printSummary(options: CliOptions, stats: DedupeStats, readiness: Stage3Readiness): void {
   console.log("")
   console.log("Causal Graph Dedupe Summary")
   console.log("==========================")
@@ -562,6 +651,14 @@ function printSummary(options: CliOptions, stats: DedupeStats): void {
   console.log(`Duplicate hyperedge groups: ${stats.duplicateHyperEdgeGroups}`)
   console.log(`Duplicate hyperedges removed (or planned): ${stats.duplicateHyperEdgesRemoved}`)
   console.log(`Hyperedge merges applied (or planned): ${stats.hyperEdgesMerged}`)
+  console.log("")
+  console.log("Stage-3 Readiness (non-null + unique constraints)")
+  console.log("-----------------------------------------------")
+  console.log(`Missing node eventKey rows: ${readiness.missingNodeEventKeys}`)
+  console.log(`Remaining duplicate node groups: ${readiness.remainingDuplicateNodeGroups}`)
+  console.log(`Missing hyperedge memberSetHash rows: ${readiness.missingHyperEdgeMemberSetHashes}`)
+  console.log(`Remaining duplicate hyperedge groups: ${readiness.remainingDuplicateHyperEdgeGroups}`)
+  console.log(`Ready for Stage-3 migration: ${readiness.ready ? "YES" : "NO"}`)
 }
 
 async function main(): Promise<void> {
@@ -580,8 +677,9 @@ async function main(): Promise<void> {
     await dedupeCausalNodesPhase(prisma, options, stats)
     await backfillHyperEdgeHashesPhase(prisma, options, stats)
     await dedupeHyperEdgesPhase(prisma, options, stats)
+    const readiness = await collectStage3Readiness(prisma, options)
     await summarizePotentialNewColumns(prisma, options)
-    printSummary(options, stats)
+    printSummary(options, stats, readiness)
   } finally {
     await prisma.$disconnect().catch((error) => log.warn("prisma disconnect failed", error))
   }

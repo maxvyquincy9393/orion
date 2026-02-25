@@ -120,3 +120,26 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - hyperedge `memberSetHash` backfill phase (after node dedupe repoints memberships)
 - Runtime verification re-run after writer/backfill patch:
   - `pnpm test:ci` => `15` test files passed / `45` tests passed
+
+## Follow-up Notes (pass 8)
+
+- Added Stage-3 Prisma schema + migration scaffold for causal-graph dedupe constraints:
+  - `prisma/migrations/20260225163000_enforce_causal_graph_dedupe_keys_stage3/migration.sql`
+  - enforces non-null `CausalNode.eventKey` and `HyperEdge.memberSetHash`
+  - adds unique constraints for `(userId, eventKey)` and `(userId, relation, memberSetHash)`
+- Dedupe CLI summary now prints explicit Stage-3 readiness checks:
+  - missing `eventKey` row count
+  - missing `memberSetHash` row count
+  - remaining duplicate node/hyperedge group counts
+  - final `Ready for Stage-3 migration: YES|NO`
+
+## Follow-up Notes (pass 9)
+
+- Stage-3 migration verified on local SQLite (empty graph dataset):
+  - `pnpm exec prisma migrate deploy` applied `20260225163000_enforce_causal_graph_dedupe_keys_stage3`
+- Dedupe CLI dry-run re-verified after Stage-3 migration:
+  - readiness summary prints all zero counts locally and `Ready for Stage-3 migration: YES`
+- Regression verification after Stage-3 schema/CLI patch:
+  - `pnpm test:ci` => `15` test files passed / `45` tests passed
+- Remaining rollout caveat:
+  - real environments still must run dedupe/backfill dry-run and review counts before applying Stage-3 migration

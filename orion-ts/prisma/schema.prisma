@@ -257,7 +257,7 @@ model CausalNode {
   id        String   @id @default(cuid())
   userId    String
   event     String
-  eventKey  String?  // Stage-1 dedupe key (lower/trim normalized event)
+  eventKey  String   // Stage-3 enforced dedupe key (lower/trim normalized event)
   category  String
   createdAt DateTime @default(now())
 
@@ -266,7 +266,7 @@ model CausalNode {
   hyperEdges  HyperEdgeMembership[]
 
   @@index([userId, category])
-  @@index([userId, eventKey])
+  @@unique([userId, eventKey])
 }
 
 model CausalEdge {
@@ -290,12 +290,12 @@ model HyperEdge {
   userId   String
   relation String
   context  String
-  memberSetHash String? // Stage-1 dedupe key (hash of normalized relation + member set)
+  memberSetHash String // Stage-3 enforced dedupe key (hash of normalized relation + member set)
   weight   Float    @default(0.5)
   members  HyperEdgeMembership[]
 
   @@index([userId])
-  @@index([userId, relation, memberSetHash])
+  @@unique([userId, relation, memberSetHash])
 }
 
 model HyperEdgeMembership {
