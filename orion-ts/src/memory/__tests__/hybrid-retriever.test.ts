@@ -6,7 +6,13 @@ describe("HybridRetriever helpers", () => {
   it("builds FTS queries from punctuation-heavy input without parser-hostile tokens", () => {
     const query = __hybridRetrieverTestUtils.buildFTSQuery(`"foo,bar" C++ error: disk/full ??? a io`)
 
-    expect(query).toBe("foo* bar* error* disk* full*")
+    expect(query).toBe("foo* bar* error* disk* full* io*")
+  })
+
+  it("preserves meaningful short technical tokens and deduplicates them", () => {
+    const query = __hybridRetrieverTestUtils.buildFTSQuery("Go js TS go  io bug ts")
+
+    expect(query).toBe("go* js* ts* io* bug*")
   })
 
   it("normalizes invalid config values and keeps topK >= finalLimit", () => {
@@ -36,5 +42,10 @@ describe("HybridRetriever helpers", () => {
     expect(config.ftsWeight).toBeGreaterThan(0)
     expect(config.vectorWeight).toBeGreaterThan(0)
     expect(config.topK).toBeGreaterThanOrEqual(config.finalLimit)
+  })
+
+  it("exposes the short-token allowlist for test visibility", () => {
+    expect(__hybridRetrieverTestUtils.SHORT_TECHNICAL_TOKENS.has("go")).toBe(true)
+    expect(__hybridRetrieverTestUtils.SHORT_TECHNICAL_TOKENS.has("js")).toBe(true)
   })
 })

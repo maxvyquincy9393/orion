@@ -40,4 +40,17 @@ Here is the result:
 
     expect(a).toBe(b)
   })
+
+  it("compares string sets independent of order", () => {
+    expect(__causalGraphTestUtils.sameStringSet(["a", "b"], ["b", "a"])).toBe(true)
+    expect(__causalGraphTestUtils.sameStringSet(["a", "b"], ["a"])).toBe(false)
+    expect(__causalGraphTestUtils.sameStringSet(["a", "b"], ["a", "c"])).toBe(false)
+  })
+
+  it("normalizes query text by trimming and clipping", () => {
+    const normalized = __causalGraphTestUtils.normalizeQueryText(`  hello  ${"x".repeat(600)} `)
+
+    expect(normalized.startsWith("hello")).toBe(true)
+    expect(normalized.length).toBeLessThanOrEqual(500)
+  })
 })

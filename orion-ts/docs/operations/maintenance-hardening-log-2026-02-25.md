@@ -36,10 +36,12 @@ Scope: production maintainability + bug hunting across core pipeline, engines, s
   - embedding requests had no timeout.
   - pending MemRL feedback could go stale/leak.
   - MemRL retrieval/update paths now tolerate malformed runtime data better.
-  - hybrid FTS query incorrectly filtered by sanitized Prisma `userId`.
-  - hybrid FTS join used `m.id = fts.rowid` (string PK vs SQLite rowid mismatch).
-  - causal hyperedge extraction weight was parsed but never persisted.
-  - hyperedges could duplicate aggressively for repeated extractions (best-effort dedupe added).
+- hybrid FTS query incorrectly filtered by sanitized Prisma `userId`.
+- hybrid FTS join used `m.id = fts.rowid` (string PK vs SQLite rowid mismatch).
+- hybrid FTS builder dropped short technical tokens (`go`, `js`, `ts`, `io`, etc.) and reduced lexical recall for developer queries.
+- causal hyperedge extraction weight was parsed but never persisted.
+- hyperedges could duplicate aggressively for repeated extractions (best-effort dedupe added).
+- causal graph retrieval could broad-scan on empty query (`contains: ""`) and traverse duplicate edges repeatedly.
 - Workspace/bootstrap:
   - nested tenant config updates were shallow-merged.
   - `updateUserMd()` replacement corrupted values containing `$1`, `$&`, etc.
@@ -61,3 +63,9 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
 2. Split `src/memory/causal-graph.ts` into parser/persistence/retrieval modules.
 3. Add schema-level dedupe strategy for graph nodes/hyperedges (migration plan).
 4. Run full Vitest suite in host/CI (non-sandbox) and fix assertion regressions.
+
+## Follow-up Notes (pass 2)
+
+- `hybrid-retriever` FTS join now uses SQLite `rowid` (`m.rowid = fts.rowid`) to match FTS5 semantics.
+- `causal-graph` retrieval now trims/clips query input and skips keyword graph scans for empty queries.
+- Graph traversal suppresses duplicate edge processing during BFS to reduce repeated edge candidates.

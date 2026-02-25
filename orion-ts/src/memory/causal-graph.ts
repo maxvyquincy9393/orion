@@ -252,6 +252,10 @@ function sameStringSet(left: string[], right: string[]): boolean {
   return leftSorted.every((value, index) => value === rightSorted[index])
 }
 
+function normalizeQueryText(query: string): string {
+  return query.trim().slice(0, 500)
+}
+
 export class CausalGraph {
   private async resolveNodeIds(
     userId: string,
@@ -540,12 +544,17 @@ export class CausalGraph {
     weight: number
   }>> {
     try {
+      const normalizedQuery = normalizeQueryText(query)
+      if (!normalizedQuery) {
+        return []
+      }
+
       const edges = await prisma.hyperEdge.findMany({
         where: {
           userId,
           OR: [
-            { relation: { contains: query } },
-            { context: { contains: query } },
+            { relation: { contains: normalizedQuery } },
+            { context: { contains: normalizedQuery } },
           ],
         },
         include: {
@@ -579,22 +588,29 @@ export class CausalGraph {
     relevance: number
   }>> {
     try {
-      const complexity = detectQueryComplexity(query)
-      const semanticCandidates = await temporalIndex.retrieve(userId, query, complexity)
+      const normalizedQuery = normalizeQueryText(query)
+      const complexity = detectQueryComplexity(normalizedQuery)
+      const semanticCandidates = await temporalIndex.retrieve(userId, normalizedQuery, complexity)
 
-      const seedNodes = await prisma.causalNode.findMany({
-        where: {
-          userId,
-          OR: [
-            { event: { contains: query } },
-            { category: { contains: query } },
-          ],
-        },
-        take: 12,
-      })
+      const seedNodes = normalizedQuery
+        ? await prisma.causalNode.findMany({
+          where: {
+            userId,
+            OR: [
+              { event: { contains: normalizedQuery } },
+              { category: { contains: normalizedQuery } },
+            ],
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 12,
+        })
+        : []
 
       const nodeDistance = new Map<string, number>()
       const queue: Array<{ nodeId: string; distance: number }> = []
+      const seenGraphEdges = new Set<string>()
 
       for (const node of seedNodes) {
         nodeDistance.set(node.id, 0)
@@ -625,6 +641,11 @@ export class CausalGraph {
         })
 
         for (const edge of edges) {
+          if (seenGraphEdges.has(edge.id)) {
+            continue
+          }
+          seenGraphEdges.add(edge.id)
+
           collectedEdges.push({
             fromEvent: edge.from.event,
             toEvent: edge.to.event,
@@ -812,4 +833,5 @@ export const __causalGraphTestUtils = {
   extractFirstJsonObject,
   buildHyperEdgeKey,
   sameStringSet,
+  normalizeQueryText,
 }

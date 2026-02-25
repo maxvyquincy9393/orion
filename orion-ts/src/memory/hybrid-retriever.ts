@@ -67,6 +67,18 @@ const DEFAULT_CONFIG: HybridConfig = {
 const MIN_RRF_WEIGHT = 0.01
 const MAX_TOP_K = 200
 const MAX_FINAL_LIMIT = 50
+const SHORT_TECHNICAL_TOKENS = new Set([
+  "ai",
+  "db",
+  "go",
+  "io",
+  "js",
+  "ml",
+  "qa",
+  "ts",
+  "ui",
+  "ux",
+])
 
 /**
  * Compute RRF score for a result
@@ -130,12 +142,32 @@ function normalizeHybridConfig(config: Partial<HybridConfig>, base: HybridConfig
 }
 
 function buildFTSQuery(query: string): string {
-  const tokens = (query.match(/[a-zA-Z0-9_]+/g) ?? [])
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2)
-    .slice(0, 8)
+  const deduped: string[] = []
+  const seen = new Set<string>()
 
-  return tokens.map((token) => `${token}*`).join(" ")
+  for (const rawToken of query.match(/[a-zA-Z0-9_]+/g) ?? []) {
+    const token = rawToken.trim().toLowerCase()
+    if (!token) {
+      continue
+    }
+
+    const allowShort = token.length >= 2 && SHORT_TECHNICAL_TOKENS.has(token)
+    if (token.length <= 2 && !allowShort) {
+      continue
+    }
+    if (token.length > 2 || allowShort) {
+      if (seen.has(token)) {
+        continue
+      }
+      seen.add(token)
+      deduped.push(token)
+    }
+    if (deduped.length >= 8) {
+      break
+    }
+  }
+
+  return deduped.map((token) => `${token}*`).join(" ")
 }
 
 /**
@@ -494,4 +526,5 @@ export const hybridRetriever = new HybridRetriever()
 export const __hybridRetrieverTestUtils = {
   buildFTSQuery,
   normalizeHybridConfig,
+  SHORT_TECHNICAL_TOKENS: new Set(SHORT_TECHNICAL_TOKENS),
 }
