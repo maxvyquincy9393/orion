@@ -15,11 +15,14 @@ vi.mock("../../database/index.js", () => ({
     },
     hyperEdge: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
     hyperEdgeMembership: {
       createMany: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
     },
   },
 }))
@@ -53,19 +56,27 @@ import { CausalGraph } from "../causal-graph.js"
 
 type MockFn<T extends (...args: any[]) => any> = ReturnType<typeof vi.fn<T>>
 
+function p2002(target: string[] = []): { code: string; meta: { target: string[] } } {
+  return { code: "P2002", meta: { target } }
+}
+
 describe("CausalGraph integration (mocked)", () => {
   const prismaMock = prisma as unknown as {
     causalNode: {
       findMany: MockFn<any>
       create: MockFn<any>
+      findFirst: MockFn<any>
     }
     hyperEdge: {
       findMany: MockFn<any>
+      findFirst: MockFn<any>
       create: MockFn<any>
       update: MockFn<any>
     }
     hyperEdgeMembership: {
       createMany: MockFn<any>
+      findMany: MockFn<any>
+      create: MockFn<any>
     }
   }
 
@@ -81,11 +92,15 @@ describe("CausalGraph integration (mocked)", () => {
       .mockResolvedValueOnce({ id: "node-a" })
       .mockResolvedValueOnce({ id: "node-b" })
       .mockResolvedValue({ id: "node-x" })
+    prismaMock.causalNode.findFirst.mockResolvedValue(null)
 
     prismaMock.hyperEdge.findMany.mockResolvedValue([])
+    prismaMock.hyperEdge.findFirst.mockResolvedValue(null)
     prismaMock.hyperEdge.create.mockResolvedValue({ id: "hyper-1", weight: 0.5 })
     prismaMock.hyperEdge.update.mockResolvedValue({ id: "hyper-1", weight: 0.9 })
     prismaMock.hyperEdgeMembership.createMany.mockResolvedValue({ count: 2 })
+    prismaMock.hyperEdgeMembership.findMany.mockResolvedValue([])
+    prismaMock.hyperEdgeMembership.create.mockResolvedValue({ hyperEdgeId: "hyper-1", nodeId: "node-a" })
   })
 
   it("extractAndUpdate persists parsed hyperedge weight and dedupes repeated hyperedges in one response", async () => {
@@ -161,5 +176,74 @@ describe("CausalGraph integration (mocked)", () => {
       },
     })
     expect(prismaMock.hyperEdge.create).not.toHaveBeenCalled()
+  })
+
+  it("recovers from causal node unique conflicts when concurrent writers create the same event", async () => {
+    const graph = new CausalGraph()
+
+    prismaMock.causalNode.findMany.mockResolvedValueOnce([])
+    prismaMock.causalNode.create.mockReset()
+    prismaMock.causalNode.create
+      .mockRejectedValueOnce(p2002(["userId", "eventKey"]))
+      .mockResolvedValueOnce({ id: "node-b" })
+    prismaMock.causalNode.findFirst.mockResolvedValueOnce({
+      id: "node-a",
+      event: "Late sleep",
+      eventKey: normalizeCausalEventKey("Late sleep"),
+      createdAt: new Date(),
+    })
+
+    prismaMock.hyperEdge.findFirst.mockResolvedValueOnce(null)
+    prismaMock.hyperEdge.findMany.mockResolvedValueOnce([])
+    prismaMock.hyperEdge.create.mockResolvedValueOnce({ id: "hyper-race" })
+    prismaMock.hyperEdgeMembership.createMany.mockResolvedValueOnce({ count: 2 })
+
+    await graph.addHyperEdge("user-1", ["Late sleep", "Missed meeting"], "routine", "weekday", 0.7)
+
+    expect(prismaMock.causalNode.findFirst).toHaveBeenCalledTimes(1)
+    expect(prismaMock.hyperEdge.create).toHaveBeenCalledTimes(1)
+  })
+
+  it("recovers from hyperedge unique conflicts and fills missing memberships", async () => {
+    const graph = new CausalGraph()
+
+    prismaMock.causalNode.findMany.mockResolvedValueOnce([
+      { id: "node-a", event: "Late sleep", eventKey: "late sleep", createdAt: new Date() },
+      { id: "node-b", event: "Missed meeting", eventKey: "missed meeting", createdAt: new Date() },
+    ])
+    prismaMock.hyperEdge.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "hyper-existing", weight: 0.4 })
+    prismaMock.hyperEdge.findMany.mockResolvedValueOnce([])
+    prismaMock.hyperEdge.create.mockRejectedValueOnce(p2002(["userId", "relation", "memberSetHash"]))
+    prismaMock.hyperEdgeMembership.findMany.mockResolvedValueOnce([{ nodeId: "node-a" }])
+    prismaMock.hyperEdgeMembership.create.mockResolvedValueOnce({
+      hyperEdgeId: "hyper-existing",
+      nodeId: "node-b",
+    })
+
+    await graph.addHyperEdge("user-1", ["Late sleep", "Missed meeting"], "routine", "weekday", 0.9)
+
+    expect(prismaMock.hyperEdge.update).toHaveBeenCalledWith({
+      where: { id: "hyper-existing" },
+      data: {
+        weight: 0.9,
+        context: "weekday",
+        memberSetHash: computeHyperEdgeMemberSetHash("routine", ["node-a", "node-b"]),
+      },
+    })
+    expect(prismaMock.hyperEdgeMembership.findMany).toHaveBeenCalledWith({
+      where: {
+        hyperEdgeId: "hyper-existing",
+        nodeId: { in: ["node-a", "node-b"] },
+      },
+      select: { nodeId: true },
+    })
+    expect(prismaMock.hyperEdgeMembership.create).toHaveBeenCalledWith({
+      data: {
+        hyperEdgeId: "hyper-existing",
+        nodeId: "node-b",
+      },
+    })
   })
 })

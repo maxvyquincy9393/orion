@@ -46,6 +46,15 @@ interface ExtractedCausalPayload {
   hyperEdges: ExtractedHyperEdge[]
 }
 
+interface PrismaLikeErrorMeta {
+  target?: unknown
+}
+
+interface PrismaLikeKnownError {
+  code?: unknown
+  meta?: PrismaLikeErrorMeta
+}
+
 function clamp(value: number, min = 0, max = 1): number {
   if (Number.isNaN(value)) {
     return min
@@ -79,6 +88,10 @@ function lexicalScore(query: string, candidate: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isUniqueConstraintError(error: unknown): error is PrismaLikeKnownError {
+  return isRecord(error) && (error as PrismaLikeKnownError).code === "P2002"
 }
 
 function normalizeText(value: unknown, maxLength: number): string {
@@ -258,6 +271,68 @@ function normalizeQueryText(query: string): string {
 }
 
 export class CausalGraph {
+  private async findNodeByEventOrKey(userId: string, nodeName: string) {
+    const eventKey = normalizeCausalEventKey(nodeName)
+    return prisma.causalNode.findFirst({
+      where: {
+        userId,
+        OR: [
+          { event: nodeName },
+          ...(eventKey ? [{ eventKey }] : []),
+        ],
+      },
+      orderBy: { createdAt: "asc" },
+    })
+  }
+
+  private async ensureHyperEdgeMemberships(hyperEdgeId: string, nodeIds: string[]): Promise<void> {
+    if (nodeIds.length === 0) {
+      return
+    }
+
+    const existingMemberships = await prisma.hyperEdgeMembership.findMany({
+      where: {
+        hyperEdgeId,
+        nodeId: { in: nodeIds },
+      },
+      select: { nodeId: true },
+    })
+    const existingNodeIds = new Set(existingMemberships.map((membership) => membership.nodeId))
+    const missingNodeIds = nodeIds.filter((nodeId) => !existingNodeIds.has(nodeId))
+
+    for (const nodeId of missingNodeIds) {
+      try {
+        await prisma.hyperEdgeMembership.create({
+          data: { hyperEdgeId, nodeId },
+        })
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          continue
+        }
+        throw error
+      }
+    }
+  }
+
+  private async updateExistingHyperEdge(
+    hyperEdgeId: string,
+    currentWeight: number,
+    nextWeight: number,
+    memberSetHash: string,
+    context: string,
+    resolvedNodeIds: string[],
+  ): Promise<void> {
+    await prisma.hyperEdge.update({
+      where: { id: hyperEdgeId },
+      data: {
+        weight: Math.max(currentWeight, nextWeight),
+        memberSetHash,
+        ...(context ? { context } : {}),
+      },
+    })
+    await this.ensureHyperEdgeMemberships(hyperEdgeId, resolvedNodeIds)
+  }
+
   private async resolveNodeIds(
     userId: string,
     nodeNames: string[],
@@ -323,14 +398,27 @@ export class CausalGraph {
         continue
       }
 
-      const created = await prisma.causalNode.create({
-        data: {
-          userId,
-          event: nodeName,
-          eventKey: normalizeCausalEventKey(nodeName),
-          category: normalizeCategory(categoryHints.get(nodeName)),
-        },
-      })
+      let created: { id: string } | null = null
+      try {
+        created = await prisma.causalNode.create({
+          data: {
+            userId,
+            event: nodeName,
+            eventKey: normalizeCausalEventKey(nodeName),
+            category: normalizeCategory(categoryHints.get(nodeName)),
+          },
+        })
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) {
+          throw error
+        }
+        // Stage-3 adds a unique constraint on (userId, eventKey); concurrent writers can race here.
+        const existing = await this.findNodeByEventOrKey(userId, nodeName)
+        if (!existing) {
+          throw error
+        }
+        created = existing
+      }
       resolved.set(nodeName, created.id)
       const eventKey = normalizeCausalEventKey(nodeName)
       if (eventKey && !resolvedByEventKey.has(eventKey)) {
@@ -362,14 +450,34 @@ export class CausalGraph {
       return
     }
 
-    await prisma.causalEdge.create({
-      data: {
-        userId,
-        fromId,
-        toId,
-        strength: clamp(confidence),
-      },
-    })
+    try {
+      await prisma.causalEdge.create({
+        data: {
+          userId,
+          fromId,
+          toId,
+          strength: clamp(confidence),
+        },
+      })
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error
+      }
+      // Concurrent writers may create the same edge after our read but before insert.
+      const racedEdge = await prisma.causalEdge.findUnique({
+        where: { fromId_toId: { fromId, toId } },
+      })
+      if (!racedEdge) {
+        throw error
+      }
+      await prisma.causalEdge.update({
+        where: { id: racedEdge.id },
+        data: {
+          strength: clamp(racedEdge.strength + 0.1),
+          evidence: racedEdge.evidence + 1,
+        },
+      })
+    }
   }
 
   async extractAndUpdate(userId: string, message: string): Promise<void> {
@@ -518,7 +626,33 @@ export class CausalGraph {
       const normalizedWeight = clamp(weight)
       const memberSetHash = computeHyperEdgeMemberSetHash(normalizedRelation, resolvedNodeIds)
 
-      // Best-effort runtime dedupe: schema has no unique constraint for hyperedge member sets yet.
+      // Prefer direct dedupe by stable key. The fallback candidate scan still handles legacy rows
+      // that may be missing hashes during staged rollouts before Stage-3 is enforced.
+      const keyedMatch = await prisma.hyperEdge.findFirst({
+        where: {
+          userId,
+          relation: normalizedRelation,
+          memberSetHash,
+        },
+        select: {
+          id: true,
+          weight: true,
+        },
+      })
+
+      if (keyedMatch) {
+        await this.updateExistingHyperEdge(
+          keyedMatch.id,
+          keyedMatch.weight,
+          normalizedWeight,
+          memberSetHash,
+          normalizedContext,
+          resolvedNodeIds,
+        )
+        return
+      }
+
+      // Legacy fallback for pre-backfill rows without memberSetHash.
       const existingCandidates = await prisma.hyperEdge.findMany({
         where: {
           userId,
@@ -543,30 +677,62 @@ export class CausalGraph {
       })
 
       if (matchingEdge) {
-        await prisma.hyperEdge.update({
-          where: { id: matchingEdge.id },
-          data: {
-            weight: Math.max(matchingEdge.weight, normalizedWeight),
-            memberSetHash,
-            ...(normalizedContext ? { context: normalizedContext } : {}),
-          },
-        })
+        await this.updateExistingHyperEdge(
+          matchingEdge.id,
+          matchingEdge.weight,
+          normalizedWeight,
+          memberSetHash,
+          normalizedContext,
+          resolvedNodeIds,
+        )
         return
       }
 
-      const hyperEdge = await prisma.hyperEdge.create({
-        data: {
-          userId,
-          relation: normalizedRelation,
-          context: normalizedContext,
+      let hyperEdgeId: string
+      try {
+        const hyperEdge = await prisma.hyperEdge.create({
+          data: {
+            userId,
+            relation: normalizedRelation,
+            context: normalizedContext,
+            memberSetHash,
+            weight: normalizedWeight,
+          },
+        })
+        hyperEdgeId = hyperEdge.id
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) {
+          throw error
+        }
+        // Concurrent insert after our dedupe reads; recover by fetching the canonical row.
+        const racedHyperEdge = await prisma.hyperEdge.findFirst({
+          where: {
+            userId,
+            relation: normalizedRelation,
+            memberSetHash,
+          },
+          select: {
+            id: true,
+            weight: true,
+          },
+        })
+        if (!racedHyperEdge) {
+          throw error
+        }
+        await this.updateExistingHyperEdge(
+          racedHyperEdge.id,
+          racedHyperEdge.weight,
+          normalizedWeight,
           memberSetHash,
-          weight: normalizedWeight,
-        },
-      })
+          normalizedContext,
+          resolvedNodeIds,
+        )
+        return
+      }
 
       await prisma.hyperEdgeMembership.createMany({
         data: resolvedNodeIds.map((nodeId) => ({
-          hyperEdgeId: hyperEdge.id,
+          hyperEdgeId,
           nodeId,
         })),
       })

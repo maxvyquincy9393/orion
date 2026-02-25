@@ -143,3 +143,16 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `pnpm test:ci` => `15` test files passed / `45` tests passed
 - Remaining rollout caveat:
   - real environments still must run dedupe/backfill dry-run and review counts before applying Stage-3 migration
+
+## Follow-up Notes (pass 10)
+
+- Hardened `causal-graph` write paths for Stage-3 unique-constraint races (`P2002`):
+  - `CausalNode` create conflict now reloads canonical row by `event`/`eventKey`
+  - `CausalEdge` create conflict now retries via read/update merge path
+  - `HyperEdge` create conflict now reloads keyed row and updates weight/context
+  - existing/conflict hyperedge paths now ensure missing memberships are backfilled
+- Added mocked regression tests for concurrent create conflict recovery in:
+  - `src/memory/__tests__/causal-graph.integration.test.ts`
+- Regression verification after race hardening:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `15` test files passed / `47` tests passed

@@ -27,6 +27,7 @@ Status:
 - Dedupe CLI now prints explicit Stage-3 readiness counts (missing keys + duplicate groups)
 - Stage 3 schema/migration scaffold added in `prisma/migrations/20260225163000_enforce_causal_graph_dedupe_keys_stage3/`
 - Stage 3 migration verified locally on empty SQLite dataset (safe syntax/runtime check)
+- Runtime writer is hardened for Stage-3 unique constraint races (`P2002`) in `src/memory/causal-graph.ts`
 - Stage 3 deploy remains blocked until real environment backfill/dedupe verification is complete
 
 ### Stage 1: Add columns/indexes (non-breaking)
