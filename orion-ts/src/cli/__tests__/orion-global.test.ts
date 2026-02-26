@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   parseOrionCliArgs,
   findOrionRepoUpwards,
+  getProfilePaths,
   isOrionRepoDir,
 } from "../../../bin/orion.js"
 
@@ -13,12 +14,15 @@ describe("global orion CLI helpers", () => {
     const parsed = parseOrionCliArgs([
       "--repo",
       "C:\\repo\\orion-ts",
+      "--profile",
+      "C:\\Users\\me\\.orion\\profiles\\test",
       "wa",
       "scan",
     ])
 
     expect(parsed).toEqual({
       repoOverride: "C:\\repo\\orion-ts",
+      profileOverride: "C:\\Users\\me\\.orion\\profiles\\test",
       positionals: ["wa", "scan"],
       help: false,
     })
@@ -27,9 +31,17 @@ describe("global orion CLI helpers", () => {
   it("detects help flag early", () => {
     expect(parseOrionCliArgs(["--help"])).toEqual({
       repoOverride: null,
+      profileOverride: null,
       positionals: [],
       help: true,
     })
+  })
+
+  it("builds profile-relative env/workspace/state paths", () => {
+    const paths = getProfilePaths("C:\\Users\\me\\.orion\\profiles\\default")
+    expect(paths.envPath).toContain(`${path.sep}.env`)
+    expect(paths.workspaceDir).toContain(`${path.sep}workspace`)
+    expect(paths.stateDir).toContain(`${path.sep}.orion`)
   })
 
   it("validates Orion repo by package name", async () => {

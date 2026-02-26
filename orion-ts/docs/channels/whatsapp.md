@@ -33,8 +33,11 @@ pnpm wa:scan
 If you installed the global wrapper:
 
 ```bash
+orion profile init
 orion wa scan
 ```
+
+This keeps WhatsApp auth/session files under your Orion profile state dir (for example `~/.orion/profiles/default/.orion/whatsapp-auth`) instead of the repo root.
 
 or use the general wizard:
 

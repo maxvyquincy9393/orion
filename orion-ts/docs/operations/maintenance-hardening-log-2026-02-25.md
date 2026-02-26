@@ -283,3 +283,21 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `node bin/orion.js repo --repo .` resolves current repo path
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `21` test files passed / `73` tests passed
+
+## Follow-up Notes (pass 19)
+
+- Phase-2 global wrapper improvements (`bin/orion.js`):
+  - added profile bootstrap + runtime env forwarding (`ORION_ENV_FILE`, `ORION_WORKSPACE`, `ORION_STATE_DIR`)
+  - new commands: `orion profile`, `orion profile init`, `orion init`
+  - wrapper now auto-bootstraps profile env/workspace/state before running Orion commands
+- `src/config.ts` now honors `ORION_ENV_FILE` so onboarding/runtime can use profile-scoped `.env`.
+- `src/cli/onboard.ts` now writes to `ORION_ENV_FILE` target when provided (global wrapper path).
+- `src/channels/whatsapp.ts` now stores Baileys auth under `ORION_STATE_DIR` (profile-scoped) when set.
+- Added/extended tests/docs:
+  - `src/cli/__tests__/orion-global.test.ts`
+  - `docs/platform/global-cli.md`
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `21` test files passed / `74` tests passed
+  - `node bin/orion.js profile init --repo .` creates `%USERPROFILE%\\.orion\\profiles\\default` (`.env`, `workspace`, `.orion` state dir)
+  - sandbox-only smoke with local profile path also validated profile bootstrap logic before global config write (`EPERM` on home write without escalation)

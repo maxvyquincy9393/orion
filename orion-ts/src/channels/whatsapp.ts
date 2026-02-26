@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import config from "../config.js"
 import { handleIncomingUserMessage } from "../core/incoming-message-service.js"
 import { createLogger } from "../logger.js"
@@ -142,6 +144,13 @@ function normalizeWhatsAppCommand(text: string): string | null {
   }
   const command = token.slice(1).toLowerCase()
   return command || null
+}
+
+function resolveWhatsAppAuthStateDir(): string {
+  const stateDir = typeof process.env.ORION_STATE_DIR === "string" && process.env.ORION_STATE_DIR.trim().length > 0
+    ? process.env.ORION_STATE_DIR.trim()
+    : ".orion"
+  return path.join(stateDir, "whatsapp-auth")
 }
 
 function parseWhatsAppWebhookVerifyQuery(input: unknown): CloudWebhookVerifyQuery {
@@ -314,7 +323,7 @@ export class WhatsAppChannel implements BaseChannel {
         return
       }
 
-      const { state, saveCreds } = await this.baileys.useMultiFileAuthState(".orion/whatsapp-auth")
+      const { state, saveCreds } = await this.baileys.useMultiFileAuthState(resolveWhatsAppAuthStateDir())
 
       this.socket = this.baileys.makeWASocket({
         auth: { state, saveCreds },
@@ -792,6 +801,7 @@ export const __whatsAppTestUtils = {
   toWhatsAppCloudRecipient,
   toBaileysJid,
   normalizeWhatsAppCommand,
+  resolveWhatsAppAuthStateDir,
   parseWhatsAppWebhookVerifyQuery,
   extractInboundWhatsAppCloudMessages,
 }

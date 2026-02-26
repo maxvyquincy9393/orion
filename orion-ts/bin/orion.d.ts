@@ -1,8 +1,17 @@
 export function getCliConfigDir(): string
 export function getCliConfigPath(): string
+export function getProfilesRootDir(): string
+export function getDefaultProfileDir(): string
+export function getProfilePaths(profileDir: string): {
+  profileDir: string
+  envPath: string
+  workspaceDir: string
+  stateDir: string
+}
 
 export function parseOrionCliArgs(argv: string[]): {
   repoOverride: string | null
+  profileOverride: string | null
   positionals: string[]
   help: boolean
 }
@@ -28,5 +37,12 @@ export function findOrionRepoUpwards(
   startDir: string,
   fsModule?: { readFile: (path: string, encoding: string) => Promise<string> },
 ): Promise<string | null>
+
+export function ensureProfileBootstrap(repoDir: string, profileDir: string): Promise<{
+  profileDir: string
+  envPath: string
+  workspaceDir: string
+  stateDir: string
+}>
 
 export function main(argv?: string[]): Promise<void>

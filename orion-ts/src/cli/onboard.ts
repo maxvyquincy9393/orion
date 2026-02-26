@@ -27,6 +27,11 @@ interface EnvTemplate {
   source: ".env" | ".env.example" | "empty"
 }
 
+interface OnboardEnvPaths {
+  envPath: string
+  envExamplePath: string
+}
+
 interface QuickstartPlan {
   channel: ChannelChoice
   provider: ProviderChoice
@@ -250,8 +255,9 @@ export function mergeEnvContent(baseContent: string, updates: Record<string, str
 }
 
 async function loadEnvTemplate(cwd: string): Promise<EnvTemplate> {
-  const envPath = path.join(cwd, ".env")
-  const envExamplePath = path.join(cwd, ".env.example")
+  const paths = resolveOnboardEnvPaths(cwd)
+  const envPath = paths.envPath
+  const envExamplePath = paths.envExamplePath
 
   try {
     return {
@@ -276,6 +282,18 @@ async function loadEnvTemplate(cwd: string): Promise<EnvTemplate> {
   }
 
   return { content: "", source: "empty" }
+}
+
+function resolveOnboardEnvPaths(cwd: string): OnboardEnvPaths {
+  const explicitEnvPath = typeof process.env.ORION_ENV_FILE === "string" && process.env.ORION_ENV_FILE.trim().length > 0
+    ? path.resolve(process.env.ORION_ENV_FILE.trim())
+    : null
+
+  return {
+    envPath: explicitEnvPath ?? path.join(cwd, ".env"),
+    // Keep using the repo template as the canonical base when writing a profile env.
+    envExamplePath: path.join(cwd, ".env.example"),
+  }
 }
 
 function redactSecretValue(key: string, value: string): string {
@@ -595,8 +613,9 @@ function printPlannedChanges(plan: QuickstartPlan, envPath: string, templateSour
 }
 
 async function writeEnvFile(cwd: string, template: EnvTemplate, updates: Record<string, string>): Promise<string> {
-  const envPath = path.join(cwd, ".env")
+  const { envPath } = resolveOnboardEnvPaths(cwd)
   const merged = mergeEnvContent(template.content, updates)
+  await fs.mkdir(path.dirname(envPath), { recursive: true })
   await fs.writeFile(envPath, merged, "utf-8")
   return envPath
 }
@@ -609,7 +628,7 @@ async function runOnboarding(argv: string[]): Promise<void> {
 
   const cwd = process.cwd()
   const template = await loadEnvTemplate(cwd)
-  const envPath = path.join(cwd, ".env")
+  const { envPath } = resolveOnboardEnvPaths(cwd)
   const currentEnv = readEnvValueMap(template.content)
   const plan = await collectQuickstartPlan(args, currentEnv)
 

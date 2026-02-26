@@ -1,7 +1,11 @@
 ﻿import dotenv from "dotenv"
 import { z } from "zod"
 
-dotenv.config({ path: ".env" })
+const envFilePath = typeof process.env.ORION_ENV_FILE === "string" && process.env.ORION_ENV_FILE.trim().length > 0
+  ? process.env.ORION_ENV_FILE.trim()
+  : ".env"
+
+dotenv.config({ path: envFilePath })
 
 const boolFromEnv = z.preprocess((value) => {
   if (typeof value === "boolean") {

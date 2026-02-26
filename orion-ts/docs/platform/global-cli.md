@@ -10,16 +10,21 @@ Provide a single command (`orion`) that feels closer to OpenClaw:
 - link your Orion repo once
 - use simple commands like `orion wa scan`
 
-This is a **Phase 1 wrapper**, not a full repo-independent runtime yet.
+This is now a **Phase 2 wrapper** (repo-linked runtime + profile state), not yet a fully repo-independent runtime.
 
-## What it does (Phase 1)
+## What it does (Phase 2)
 
 - Stores a linked repo path in `~/.orion/cli.json`
+- Stores an active profile under `~/.orion/profiles/default` (config/state/workspace)
 - Proxies commands to `pnpm --dir <repo> ...`
 - Removes the `pnpm setup` UX trap by exposing beginner-friendly commands:
   - `orion quickstart`
   - `orion wa scan`
   - `orion wa cloud`
+- Runs Orion commands with profile-scoped env variables:
+  - `ORION_ENV_FILE`
+  - `ORION_WORKSPACE`
+  - `ORION_STATE_DIR`
 
 ## Install (local machine)
 
@@ -50,6 +55,18 @@ Verify:
 orion repo
 ```
 
+Initialize profile files (recommended once):
+
+```bash
+orion profile init
+```
+
+Or do both and start the wizard in one command:
+
+```bash
+orion init
+```
+
 ## WhatsApp QR test (OpenClaw-style)
 
 ```bash
@@ -75,16 +92,17 @@ orion onboard -- --channel telegram --provider groq
 
 ## Current limitations (important)
 
-Phase 1 is still **repo-backed**:
+Phase 2 is still **repo-backed**:
 
-- `.env`, database, and channel auth state still live in the linked repo
-- Orion does not yet store all runtime state in `~/.orion`
+- Code still runs from the linked repo checkout
+- Some subsystems may still rely on repo-relative defaults if not overridden in profile env
+- The wrapper shells out to `pnpm` (not a bundled runtime yet)
 - `pnpm` must be available on your machine PATH
 
 ## Next phase (planned)
 
 To match OpenClaw more closely, the next step is:
 
-- move runtime config/state to `~/.orion`
-- support `orion init` without needing a linked repo checkout
+- remove remaining repo-relative runtime defaults and move all state to profile by default
+- support `orion init` without needing a linked repo checkout (template download/init flow)
 - bundle/run without shelling out to `pnpm`

@@ -45,10 +45,11 @@ pnpm wa:scan
 pnpm wa:cloud
 ```
 
-OpenClaw-style global wrapper (Phase 1):
+OpenClaw-style global wrapper (Phase 2):
 
 ```bash
 orion link <path-to-orion-ts>
+orion profile init
 orion wa scan
 ```
 
