@@ -45,14 +45,34 @@ export class MarkdownProcessor {
   }
 
   private toTelegram(markdown: string): string {
-    let result = markdown
+    let result = this.escapeTelegramHtml(markdown)
+    const placeholders = new Map<string, string>()
+    let placeholderIndex = 0
 
+    const stash = (value: string): string => {
+      const key = `\u0000TG_${placeholderIndex}\u0000`
+      placeholderIndex += 1
+      placeholders.set(key, value)
+      return key
+    }
+
+    result = result.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => stash(`<pre>${code}</pre>`))
+    result = result.replace(/`([^`]+)`/g, (_match, code) => stash(`<code>${code}</code>`))
     result = result.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     result = result.replace(/\*([^*]+)\*/g, "<i>$1</i>")
-    result = result.replace(/`([^`]+)`/g, "<code>$1</code>")
-    result = result.replace(/```(\w*)\n([\s\S]*?)```/g, "<pre>$2</pre>")
+
+    for (const [key, value] of placeholders) {
+      result = result.replaceAll(key, value)
+    }
 
     return result
+  }
+
+  private escapeTelegramHtml(text: string): string {
+    return text
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
   }
 
   private toSlack(markdown: string): string {

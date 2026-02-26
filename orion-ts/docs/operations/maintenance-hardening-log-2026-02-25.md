@@ -168,3 +168,24 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
 - Regression verification after read-path fix:
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `15` test files passed / `48` tests passed
+
+## Follow-up Notes (pass 12)
+
+- Added Telegram HP-test channel (`src/channels/telegram.ts`) with:
+  - long polling (`getUpdates`) + `deleteWebhook` startup reset
+  - private-chat-safe default (group chats require explicit `TELEGRAM_CHAT_ID` allowlist)
+  - `/start`, `/help`, `/id`, `/ping`
+  - per-chat serialized processing to avoid overlapping responses
+- Extracted shared incoming-message runtime path from gateway into:
+  - `src/core/incoming-message-service.ts`
+  - keeps hooks, usage tracking, and MemRL feedback consistent across gateway + Telegram
+- Fixed Telegram formatting reliability bug:
+  - Telegram HTML output now escapes raw `<`, `>`, `&` before sending
+  - code spans/blocks are protected from accidental italic/bold replacement
+  - plain-text fallback added on Telegram entity parse failures
+- Added tests:
+  - `src/channels/__tests__/telegram.test.ts`
+  - `src/markdown/__tests__/processor.test.ts`
+- Regression verification:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `17` test files passed / `55` tests passed

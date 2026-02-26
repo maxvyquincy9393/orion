@@ -1,6 +1,7 @@
 import type { BaseChannel } from "./base.js"
 import { WebChatChannel } from "./webchat.js"
 import { whatsAppChannel } from "./whatsapp.js"
+import { telegramChannel } from "./telegram.js"
 import { signalChannel } from "./signal.js"
 import { lineChannel } from "./line.js"
 import { matrixChannel } from "./matrix.js"
@@ -25,6 +26,7 @@ export class ChannelManager {
     const webchat = new WebChatChannel()
     this.channels.set("webchat", webchat)
     this.channels.set("whatsapp", whatsAppChannel)
+    this.channels.set("telegram", telegramChannel)
     this.channels.set("signal", signalChannel)
     this.channels.set("line", lineChannel)
     this.channels.set("matrix", matrixChannel)
@@ -64,7 +66,7 @@ export class ChannelManager {
     }
     const safeMessage = scan.sanitized
 
-    const priorityOrder = ["webchat", "whatsapp", "signal", "line", "matrix", "teams", "imessage"]
+    const priorityOrder = ["telegram", "webchat", "whatsapp", "signal", "line", "matrix", "teams", "imessage"]
     for (const name of priorityOrder) {
       const channel = this.channels.get(name)
       if (!channel || !channel.isConnected()) {

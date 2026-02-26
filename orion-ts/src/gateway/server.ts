@@ -20,9 +20,8 @@ import websocketPlugin from "@fastify/websocket"
 import { daemon } from "../background/daemon.js"
 import { channelManager } from "../channels/manager.js"
 import config from "../config.js"
-import { processMessage } from "../core/message-pipeline.js"
+import { handleIncomingUserMessage, estimateTokensFromText } from "../core/incoming-message-service.js"
 import { orchestrator } from "../engines/orchestrator.js"
-import { hookPipeline } from "../hooks/pipeline.js"
 import { createLogger } from "../logger.js"
 import { memory } from "../memory/store.js"
 import { multiUser } from "../multiuser/manager.js"
@@ -38,7 +37,6 @@ const logger = createLogger("gateway")
 
 const MAX_USAGE_DAYS = 30
 const DEFAULT_USAGE_DAYS = 7
-const REQUEST_TOKEN_CHAR_RATIO = 4
 
 type SocketLike = {
   send: (payload: string) => void
@@ -94,11 +92,6 @@ function isAdminTokenAuthorized(candidate: unknown, configuredToken: string | un
   }
 
   return typeof candidate === "string" && candidate === configuredToken
-}
-
-function estimateTokensFromText(text: string): number {
-  // Provider-agnostic approximation used only for telemetry fallback.
-  return Math.ceil(text.length / REQUEST_TOKEN_CHAR_RATIO)
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -344,86 +337,7 @@ export class GatewayServer {
   }
 
   private async handleUserMessage(userId: string, rawMessage: string, channel: string): Promise<string> {
-    const pending = memory.consumePendingFeedback(userId)
-    if (pending) {
-      const followUpSignal = pending.provisionalReward
-        + (rawMessage.length > 20 ? 0.2 : 0)
-        + (Date.now() - pending.timestamp < 10_000 ? 0.1 : 0)
-
-      void memory.provideFeedback({
-        memoryIds: pending.retrievedIds,
-        taskSuccess: followUpSignal >= 0.5,
-        reward: followUpSignal,
-      }).catch((err) => logger.warn("gateway MemRL feedback failed", { userId, err }))
-    }
-
-    const preMessage = await hookPipeline.run("pre_message", {
-      userId,
-      channel,
-      content: rawMessage,
-      metadata: {},
-    })
-
-    if (preMessage.abort) {
-      return preMessage.abortReason ?? "Message blocked by pre_message hook"
-    }
-
-    const startTime = Date.now()
-    let responseText = ""
-    let usageSuccess = true
-    let errorType: string | undefined
-
-    try {
-      const result = await processMessage(userId, preMessage.content, { channel })
-      responseText = result.response
-    } catch (error) {
-      usageSuccess = false
-      errorType = error instanceof Error ? error.name : "unknown"
-      throw error
-    } finally {
-      const latencyMs = Date.now() - startTime
-      const promptTokens = estimateTokensFromText(preMessage.content)
-      const completionTokens = estimateTokensFromText(responseText)
-      const lastEngine = orchestrator.getLastUsedEngine()
-
-      void usageTracker.recordUsage({
-        userId,
-        provider: lastEngine?.provider ?? "unknown",
-        model: lastEngine?.model ?? "unknown",
-        promptTokens,
-        completionTokens,
-        totalTokens: promptTokens + completionTokens,
-        latencyMs,
-        requestType: "chat",
-        success: usageSuccess,
-        errorType,
-        timestamp: new Date(),
-      }).catch((err) => logger.warn("Failed to track usage", err))
-    }
-
-    const postMessage = await hookPipeline.run("post_message", {
-      userId,
-      channel,
-      content: responseText,
-      metadata: {},
-    })
-
-    if (postMessage.abort) {
-      return postMessage.abortReason ?? "Message blocked by post_message hook"
-    }
-
-    const preSend = await hookPipeline.run("pre_send", {
-      userId,
-      channel,
-      content: postMessage.content,
-      metadata: postMessage.metadata,
-    })
-
-    if (preSend.abort) {
-      return preSend.abortReason ?? "Message blocked by pre_send hook"
-    }
-
-    return preSend.content
+    return handleIncomingUserMessage(userId, rawMessage, channel)
   }
 
   private stopVoiceSession(userId: string, reason: string): boolean {
