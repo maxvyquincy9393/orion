@@ -14,7 +14,7 @@ Provide a fast local onboarding flow similar to OpenClaw's "setup + onboard" exp
 ## Commands
 
 ```bash
-pnpm setup
+pnpm quickstart
 ```
 
 Alias for:
@@ -23,14 +23,26 @@ Alias for:
 pnpm onboard
 ```
 
+Compatibility note:
+
+- `pnpm setup` can collide with pnpm's built-in `setup` command.
+- Use `pnpm quickstart` (recommended) or `pnpm run setup`.
+
 Optional flags:
 
 ```bash
-pnpm onboard --channel telegram --provider groq
-pnpm onboard --channel discord --provider openrouter
-pnpm onboard --channel whatsapp --provider openrouter
-pnpm onboard --print-only
-pnpm onboard --yes
+pnpm onboard -- --channel telegram --provider groq
+pnpm onboard -- --channel discord --provider openrouter
+pnpm onboard -- --channel whatsapp --whatsapp-mode scan --provider openrouter
+pnpm onboard -- --print-only
+pnpm onboard -- --yes
+```
+
+Beginner shortcuts:
+
+```bash
+pnpm wa:scan
+pnpm wa:cloud
 ```
 
 ## What the wizard does

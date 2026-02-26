@@ -15,7 +15,10 @@
     "typecheck": "tsc --noEmit",
     "doctor": "tsx src/cli/doctor.ts",
     "onboard": "tsx src/cli/onboard.ts",
+    "quickstart": "tsx src/cli/onboard.ts --flow quickstart",
     "setup": "tsx src/cli/onboard.ts --flow quickstart",
+    "wa:scan": "tsx src/cli/onboard.ts --flow quickstart --channel whatsapp --whatsapp-mode scan",
+    "wa:cloud": "tsx src/cli/onboard.ts --flow quickstart --channel whatsapp --whatsapp-mode cloud",
     "dedupe:causal-graph": "tsx src/cli/causal-graph-dedupe.ts --apply",
     "dedupe:causal-graph:dry-run": "tsx src/cli/causal-graph-dedupe.ts --dry-run"
   },

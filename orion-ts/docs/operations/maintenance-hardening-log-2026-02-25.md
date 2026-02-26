@@ -254,3 +254,13 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - Cloud API remains available as advanced/official mode
 - Added `--whatsapp-mode scan|cloud` CLI flag for scripted onboarding runs.
 - Updated WhatsApp docs to lead with QR scan quickstart and move Cloud API under advanced section.
+
+## Follow-up Notes (pass 17)
+
+- Fixed beginner onboarding UX issue with pnpm command collisions:
+  - `pnpm setup` conflicts with pnpm built-in `setup`
+  - added beginner-safe aliases:
+    - `pnpm quickstart`
+    - `pnpm wa:scan`
+    - `pnpm wa:cloud`
+- Updated onboarding help/docs to use `pnpm onboard -- <args>` when passing script flags.

@@ -24,6 +24,18 @@ WHATSAPP_MODE=baileys
 
 ### Quick start (QR scan)
 
+Fastest command (recommended):
+
+```bash
+pnpm wa:scan
+```
+
+or use the general wizard:
+
+```bash
+pnpm quickstart
+```
+
 1. Run Orion:
    - `pnpm all`
 2. Wait for WhatsApp QR code in terminal.
@@ -134,6 +146,12 @@ AUTO_START_GATEWAY=true
 ```
 
 ## Quick start (local + public webhook)
+
+Fastest command:
+
+```bash
+pnpm wa:cloud
+```
 
 1. Create/configure a Meta app and WhatsApp Cloud API phone number.
 2. Set the Cloud API env vars above (`WHATSAPP_MODE=cloud`).
