@@ -515,3 +515,14 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `orion channels help` now clarifies `channels status --channel ...` is channel-focused status with runtime hints where supported, while bare `channels status` remains global self-test
 - Added/extended tests:
   - `src/cli/__tests__/orion-global.test.ts` (WhatsApp auth-state inspection + creds summary helpers)
+
+## Follow-up Notes (pass 31)
+
+- OpenClaw-style CLI status parity expanded beyond WhatsApp:
+  - `orion channels status --channel telegram` now includes token-format sanity hints + masked preview in runtime JSON (best-effort, no network call)
+  - `orion channels status --channel discord` now includes token-format sanity hints + masked preview in runtime JSON (best-effort, no network call)
+  - `orion channels status --channel webchat` now probes localhost WebChat port reachability and reports runtime probe results (`reachable`, `latencyMs`, error)
+- CLI UX regression guard:
+  - added explicit test ensuring global flags like `--repo` / `--profile` still parse correctly after subcommands (OpenClaw-style muscle memory)
+- Added/extended tests:
+  - `src/cli/__tests__/orion-global.test.ts` (Telegram/Discord token summaries + local TCP probe helper)

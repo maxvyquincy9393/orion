@@ -183,7 +183,7 @@ orion onboard -- --channel telegram --provider groq
 
 `orion self-test --migrate` runs a profile-scoped `prisma migrate deploy` preflight (same mechanism used by `orion all` / `orion gateway`) and reports the result.
 
-`orion self-test --json` and `orion channels status --channel <name> --json` print machine-readable status output for scripting/support tooling. WhatsApp channel JSON now includes a `runtime` snapshot (auth dir / creds pairing hints) for faster QR troubleshooting.
+`orion self-test --json` and `orion channels status --channel <name> --json` print machine-readable status output for scripting/support tooling. Channel JSON now includes a `runtime` snapshot where available (for example WhatsApp auth/session hints and WebChat localhost reachability probe).
 
 `orion all` and `orion gateway` now auto-run a profile-scoped `prisma migrate deploy` preflight (using your profile `DATABASE_URL`) before starting Orion, which prevents first-run `P2021` table-missing errors on fresh profiles.
 
@@ -197,7 +197,7 @@ orion onboard -- --channel telegram --provider groq
 
 `orion channels ...` is an OpenClaw-style namespace facade:
 - `channels login --channel whatsapp` -> Orion WhatsApp QR/Cloud setup flow
-- `channels status --channel <name>` -> channel-focused readiness checks (and runtime auth/session hints where supported, starting with WhatsApp)
+- `channels status --channel <name>` -> channel-focused readiness checks + runtime hints (WhatsApp auth/session, Telegram/Discord token sanity, WebChat localhost reachability)
 - `channels status` -> Orion global readiness/self-test
 - `channels logs` -> Orion live foreground logs today
 

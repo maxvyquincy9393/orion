@@ -4,6 +4,7 @@ import fsSync from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
+import net from "node:net"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
@@ -19,6 +20,14 @@ function testIcon(level) {
   if (level === "ok") return "OK"
   if (level === "warn") return "WARN"
   return "ERR"
+}
+
+function countCommaSeparatedValues(value) {
+  const raw = typeof value === "string" ? value.trim() : ""
+  if (!raw) {
+    return 0
+  }
+  return raw.split(",").map((item) => item.trim()).filter(Boolean).length
 }
 
 export function getPnpmCommand(platform = process.platform) {
@@ -690,6 +699,98 @@ function formatStatusTimestamp(value) {
   return value.toISOString()
 }
 
+export function summarizeTelegramBotToken(token) {
+  const raw = typeof token === "string" ? token.trim() : ""
+  if (!raw) {
+    return {
+      configured: false,
+      formatLikelyValid: false,
+      preview: null,
+    }
+  }
+  return {
+    configured: true,
+    formatLikelyValid: /^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(raw),
+    preview: maskMiddleToken(raw),
+  }
+}
+
+export function summarizeDiscordBotToken(token) {
+  const raw = typeof token === "string" ? token.trim() : ""
+  if (!raw) {
+    return {
+      configured: false,
+      formatLikelyValid: false,
+      preview: null,
+    }
+  }
+  // Discord bot tokens vary in shape/length over time; this is a loose sanity check only.
+  const hasNoWhitespace = !/\s/.test(raw)
+  const likelySegmented = raw.split(".").filter(Boolean).length >= 2
+  const likelyLength = raw.length >= 30
+  return {
+    configured: true,
+    formatLikelyValid: hasNoWhitespace && likelyLength && likelySegmented,
+    preview: maskMiddleToken(raw),
+  }
+}
+
+export async function probeLocalTcpPort(port, options = {}) {
+  const host = typeof options.host === "string" && options.host.trim() ? options.host.trim() : "127.0.0.1"
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 400
+  const startedAt = Date.now()
+
+  return await new Promise((resolve) => {
+    const socket = new net.Socket()
+    let settled = false
+
+    const finish = (payload) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      try {
+        socket.destroy()
+      } catch {
+        // no-op
+      }
+      resolve(payload)
+    }
+
+    socket.setTimeout(timeoutMs)
+    socket.once("connect", () => {
+      finish({
+        reachable: true,
+        host,
+        port,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        error: null,
+      })
+    })
+    socket.once("timeout", () => {
+      finish({
+        reachable: false,
+        host,
+        port,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        error: `timeout after ${timeoutMs}ms`,
+      })
+    })
+    socket.once("error", (error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      finish({
+        reachable: false,
+        host,
+        port,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        error: message,
+      })
+    })
+
+    socket.connect({ host, port })
+  })
+}
+
 export function summarizeWhatsAppBaileysCreds(rawCreds) {
   const root = asRecordObject(rawCreds)
   if (!root) {
@@ -870,6 +971,100 @@ async function buildWhatsAppChannelStatusChecks(envMap, profilePaths) {
         maskedJid: auth.creds.maskedJid,
         registered: auth.creds.registered,
         hasIdentityMaterial: auth.creds.hasIdentityMaterial,
+      },
+    },
+  }
+}
+
+function buildTelegramChannelStatusChecks(envMap) {
+  const checks = buildTelegramSelfTestChecks(envMap)
+  const token = summarizeTelegramBotToken(envMap.TELEGRAM_BOT_TOKEN ?? "")
+  if (!token.configured) {
+    return { checks, runtime: null }
+  }
+
+  const allowlistCount = countCommaSeparatedValues(envMap.TELEGRAM_CHAT_ID ?? "")
+  checks.push({
+    level: token.formatLikelyValid ? "ok" : "warn",
+    label: "Telegram Token Format",
+    detail: token.formatLikelyValid
+      ? `Looks like a Bot API token (${token.preview})`
+      : `Token is set but format looks unusual (${token.preview ?? "hidden"})`,
+  })
+
+  return {
+    checks,
+    runtime: {
+      mode: "bot-api",
+      tokenConfigured: true,
+      tokenFormatLikelyValid: token.formatLikelyValid,
+      tokenPreview: token.preview,
+      allowlistConfigured: allowlistCount > 0,
+      allowlistCount,
+    },
+  }
+}
+
+function buildDiscordChannelStatusChecks(envMap) {
+  const checks = buildDiscordSelfTestChecks(envMap)
+  const token = summarizeDiscordBotToken(envMap.DISCORD_BOT_TOKEN ?? "")
+  if (!token.configured) {
+    return { checks, runtime: null }
+  }
+
+  const allowlistCount = countCommaSeparatedValues(envMap.DISCORD_CHANNEL_ID ?? "")
+  checks.push({
+    level: token.formatLikelyValid ? "ok" : "warn",
+    label: "Discord Token Format",
+    detail: token.formatLikelyValid
+      ? `Token format looks plausible (${token.preview})`
+      : `Token is set but format looks unusual (${token.preview ?? "hidden"})`,
+  })
+
+  return {
+    checks,
+    runtime: {
+      mode: "bot-token",
+      tokenConfigured: true,
+      tokenFormatLikelyValid: token.formatLikelyValid,
+      tokenPreview: token.preview,
+      allowlistConfigured: allowlistCount > 0,
+      allowlistCount,
+    },
+  }
+}
+
+function resolveWebchatPort(envMap) {
+  const rawPort = (envMap.WEBCHAT_PORT ?? "").trim()
+  const parsed = Number.parseInt(rawPort, 10)
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 65535 ? parsed : 8080
+}
+
+async function buildWebchatChannelStatusChecks(envMap) {
+  const checks = buildWebchatSelfTestChecks(envMap)
+  const port = resolveWebchatPort(envMap)
+  const probe = await probeLocalTcpPort(port, { host: "127.0.0.1", timeoutMs: 350 })
+  const url = `http://127.0.0.1:${port}`
+
+  checks.push({
+    level: probe.reachable ? "ok" : "warn",
+    label: "WebChat Reachability",
+    detail: probe.reachable
+      ? `Local listener detected at ${url} (${probe.latencyMs}ms)`
+      : `No local listener detected at ${url} (${probe.error ?? "unreachable"})`,
+  })
+
+  return {
+    checks,
+    runtime: {
+      mode: "local-web",
+      url,
+      probe: {
+        reachable: probe.reachable,
+        host: probe.host,
+        port: probe.port,
+        latencyMs: probe.latencyMs,
+        error: probe.error,
       },
     },
   }
@@ -1276,11 +1471,17 @@ async function printChannelStatus(repoDir, profileDir, channel) {
     checks = result.checks
     runtime = result.runtime
   } else if (channel === "telegram") {
-    checks = buildTelegramSelfTestChecks(envMap)
+    const result = buildTelegramChannelStatusChecks(envMap)
+    checks = result.checks
+    runtime = result.runtime
   } else if (channel === "discord") {
-    checks = buildDiscordSelfTestChecks(envMap)
+    const result = buildDiscordChannelStatusChecks(envMap)
+    checks = result.checks
+    runtime = result.runtime
   } else if (channel === "webchat") {
-    checks = buildWebchatSelfTestChecks(envMap)
+    const result = await buildWebchatChannelStatusChecks(envMap)
+    checks = result.checks
+    runtime = result.runtime
   } else {
     throw new Error(`Unsupported channel '${channel}'`)
   }

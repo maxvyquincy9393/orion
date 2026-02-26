@@ -47,6 +47,26 @@ export function summarizeWhatsAppBaileysCreds(rawCreds: unknown): {
   registered: boolean | null
   hasIdentityMaterial: boolean
 }
+export function summarizeTelegramBotToken(token: string): {
+  configured: boolean
+  formatLikelyValid: boolean
+  preview: string | null
+}
+export function summarizeDiscordBotToken(token: string): {
+  configured: boolean
+  formatLikelyValid: boolean
+  preview: string | null
+}
+export function probeLocalTcpPort(
+  port: number,
+  options?: { host?: string; timeoutMs?: number },
+): Promise<{
+  reachable: boolean
+  host: string
+  port: number
+  latencyMs: number
+  error: string | null
+}>
 export function inspectWhatsAppBaileysAuthState(
   authDir: string,
   fsModule?: {

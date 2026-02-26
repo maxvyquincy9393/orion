@@ -1,4 +1,5 @@
 import path from "node:path"
+import net from "node:net"
 
 import { describe, expect, it, vi } from "vitest"
 
@@ -22,7 +23,10 @@ import {
   findOrionRepoUpwards,
   getProfilePaths,
   isOrionRepoDir,
+  probeLocalTcpPort,
   resolveProfileSelector,
+  summarizeDiscordBotToken,
+  summarizeTelegramBotToken,
   summarizeWhatsAppBaileysCreds,
   shouldUseShellForCommand,
   shouldInvokeCli,
@@ -72,6 +76,27 @@ describe("global orion CLI helpers", () => {
       profileOverride: null,
       dev: false,
       positionals: ["dashboard", "--help"],
+      help: false,
+    })
+  })
+
+  it("accepts global repo/profile flags after subcommands (OpenClaw-style muscle memory)", () => {
+    const parsed = parseOrionCliArgs([
+      "channels",
+      "status",
+      "--channel",
+      "whatsapp",
+      "--repo",
+      ".",
+      "--profile",
+      ".tmp",
+    ])
+
+    expect(parsed).toEqual({
+      repoOverride: ".",
+      profileOverride: ".tmp",
+      dev: false,
+      positionals: ["channels", "status", "--channel", "whatsapp"],
       help: false,
     })
   })
@@ -321,6 +346,43 @@ describe("global orion CLI helpers", () => {
 
     expect(telegram.find((check) => check.label === "Telegram Allowlist")?.level).toBe("warn")
     expect(discord.find((check) => check.label === "Discord Allowlist")?.level).toBe("warn")
+  })
+
+  it("summarizes Telegram and Discord token formats for channel status runtime hints", () => {
+    const telegram = summarizeTelegramBotToken("123456789:AAAbbbCCCdddEEEfffGGG_hhhIII-jjj")
+    const telegramOdd = summarizeTelegramBotToken("not-a-real-token")
+    const discord = summarizeDiscordBotToken("abc.def.ghi_jklmnopqrstuvwxyz0123456789")
+    const discordOdd = summarizeDiscordBotToken("short")
+
+    expect(telegram).toMatchObject({ configured: true, formatLikelyValid: true })
+    expect(telegram.preview).toBeTruthy()
+    expect(telegramOdd).toMatchObject({ configured: true, formatLikelyValid: false })
+
+    expect(discord).toMatchObject({ configured: true, formatLikelyValid: true })
+    expect(discord.preview).toBeTruthy()
+    expect(discordOdd).toMatchObject({ configured: true, formatLikelyValid: false })
+  })
+
+  it("probes local TCP port reachability for WebChat runtime hints", async () => {
+    const server = net.createServer()
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()))
+    const address = server.address()
+    if (!address || typeof address === "string") {
+      server.close()
+      throw new Error("Expected TCP address info")
+    }
+
+    const reachable = await probeLocalTcpPort(address.port, { host: "127.0.0.1", timeoutMs: 500 })
+    expect(reachable.reachable).toBe(true)
+    expect(reachable.port).toBe(address.port)
+    expect(reachable.error).toBeNull()
+
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+
+    const unreachable = await probeLocalTcpPort(address.port, { host: "127.0.0.1", timeoutMs: 200 })
+    expect(unreachable.reachable).toBe(false)
+    expect(unreachable.port).toBe(address.port)
+    expect(unreachable.error).toBeTruthy()
   })
 
   it("reports WebChat URL using configured port fallback", () => {
