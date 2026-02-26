@@ -20,7 +20,9 @@ const RECENT_MESSAGE_ID_MAX = 1000
 
 interface BaileysSocket {
   user: { id: string } | null
-  on(event: string, callback: (...args: unknown[]) => void): void
+  ev: {
+    on(event: string, callback: (...args: unknown[]) => void): void
+  }
   sendMessage(jid: string, content: { text: string }): Promise<unknown>
   end(): void
 }
@@ -342,13 +344,13 @@ export class WhatsAppChannel implements BaseChannel {
       })
       this.running = true
 
-      this.socket.on("creds.update", () => {
+      this.socket.ev.on("creds.update", () => {
         void saveCreds().catch((error) => {
           log.warn("WhatsApp (Baileys) failed to persist updated creds", { error })
         })
       })
 
-      this.socket.on("connection.update", (update: unknown) => {
+      this.socket.ev.on("connection.update", (update: unknown) => {
         const connUpdate = update as {
           connection?: string
           qr?: string
@@ -379,7 +381,7 @@ export class WhatsAppChannel implements BaseChannel {
         }
       })
 
-      this.socket.on("messages.upsert", (msgUpdate: unknown) => {
+      this.socket.ev.on("messages.upsert", (msgUpdate: unknown) => {
         const updates = this.extractBaileysInboundMessages(msgUpdate)
         for (const inbound of updates) {
           this.handleInboundText(inbound.sourceId, inbound.waId, inbound.text)
@@ -388,7 +390,7 @@ export class WhatsAppChannel implements BaseChannel {
     } catch (error) {
       this.running = false
       this.connected = false
-      log.error("failed to start WhatsApp channel", error)
+      log.error("failed to start WhatsApp channel", { error })
     }
   }
 
