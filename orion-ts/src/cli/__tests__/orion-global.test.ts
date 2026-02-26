@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildDiscordSelfTestChecks,
   isProfileEnvLikelyConfigured,
+  parseDashboardArgs,
   buildTelegramSelfTestChecks,
   buildWebchatSelfTestChecks,
   buildWhatsAppSelfTestChecks,
@@ -60,6 +61,16 @@ describe("global orion CLI helpers", () => {
       dev: false,
       positionals: [],
       help: true,
+    })
+  })
+
+  it("passes --help through to subcommands when command is already present", () => {
+    expect(parseOrionCliArgs(["dashboard", "--help"])).toEqual({
+      repoOverride: null,
+      profileOverride: null,
+      dev: false,
+      positionals: ["dashboard", "--help"],
+      help: false,
     })
   })
 
@@ -161,6 +172,24 @@ describe("global orion CLI helpers", () => {
       help: true,
       json: true,
       positionals: ["--foo"],
+    })
+  })
+
+  it("parses dashboard flags and preserves extra args", () => {
+    expect(parseDashboardArgs(["--open", "--foo"])).toEqual({
+      open: true,
+      help: false,
+      positionals: ["--foo"],
+    })
+    expect(parseDashboardArgs(["--open", "--no-open"])).toEqual({
+      open: false,
+      help: false,
+      positionals: [],
+    })
+    expect(parseDashboardArgs(["--help"])).toEqual({
+      open: false,
+      help: true,
+      positionals: [],
     })
   })
 

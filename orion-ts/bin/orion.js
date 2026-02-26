@@ -287,6 +287,31 @@ export function parseSelfTestArgs(argv) {
   return { fix, migrate, help, json, positionals }
 }
 
+export function parseDashboardArgs(argv) {
+  const args = [...argv]
+  let open = false
+  let help = false
+  const positionals = []
+
+  for (const arg of args) {
+    if (arg === "--help" || arg === "-h") {
+      help = true
+      continue
+    }
+    if (arg === "--open") {
+      open = true
+      continue
+    }
+    if (arg === "--no-open") {
+      open = false
+      continue
+    }
+    positionals.push(arg)
+  }
+
+  return { open, help, positionals }
+}
+
 export function parseOrionCliArgs(argv) {
   const args = [...argv]
   let repoOverride = null
@@ -297,7 +322,11 @@ export function parseOrionCliArgs(argv) {
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]
     if (arg === "--help" || arg === "-h") {
-      return { repoOverride: null, profileOverride: null, dev: false, positionals: [], help: true }
+      if (positionals.length === 0) {
+        return { repoOverride: null, profileOverride: null, dev: false, positionals: [], help: true }
+      }
+      positionals.push(arg)
+      continue
     }
     if (arg === "--repo" && args[i + 1]) {
       repoOverride = normalizePathInput(args[i + 1])
@@ -1282,6 +1311,26 @@ async function runChild(command, args, options = {}) {
   })
 }
 
+function tryOpenUrl(url) {
+  const platform = process.platform
+  if (platform === "win32") {
+    // `start` is a shell builtin, so we invoke through cmd.
+    spawn("cmd.exe", ["/c", "start", "", url], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref()
+    return true
+  }
+
+  const command = platform === "darwin" ? "open" : "xdg-open"
+  spawn(command, [url], {
+    detached: true,
+    stdio: "ignore",
+  }).unref()
+  return true
+}
+
 async function runPnpmScript(repoDir, profileDir, script, extraArgs = []) {
   const args = ["--dir", repoDir, script, ...extraArgs]
   const code = await runChild(getPnpmCommand(), args, {
@@ -1371,10 +1420,34 @@ async function handleLogs(repoDir, profileDir, rest) {
   await runPnpmScript(repoDir, profileDir, target)
 }
 
-async function handleDashboard(repoDir, profileDir) {
+async function handleDashboard(repoDir, profileDir, rest = []) {
+  const options = parseDashboardArgs(rest)
+  if (options.help) {
+    console.log("Orion Dashboard")
+    console.log("==============")
+    console.log("")
+    console.log("Usage:")
+    console.log("  orion dashboard [--open|--no-open]")
+    console.log("")
+    console.log("Options:")
+    console.log("  --open      Open dashboard URL in the default browser (best effort)")
+    console.log("  --no-open   Do not auto-open browser (default)")
+    return
+  }
+
   await maybeAutoMigrateProfileDb(repoDir, profileDir, "dashboard")
   const gatewayPort = await detectGatewayPortFromProfileEnv(profileDir)
-  console.log(`Dashboard URL: http://127.0.0.1:${gatewayPort}`)
+  const dashboardUrl = `http://127.0.0.1:${gatewayPort}`
+  console.log(`Dashboard URL: ${dashboardUrl}`)
+  if (options.open) {
+    try {
+      tryOpenUrl(dashboardUrl)
+      console.log("Opening dashboard in your default browser (best effort)...")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.log(`Could not auto-open browser: ${message}`)
+    }
+  }
   console.log("Starting gateway in foreground (Ctrl+C to stop)...")
   await runPnpmScript(repoDir, profileDir, "gateway")
 }
@@ -1549,7 +1622,7 @@ async function handleCommand(repoOverride, profileOverride, devMode, positionals
   }
 
   if (command === "dashboard") {
-    await handleDashboard(repoDir, profileDir)
+    await handleDashboard(repoDir, profileDir, rest)
     return
   }
 

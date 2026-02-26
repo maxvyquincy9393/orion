@@ -24,6 +24,11 @@ export function parseSelfTestArgs(argv: string[]): {
   json: boolean
   positionals: string[]
 }
+export function parseDashboardArgs(argv: string[]): {
+  open: boolean
+  help: boolean
+  positionals: string[]
+}
 export function getProfilePaths(profileDir: string): {
   profileDir: string
   envPath: string

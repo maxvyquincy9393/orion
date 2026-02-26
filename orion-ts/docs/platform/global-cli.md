@@ -31,6 +31,7 @@ This is now a **Phase 2 wrapper** (repo-linked runtime + profile state), not yet
   - `orion wa scan`
   - `orion wa cloud`
   - `orion channels status --json`
+  - `orion dashboard --open`
 - Runs Orion commands with profile-scoped env variables:
   - `ORION_ENV_FILE`
   - `ORION_WORKSPACE`
@@ -146,6 +147,7 @@ orion configure
 orion
 orion status
 orion dashboard
+orion dashboard --open
 orion logs gateway
 orion channels help
 orion channels login --channel whatsapp
@@ -184,6 +186,8 @@ orion onboard -- --channel telegram --provider groq
 `orion self-test --json` and `orion channels status --channel <name> --json` print machine-readable status output for scripting/support tooling.
 
 `orion all` and `orion gateway` now auto-run a profile-scoped `prisma migrate deploy` preflight (using your profile `DATABASE_URL`) before starting Orion, which prevents first-run `P2021` table-missing errors on fresh profiles.
+
+`orion dashboard --open` tries to open the dashboard URL in your default browser (best effort) and then starts gateway foreground mode.
 
 `--repo` and `--profile` are one-shot overrides for the current command. They do not rewrite your saved default link/profile unless you run `orion link`.
 

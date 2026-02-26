@@ -487,3 +487,14 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `src/cli/__tests__/orion-global.test.ts` (`parseSelfTestArgs` and `parseChannelsArgs` coverage for `--migrate` / `--json`)
 - Documentation updates:
   - `docs/platform/global-cli.md` (`--json`, `--migrate`, machine-readable status examples)
+
+## Follow-up Notes (pass 29)
+
+- OpenClaw-style dashboard-first CLI polish:
+  - added `orion dashboard --open` / `--no-open`
+  - `--open` best-effort opens the dashboard URL in the default browser, then starts gateway foreground mode
+  - `orion dashboard --help` now documents dashboard-specific flags
+- Added tests:
+  - `src/cli/__tests__/orion-global.test.ts` (`parseDashboardArgs`)
+- Documentation updates:
+  - `docs/platform/global-cli.md` (`orion dashboard --open` examples)
