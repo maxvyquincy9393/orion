@@ -8,6 +8,11 @@ export function getProfilePaths(profileDir: string): {
   workspaceDir: string
   stateDir: string
 }
+export function parseEnvContentLoose(content: string): Record<string, string>
+export function buildWhatsAppSelfTestChecks(
+  envMap: Record<string, string>,
+  profilePaths: { profileDir: string; envPath: string; workspaceDir: string; stateDir: string },
+): Array<{ level: "ok" | "warn" | "error"; label: string; detail: string }>
 
 export function parseOrionCliArgs(argv: string[]): {
   repoOverride: string | null

@@ -3,7 +3,9 @@ import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 
 import {
+  buildWhatsAppSelfTestChecks,
   parseOrionCliArgs,
+  parseEnvContentLoose,
   findOrionRepoUpwards,
   getProfilePaths,
   isOrionRepoDir,
@@ -42,6 +44,48 @@ describe("global orion CLI helpers", () => {
     expect(paths.envPath).toContain(`${path.sep}.env`)
     expect(paths.workspaceDir).toContain(`${path.sep}workspace`)
     expect(paths.stateDir).toContain(`${path.sep}.orion`)
+  })
+
+  it("parses dotenv-like content for profile env checks", () => {
+    const parsed = parseEnvContentLoose([
+      "# comment",
+      "WHATSAPP_ENABLED=true",
+      "WHATSAPP_MODE=baileys",
+      "DATABASE_URL=\"file:C:/Users/test profile/orion.db\"",
+      "",
+    ].join("\n"))
+
+    expect(parsed).toMatchObject({
+      WHATSAPP_ENABLED: "true",
+      WHATSAPP_MODE: "baileys",
+      DATABASE_URL: "file:C:/Users/test profile/orion.db",
+    })
+  })
+
+  it("reports WhatsApp Cloud config errors when required keys are missing", () => {
+    const checks = buildWhatsAppSelfTestChecks(
+      {
+        WHATSAPP_ENABLED: "true",
+        WHATSAPP_MODE: "cloud",
+        WHATSAPP_CLOUD_PHONE_NUMBER_ID: "123",
+      },
+      getProfilePaths("C:\\Users\\me\\.orion\\profiles\\default"),
+    )
+
+    expect(checks.some((check) => check.level === "error" && /WHATSAPP_CLOUD_ACCESS_TOKEN/.test(check.detail))).toBe(true)
+  })
+
+  it("reports WhatsApp QR scan mode as ready without Cloud API requirements", () => {
+    const checks = buildWhatsAppSelfTestChecks(
+      {
+        WHATSAPP_ENABLED: "true",
+        WHATSAPP_MODE: "baileys",
+      },
+      getProfilePaths("C:\\Users\\me\\.orion\\profiles\\default"),
+    )
+
+    expect(checks.find((check) => check.label === "WhatsApp Mode")?.detail).toContain("QR Scan")
+    expect(checks.some((check) => check.label === "WhatsApp Cloud Config")).toBe(false)
   })
 
   it("validates Orion repo by package name", async () => {

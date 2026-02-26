@@ -50,6 +50,7 @@ OpenClaw-style global wrapper (Phase 2):
 ```bash
 orion link <path-to-orion-ts>
 orion profile init
+orion self-test
 orion wa scan
 ```
 

@@ -9,6 +9,7 @@ Provide a single command (`orion`) that feels closer to OpenClaw:
 - run from any directory
 - link your Orion repo once
 - use simple commands like `orion wa scan`
+- validate readiness with `orion self-test`
 
 This is now a **Phase 2 wrapper** (repo-linked runtime + profile state), not yet a fully repo-independent runtime.
 
@@ -59,6 +60,7 @@ Initialize profile files (recommended once):
 
 ```bash
 orion profile init
+orion self-test
 ```
 
 Or do both and start the wizard in one command:
@@ -83,12 +85,20 @@ Then scan QR from your phone:
 
 ```bash
 orion quickstart
+orion self-test
 orion doctor
 orion gateway
 orion wa scan
 orion wa cloud
 orion onboard -- --channel telegram --provider groq
 ```
+
+`orion self-test` is the recommended first troubleshooting step. It checks:
+
+- repo link + profile directories
+- profile `.env` existence
+- provider/WhatsApp mode basics
+- `pnpm` availability on PATH (with a hint to reopen terminal if PATH is stale)
 
 ## Current limitations (important)
 

@@ -34,6 +34,7 @@ If you installed the global wrapper:
 
 ```bash
 orion profile init
+orion self-test
 orion wa scan
 ```
 

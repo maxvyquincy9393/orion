@@ -301,3 +301,16 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `pnpm test:ci` => `21` test files passed / `74` tests passed
   - `node bin/orion.js profile init --repo .` creates `%USERPROFILE%\\.orion\\profiles\\default` (`.env`, `workspace`, `.orion` state dir)
   - sandbox-only smoke with local profile path also validated profile bootstrap logic before global config write (`EPERM` on home write without escalation)
+
+## Follow-up Notes (pass 20)
+
+- Added `orion self-test` (beginner-friendly readiness report) to global wrapper:
+  - checks repo/profile bootstrap, profile `.env`, workspace/state dirs
+  - checks provider presence + WhatsApp mode readiness
+  - checks `pnpm` on PATH and prints reopen-terminal hint for stale PATH (`ENOENT`)
+- Added helper tests for self-test parsing/check logic:
+  - `src/cli/__tests__/orion-global.test.ts`
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `21` test files passed / `77` tests passed
+  - `node bin/orion.js self-test --repo . --profile .tmp-orion-profile` prints actionable report (sandbox: `EPERM`; escalated run reports `ENOENT` when `pnpm` is not on PATH in that shell)

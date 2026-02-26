@@ -12,6 +12,12 @@ const CLI_PROFILES_DIR_NAME = "profiles"
 const DEFAULT_PROFILE_NAME = "default"
 const LOCAL_PACKAGE_NAME = "orion"
 
+function testIcon(level) {
+  if (level === "ok") return "OK"
+  if (level === "warn") return "WARN"
+  return "ERR"
+}
+
 function printHelp() {
   console.log("Orion CLI (OpenClaw-style wrapper)")
   console.log("==================================")
@@ -23,6 +29,7 @@ function printHelp() {
   console.log("  orion profile init                Create ~/.orion profile files (env/workspace/state)")
   console.log("  orion init                        Bootstrap profile + run quickstart wizard")
   console.log("  orion quickstart                  Run onboarding wizard")
+  console.log("  orion self-test                   Check repo/profile/env readiness (beginner-friendly)")
   console.log("  orion wa scan                     WhatsApp QR setup (OpenClaw-style)")
   console.log("  orion wa cloud                    WhatsApp Cloud API setup")
   console.log("  orion all                         Start Orion (gateway + channels + CLI)")
@@ -251,6 +258,273 @@ function buildOrionChildEnv(parentEnv, profileDir) {
   }
 }
 
+export function parseEnvContentLoose(content) {
+  const out = {}
+  const normalized = String(content ?? "").replace(/\r\n/g, "\n")
+  for (const rawLine of normalized.split("\n")) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith("#")) {
+      continue
+    }
+
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
+    if (!match) {
+      continue
+    }
+
+    const [, key, valueRaw] = match
+    let value = valueRaw
+    if (
+      (value.startsWith("\"") && value.endsWith("\""))
+      || (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    out[key] = value
+  }
+
+  return out
+}
+
+function isTruthyEnv(value) {
+  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase())
+}
+
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function runChildCapture(command, args, options = {}) {
+  const child = spawn(command, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: false,
+    ...options,
+  })
+
+  let stdout = ""
+  let stderr = ""
+  child.stdout?.on("data", (chunk) => {
+    stdout += String(chunk)
+  })
+  child.stderr?.on("data", (chunk) => {
+    stderr += String(chunk)
+  })
+
+  return await new Promise((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`${command} terminated by signal ${signal}`))
+        return
+      }
+      resolve({ code: code ?? 0, stdout, stderr })
+    })
+  })
+}
+
+export function buildWhatsAppSelfTestChecks(envMap, profilePaths) {
+  const checks = []
+  const enabled = isTruthyEnv(envMap.WHATSAPP_ENABLED ?? "")
+  const mode = (envMap.WHATSAPP_MODE ?? "baileys").trim().toLowerCase()
+
+  if (!enabled) {
+    checks.push({
+      level: "warn",
+      label: "WhatsApp",
+      detail: "Disabled (set WHATSAPP_ENABLED=true to use WhatsApp)",
+    })
+    return checks
+  }
+
+  if (mode !== "baileys" && mode !== "cloud") {
+    checks.push({
+      level: "error",
+      label: "WhatsApp Mode",
+      detail: `Invalid WHATSAPP_MODE='${mode || "(empty)"}' (expected 'baileys' or 'cloud')`,
+    })
+    return checks
+  }
+
+  checks.push({
+    level: "ok",
+    label: "WhatsApp Mode",
+    detail: mode === "baileys" ? "QR Scan (Baileys)" : "Cloud API",
+  })
+
+  if (mode === "baileys") {
+    const authDir = path.join(profilePaths.stateDir, "whatsapp-auth")
+    checks.push({
+      level: "ok",
+      label: "WhatsApp Auth State",
+      detail: `Will use profile-scoped auth dir: ${authDir}`,
+    })
+    return checks
+  }
+
+  const requiredCloudKeys = [
+    "WHATSAPP_CLOUD_ACCESS_TOKEN",
+    "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+    "WHATSAPP_CLOUD_VERIFY_TOKEN",
+  ]
+
+  const missing = requiredCloudKeys.filter((key) => !(envMap[key] ?? "").trim())
+  if (missing.length > 0) {
+    checks.push({
+      level: "error",
+      label: "WhatsApp Cloud Config",
+      detail: `Missing: ${missing.join(", ")}`,
+    })
+  } else {
+    checks.push({
+      level: "ok",
+      label: "WhatsApp Cloud Config",
+      detail: "Access token, phone number ID, and verify token are set",
+    })
+  }
+
+  return checks
+}
+
+async function collectSelfTestChecks(repoDir, profileDir) {
+  const checks = []
+  const profilePaths = await ensureProfileBootstrap(repoDir, profileDir)
+  const envExists = await pathExists(profilePaths.envPath)
+  const workspaceExists = await pathExists(profilePaths.workspaceDir)
+  const stateExists = await pathExists(profilePaths.stateDir)
+  const permissionsExists = await pathExists(path.join(profilePaths.profileDir, "permissions", "permissions.yaml"))
+
+  checks.push({
+    level: "ok",
+    label: "Repo",
+    detail: repoDir,
+  })
+  checks.push({
+    level: "ok",
+    label: "Profile",
+    detail: profilePaths.profileDir,
+  })
+  checks.push({
+    level: envExists ? "ok" : "error",
+    label: "Profile Env",
+    detail: envExists ? `Found ${profilePaths.envPath}` : `Missing ${profilePaths.envPath}`,
+  })
+  checks.push({
+    level: workspaceExists ? "ok" : "error",
+    label: "Workspace",
+    detail: workspaceExists ? `Found ${profilePaths.workspaceDir}` : `Missing ${profilePaths.workspaceDir}`,
+  })
+  checks.push({
+    level: stateExists ? "ok" : "error",
+    label: "State Dir",
+    detail: stateExists ? `Found ${profilePaths.stateDir}` : `Missing ${profilePaths.stateDir}`,
+  })
+  checks.push({
+    level: permissionsExists ? "ok" : "warn",
+    label: "Permissions",
+    detail: permissionsExists
+      ? "Profile permissions template is present"
+      : "Profile permissions file is missing (doctor/startup may fail until created)",
+  })
+
+  let envMap = {}
+  if (envExists) {
+    const raw = await fs.readFile(profilePaths.envPath, "utf-8")
+    envMap = parseEnvContentLoose(raw)
+  }
+
+  const providerKeys = [
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+  ]
+  const providerConfigured = providerKeys.some((key) => (envMap[key] ?? "").trim().length > 0)
+  const ollamaConfigured = (envMap.OLLAMA_BASE_URL ?? "").trim().length > 0
+  checks.push({
+    level: providerConfigured || ollamaConfigured ? "ok" : "warn",
+    label: "Model Provider",
+    detail: providerConfigured || ollamaConfigured
+      ? "At least one provider or OLLAMA_BASE_URL is configured"
+      : "No provider key found (wizard can still set this)",
+  })
+
+  const autoGateway = isTruthyEnv(envMap.AUTO_START_GATEWAY ?? "")
+  checks.push({
+    level: autoGateway ? "ok" : "warn",
+    label: "AUTO_START_GATEWAY",
+    detail: autoGateway
+      ? "Enabled for `pnpm dev`"
+      : "Disabled (fine for `orion all`; required if you expect `pnpm dev` to start gateway automatically)",
+  })
+
+  checks.push(...buildWhatsAppSelfTestChecks(envMap, profilePaths))
+
+  try {
+    const pnpm = await runChildCapture("pnpm", ["--version"])
+    checks.push({
+      level: pnpm.code === 0 ? "ok" : "error",
+      label: "pnpm",
+      detail: pnpm.code === 0
+        ? `Detected ${pnpm.stdout.trim() || pnpm.stderr.trim() || "installed"}`
+        : `pnpm failed (exit ${pnpm.code})`,
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const hint = /enoent/i.test(errorMessage)
+      ? " (install pnpm and reopen terminal so PATH refreshes)"
+      : ""
+    checks.push({
+      level: "error",
+      label: "pnpm",
+      detail: `Not available on PATH: ${errorMessage}${hint}`,
+    })
+  }
+
+  checks.push({
+    level: "ok",
+    label: "Node",
+    detail: process.version,
+  })
+
+  return { checks, profilePaths }
+}
+
+async function handleSelfTest(repoOverride, profileOverride) {
+  const repoDir = await resolveRepoDir(repoOverride)
+  const profileDir = await resolveProfileDir(profileOverride)
+  const { checks, profilePaths } = await collectSelfTestChecks(repoDir, profileDir)
+
+  const errors = checks.filter((c) => c.level === "error").length
+  const warnings = checks.filter((c) => c.level === "warn").length
+
+  console.log("Orion Self-Test")
+  console.log("===============")
+  console.log(`Repo:    ${repoDir}`)
+  console.log(`Profile: ${profilePaths.profileDir}`)
+  console.log("")
+
+  for (const check of checks) {
+    console.log(`${testIcon(check.level)} ${check.label} - ${check.detail}`)
+  }
+
+  console.log("")
+  console.log(`Summary: ${errors} errors, ${warnings} warnings`)
+  if (errors === 0) {
+    console.log("")
+    console.log("Next:")
+    console.log("- `orion wa scan` (WhatsApp QR setup)")
+    console.log("- `orion all` (start Orion)")
+  }
+
+  process.exit(errors > 0 ? 1 : 0)
+}
+
 async function resolveRepoDir(repoOverride) {
   if (repoOverride) {
     const resolved = path.resolve(process.cwd(), repoOverride)
@@ -412,6 +686,11 @@ async function handleCommand(repoOverride, profileOverride, positionals) {
 
   if (command === "profile") {
     await handleProfile(repoOverride, profileOverride, (rest[0] ?? "").toLowerCase() || null)
+    return
+  }
+
+  if (command === "self-test" || command === "selftest") {
+    await handleSelfTest(repoOverride, profileOverride)
     return
   }
 
