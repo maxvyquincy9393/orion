@@ -10,6 +10,10 @@ export function isLikelyProfileName(value: string): boolean
 export function resolveProfileSelector(profileSelector: string, cwd?: string, homeDir?: string): string | null
 export function normalizeChannelName(value: string): "telegram" | "discord" | "whatsapp" | "webchat" | null
 export function normalizeWhatsAppLoginMode(value?: string | null): "scan" | "cloud" | null
+export function lineMatchesChannelLogFilter(
+  channel: string,
+  line: string,
+): boolean
 export function parseChannelsArgs(argv: string[]): {
   channel: "telegram" | "discord" | "whatsapp" | "webchat" | null
   mode: string | null

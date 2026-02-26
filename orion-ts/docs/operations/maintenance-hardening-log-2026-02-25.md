@@ -526,3 +526,19 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - added explicit test ensuring global flags like `--repo` / `--profile` still parse correctly after subcommands (OpenClaw-style muscle memory)
 - Added/extended tests:
   - `src/cli/__tests__/orion-global.test.ts` (Telegram/Discord token summaries + local TCP probe helper)
+
+## Follow-up Notes (pass 32)
+
+- OpenClaw-style `channels logs` parity improvement:
+  - `orion channels logs --channel <name>` now runs live foreground logs with best-effort line filtering instead of always falling back to unfiltered global logs
+  - supported filters:
+    - WhatsApp (`[whatsapp-channel]`, `[channels.whatsapp]`, Baileys JSON `"class":"baileys"`)
+    - Telegram (`[channels.telegram]`)
+    - Discord (`[channels.discord]`)
+    - WebChat (`[webchat-channel]`)
+  - fatal process/runtime lines (e.g. `ELIFECYCLE`, `TypeError`, Prisma fatal errors) are still passed through even if they don't match channel tags, to avoid hiding startup failures
+- Help/docs polish:
+  - `orion channels help` now describes channel-filtered logs behavior
+  - `docs/platform/global-cli.md` and `docs/channels/whatsapp.md` updated accordingly
+- Added tests:
+  - `src/cli/__tests__/orion-global.test.ts` (`lineMatchesChannelLogFilter` coverage for channel tags + fatal passthrough)

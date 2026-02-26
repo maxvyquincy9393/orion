@@ -199,7 +199,8 @@ orion onboard -- --channel telegram --provider groq
 - `channels login --channel whatsapp` -> Orion WhatsApp QR/Cloud setup flow
 - `channels status --channel <name>` -> channel-focused readiness checks + runtime hints (WhatsApp auth/session, Telegram/Discord token sanity, WebChat localhost reachability)
 - `channels status` -> Orion global readiness/self-test
-- `channels logs` -> Orion live foreground logs today
+- `channels logs --channel <name>` -> best-effort filtered live logs (channel tags + fatal passthrough)
+- `channels logs` -> Orion live foreground logs
 
 ## Current limitations (important)
 

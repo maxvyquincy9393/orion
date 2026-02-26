@@ -30,6 +30,51 @@ function countCommaSeparatedValues(value) {
   return raw.split(",").map((item) => item.trim()).filter(Boolean).length
 }
 
+const CHANNEL_LOG_PATTERNS = {
+  whatsapp: [
+    /\[whatsapp-channel\]/i,
+    /\[channels\.whatsapp\]/i,
+    /"class"\s*:\s*"baileys"/i,
+  ],
+  telegram: [
+    /\[channels\.telegram\]/i,
+  ],
+  discord: [
+    /\[channels\.discord\]/i,
+  ],
+  webchat: [
+    /\[webchat-channel\]/i,
+  ],
+}
+
+function isLikelyCriticalLogLine(line) {
+  const text = String(line ?? "")
+  if (!text.trim()) {
+    return false
+  }
+  return (
+    /\bELIFECYCLE\b/i.test(text)
+    || /\b(prisma:error|uncaught|unhandled|TypeError|ReferenceError|SyntaxError)\b/i.test(text)
+    || (/\b(ERROR|ERR)\b/.test(text) && !/\bchannels\.(telegram|discord)\b/i.test(text))
+  )
+}
+
+export function lineMatchesChannelLogFilter(channel, line) {
+  const normalizedChannel = normalizeChannelName(channel ?? "")
+  if (!normalizedChannel) {
+    return false
+  }
+  const text = String(line ?? "")
+  if (!text) {
+    return false
+  }
+  const patterns = CHANNEL_LOG_PATTERNS[normalizedChannel] ?? []
+  if (patterns.some((pattern) => pattern.test(text))) {
+    return true
+  }
+  return isLikelyCriticalLogLine(text)
+}
+
 export function getPnpmCommand(platform = process.platform) {
   return platform === "win32" ? "pnpm.cmd" : "pnpm"
 }
@@ -1749,6 +1794,80 @@ async function runChild(command, args, options = {}) {
   })
 }
 
+function createLineStreamProcessor(onLine) {
+  let buffer = ""
+  return {
+    push(chunk) {
+      buffer += String(chunk)
+      while (true) {
+        const newlineIndex = buffer.search(/\r?\n/)
+        if (newlineIndex === -1) {
+          break
+        }
+        let line = buffer.slice(0, newlineIndex)
+        const consumed = buffer[newlineIndex] === "\r" && buffer[newlineIndex + 1] === "\n" ? 2 : 1
+        buffer = buffer.slice(newlineIndex + consumed)
+        onLine(line)
+      }
+    },
+    flush() {
+      if (!buffer.length) {
+        return
+      }
+      onLine(buffer)
+      buffer = ""
+    },
+  }
+}
+
+async function runChildFilteredLines(command, args, lineMatcher, options = {}) {
+  const child = spawn(command, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: shouldUseShellForCommand(command),
+    ...options,
+  })
+
+  let shown = 0
+  let suppressed = 0
+
+  const stdoutProcessor = createLineStreamProcessor((line) => {
+    if (lineMatcher(line, "stdout")) {
+      shown += 1
+      process.stdout.write(`${line}\n`)
+    } else {
+      suppressed += 1
+    }
+  })
+  const stderrProcessor = createLineStreamProcessor((line) => {
+    if (lineMatcher(line, "stderr")) {
+      shown += 1
+      process.stderr.write(`${line}\n`)
+    } else {
+      suppressed += 1
+    }
+  })
+
+  child.stdout?.on("data", (chunk) => stdoutProcessor.push(chunk))
+  child.stderr?.on("data", (chunk) => stderrProcessor.push(chunk))
+
+  return await new Promise((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", (code, signal) => {
+      stdoutProcessor.flush()
+      stderrProcessor.flush()
+      if (signal) {
+        reject(new Error(`${command} terminated by signal ${signal}`))
+        return
+      }
+      resolve({
+        code: code ?? 0,
+        shown,
+        suppressed,
+      })
+    })
+  })
+}
+
 function tryOpenUrl(url) {
   const platform = process.platform
   if (platform === "win32") {
@@ -1775,6 +1894,17 @@ async function runPnpmScript(repoDir, profileDir, script, extraArgs = []) {
     env: buildOrionChildEnv(process.env, profileDir),
   })
   process.exit(code)
+}
+
+async function runPnpmScriptFiltered(repoDir, profileDir, script, lineMatcher, extraArgs = []) {
+  const args = ["--dir", repoDir, script, ...extraArgs]
+  const result = await runChildFilteredLines(getPnpmCommand(), args, lineMatcher, {
+    env: buildOrionChildEnv(process.env, profileDir),
+  })
+  if (result.suppressed > 0) {
+    console.log(`(filtered ${result.suppressed} non-matching log line(s); displayed ${result.shown})`)
+  }
+  process.exit(result.code)
 }
 
 async function runPnpmRaw(repoDir, profileDir, args) {
@@ -1904,7 +2034,8 @@ function printChannelsHelp() {
   console.log("  - WhatsApp defaults to QR scan mode unless `--mode cloud` is provided.")
   console.log("  - `channels status --channel <name>` prints channel-focused readiness (and runtime auth/session hints where supported).")
   console.log("  - `channels status` without `--channel` reuses `orion status` (global self-test).")
-  console.log("  - `channels logs` currently reuses live foreground logs (`orion logs ...`).")
+  console.log("  - `channels logs --channel <name>` streams best-effort channel-filtered live logs (foreground).")
+  console.log("  - `channels logs` without `--channel` reuses `orion logs ...`.")
 }
 
 async function handleChannelsCommand(repoOverride, profileOverride, devMode, rest) {
@@ -1965,12 +2096,26 @@ async function handleChannelsCommand(repoOverride, profileOverride, devMode, res
   await ensureProfileBootstrap(repoDir, profileDir)
 
   if (subcommand === "logs") {
-    if (channel) {
-      console.log(`Channel-specific log filtering for '${channel}' is not implemented yet; showing Orion live logs.`)
-    }
     const firstTarget = (remainingPositionals[0] ?? "").toLowerCase()
     const hasExplicitTarget = firstTarget === "all" || firstTarget === "gateway"
     const targetArgs = channel && !hasExplicitTarget ? ["all", ...remainingPositionals] : remainingPositionals
+    if (channel) {
+      const target = (targetArgs[0] ?? "all").toLowerCase()
+      if (target !== "all" && target !== "gateway") {
+        console.log("Orion does not run a persistent daemon log store yet.")
+        console.log("Use `orion channels logs --channel <name> [all|gateway]` to stream live filtered logs.")
+        return
+      }
+      console.log(`Streaming best-effort filtered logs for channel '${channel}' via \`orion ${target}\` (Ctrl+C to stop)...`)
+      await runPnpmScriptFiltered(
+        repoDir,
+        profileDir,
+        target,
+        (line) => lineMatchesChannelLogFilter(channel, line),
+        targetArgs.slice(1),
+      )
+      return
+    }
     await handleLogs(repoDir, profileDir, targetArgs)
     return
   }

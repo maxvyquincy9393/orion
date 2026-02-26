@@ -23,6 +23,7 @@ import {
   findOrionRepoUpwards,
   getProfilePaths,
   isOrionRepoDir,
+  lineMatchesChannelLogFilter,
   probeLocalTcpPort,
   resolveProfileSelector,
   summarizeDiscordBotToken,
@@ -383,6 +384,22 @@ describe("global orion CLI helpers", () => {
     expect(unreachable.reachable).toBe(false)
     expect(unreachable.port).toBe(address.port)
     expect(unreachable.error).toBeTruthy()
+  })
+
+  it("matches channel-specific live logs and preserves fatal lines in filtered mode", () => {
+    expect(lineMatchesChannelLogFilter("whatsapp", "[2026-01-01] INFO  [whatsapp-channel] started")).toBe(true)
+    expect(lineMatchesChannelLogFilter("whatsapp", "{\"class\":\"baileys\",\"msg\":\"connected to WA\"}")).toBe(true)
+    expect(lineMatchesChannelLogFilter("telegram", "[2026-01-01] INFO  [channels.telegram] Telegram disabled")).toBe(true)
+    expect(lineMatchesChannelLogFilter("discord", "[2026-01-01] INFO  [channels.discord] Discord disabled")).toBe(true)
+    expect(lineMatchesChannelLogFilter("webchat", "[2026-01-01] INFO  [webchat-channel] ready")).toBe(true)
+
+    // Fatal lines should still pass through filtered mode even if they are not tagged to the channel.
+    expect(lineMatchesChannelLogFilter("telegram", "ELIFECYCLE Command failed with exit code 1.")).toBe(true)
+    expect(lineMatchesChannelLogFilter("discord", "TypeError: boom")).toBe(true)
+
+    // Unrelated healthy lines are filtered out.
+    expect(lineMatchesChannelLogFilter("telegram", "[startup] engines loaded")).toBe(false)
+    expect(lineMatchesChannelLogFilter("whatsapp", "[channels.telegram] Telegram disabled")).toBe(false)
   })
 
   it("reports WebChat URL using configured port fallback", () => {
