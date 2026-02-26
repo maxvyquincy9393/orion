@@ -19,6 +19,7 @@ import websocketPlugin from "@fastify/websocket"
 
 import { daemon } from "../background/daemon.js"
 import { channelManager } from "../channels/manager.js"
+import { whatsAppChannel } from "../channels/whatsapp.js"
 import config from "../config.js"
 import { handleIncomingUserMessage, estimateTokensFromText } from "../core/incoming-message-service.js"
 import { orchestrator } from "../engines/orchestrator.js"
@@ -215,6 +216,33 @@ export class GatewayServer {
           const userId = asString(req.body?.userId) ?? config.DEFAULT_USER_ID
           const response = await this.handleUserMessage(userId, message, "webchat")
           return { response }
+        },
+      )
+
+      app.get<{ Querystring: Record<string, unknown> }>(
+        "/webhooks/whatsapp",
+        async (req, reply) => {
+          const verification = whatsAppChannel.verifyCloudWebhook(req.query)
+          if (!verification.ok) {
+            return reply.code(verification.statusCode).send({ error: verification.error })
+          }
+          return reply.type("text/plain").send(verification.challenge ?? "")
+        },
+      )
+
+      app.post<{ Body?: unknown }>(
+        "/webhooks/whatsapp",
+        async (req, reply) => {
+          if (!whatsAppChannel.isCloudWebhookEnabled()) {
+            return reply.code(503).send({ error: "WhatsApp Cloud webhook is not configured" })
+          }
+
+          const ingest = await whatsAppChannel.handleCloudWebhookPayload(req.body)
+          return reply.code(200).send({
+            received: true,
+            processed: ingest.processed,
+            ignored: ingest.ignored,
+          })
         },
       )
 

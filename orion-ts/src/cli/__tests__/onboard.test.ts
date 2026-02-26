@@ -53,4 +53,20 @@ describe("onboard cli helpers", () => {
     expect(steps.join("\n")).toContain("docs/channels/telegram.md")
     expect(steps.join("\n")).toContain("docs/platform/onboarding.md")
   })
+
+  it("builds WhatsApp Cloud API next steps and docs reference", () => {
+    const steps = __onboardTestUtils.buildNextSteps({
+      channel: "whatsapp",
+      provider: "openrouter",
+      updates: {
+        WHATSAPP_ENABLED: "true",
+        WHATSAPP_MODE: "cloud",
+        WHATSAPP_CLOUD_VERIFY_TOKEN: "verify",
+      },
+    })
+
+    expect(steps.join("\n")).toContain("/webhooks/whatsapp")
+    expect(steps.join("\n")).toContain("WHATSAPP_CLOUD_VERIFY_TOKEN")
+    expect(steps.join("\n")).toContain("docs/channels/whatsapp.md")
+  })
 })

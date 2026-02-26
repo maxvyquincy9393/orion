@@ -222,3 +222,26 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `19` test files passed / `63` tests passed
   - `pnpm onboard --help` renders expected quickstart usage text (verified outside sandbox)
+
+## Follow-up Notes (pass 15)
+
+- Added WhatsApp Cloud API mode (official Meta API) alongside existing Baileys mode in:
+  - `src/channels/whatsapp.ts`
+  - new env knobs: `WHATSAPP_MODE`, `WHATSAPP_CLOUD_*`
+- Added gateway webhook endpoints for Meta verification + inbound message ingestion:
+  - `GET /webhooks/whatsapp`
+  - `POST /webhooks/whatsapp`
+- Inbound WhatsApp Cloud messages now reuse shared incoming pipeline path (`hooks`, `usage`, `MemRL`) and support:
+  - `/help`, `/id`, `/ping` (also `!help`, `!id`, `!ping`)
+  - per-sender serialized processing
+  - best-effort webhook duplicate suppression by `message.id`
+- Bug fix:
+  - `ChannelManager.send()` proactive priority now prefers `whatsapp` before `webchat` (prevents webchat from stealing sends when both are connected)
+- Added tests/docs:
+  - `src/channels/__tests__/whatsapp.test.ts`
+  - `docs/channels/whatsapp.md`
+  - onboarding wizard/docs updated to include WhatsApp Cloud API quickstart
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `20` test files passed / `68` tests passed
+  - `pnpm onboard --help` shows `--channel ...whatsapp...`

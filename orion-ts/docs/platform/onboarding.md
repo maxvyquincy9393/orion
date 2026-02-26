@@ -7,7 +7,7 @@ Date: 2026-02-26
 Provide a fast local onboarding flow similar to OpenClaw's "setup + onboard" experience:
 
 - guided quickstart command
-- channel-first setup (Telegram / Discord / WebChat)
+- channel-first setup (Telegram / Discord / WhatsApp Cloud API / WebChat)
 - provider selection (Groq, OpenRouter, Anthropic, OpenAI, Gemini, Ollama)
 - explicit next steps for phone testing
 
@@ -28,13 +28,14 @@ Optional flags:
 ```bash
 pnpm onboard --channel telegram --provider groq
 pnpm onboard --channel discord --provider openrouter
+pnpm onboard --channel whatsapp --provider openrouter
 pnpm onboard --print-only
 pnpm onboard --yes
 ```
 
 ## What the wizard does
 
-1. Chooses a first test channel (`telegram`, `discord`, or `webchat`).
+1. Chooses a first test channel (`telegram`, `discord`, `whatsapp`, or `webchat`).
 2. Chooses a primary model provider.
 3. Collects minimal required env values.
 4. Writes `.env` (preserving comments and existing keys where possible).
@@ -54,10 +55,12 @@ pnpm gateway:watch
 - Channel adapters are safe-by-default:
   - Telegram: private chat only if `TELEGRAM_CHAT_ID` is unset
   - Discord: DM only if `DISCORD_CHANNEL_ID` is unset
+  - WhatsApp Cloud API: accepts inbound senders by default, but supports `WHATSAPP_CLOUD_ALLOWED_WA_IDS` allowlist for stricter testing
 - For production rollout, continue using `pnpm doctor`, migrations, and dedupe checks as documented in `docs/operations/maintenance-hardening-log-2026-02-25.md`.
 
 ## Related docs
 
 - `docs/channels/telegram.md`
 - `docs/channels/discord.md`
+- `docs/channels/whatsapp.md`
 - `docs/platform/doctor.md`

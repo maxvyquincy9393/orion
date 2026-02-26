@@ -37,6 +37,7 @@ const floatFromEnv = z.preprocess((value) => {
 }, z.number())
 
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"])
+const whatsAppModeSchema = z.enum(["baileys", "cloud"])
 
 const ConfigSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(""),
@@ -52,6 +53,12 @@ const ConfigSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().default(""),
   TELEGRAM_CHAT_ID: z.string().default(""),
   WHATSAPP_ENABLED: boolFromEnv.default(false),
+  WHATSAPP_MODE: whatsAppModeSchema.default("baileys"),
+  WHATSAPP_CLOUD_ACCESS_TOKEN: z.string().default(""),
+  WHATSAPP_CLOUD_PHONE_NUMBER_ID: z.string().default(""),
+  WHATSAPP_CLOUD_VERIFY_TOKEN: z.string().default(""),
+  WHATSAPP_CLOUD_ALLOWED_WA_IDS: z.string().default(""),
+  WHATSAPP_CLOUD_API_VERSION: z.string().default("v20.0"),
   SIGNAL_PHONE_NUMBER: z.string().default(""),
   SIGNAL_CLI_PATH: z.string().default(""),
   LINE_CHANNEL_TOKEN: z.string().default(""),

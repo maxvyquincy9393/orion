@@ -68,7 +68,7 @@ export class ChannelManager {
     }
     const safeMessage = scan.sanitized
 
-    const priorityOrder = ["telegram", "discord", "webchat", "whatsapp", "signal", "line", "matrix", "teams", "imessage"]
+    const priorityOrder = ["telegram", "discord", "whatsapp", "webchat", "signal", "line", "matrix", "teams", "imessage"]
     for (const name of priorityOrder) {
       const channel = this.channels.get(name)
       if (!channel || !channel.isConnected()) {

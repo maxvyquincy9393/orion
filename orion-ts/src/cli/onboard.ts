@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 import readline from "node:readline/promises"
@@ -6,7 +7,7 @@ import { pathToFileURL } from "node:url"
 
 import dotenv from "dotenv"
 
-type ChannelChoice = "telegram" | "discord" | "webchat"
+type ChannelChoice = "telegram" | "discord" | "whatsapp" | "webchat"
 type ProviderChoice = "groq" | "openrouter" | "anthropic" | "openai" | "gemini" | "ollama"
 
 type WriteMode = "write" | "print"
@@ -33,6 +34,7 @@ interface QuickstartPlan {
 const CHANNEL_CHOICES: ReadonlyArray<{ key: ChannelChoice; label: string; description: string }> = [
   { key: "telegram", label: "Telegram (recommended)", description: "Fastest path for phone testing via Bot API" },
   { key: "discord", label: "Discord", description: "Good for DMs or one allowlisted server channel" },
+  { key: "whatsapp", label: "WhatsApp (Cloud API)", description: "Phone-native test via Meta WhatsApp Cloud API + webhook" },
   { key: "webchat", label: "WebChat (local browser)", description: "No external token needed; local-only testing" },
 ]
 
@@ -50,7 +52,7 @@ function printHelp(): void {
   console.log("====================================")
   console.log("")
   console.log("Usage:")
-  console.log("  pnpm onboard [--channel telegram|discord|webchat] [--provider groq|openrouter|anthropic|openai|gemini|ollama]")
+  console.log("  pnpm onboard [--channel telegram|discord|whatsapp|webchat] [--provider groq|openrouter|anthropic|openai|gemini|ollama]")
   console.log("  pnpm setup   # alias for quickstart wizard")
   console.log("")
   console.log("Options:")
@@ -277,9 +279,16 @@ function buildNextSteps(plan: QuickstartPlan): string[] {
     if (!plan.updates.DISCORD_CHANNEL_ID) {
       lines.push("5. If using a server channel, add the `!id` result to `DISCORD_CHANNEL_ID` and rerun `pnpm onboard`.")
     }
+  } else if (plan.channel === "whatsapp") {
+    lines.push("3. Expose your gateway publicly (e.g. Cloudflare Tunnel / ngrok) and point Meta webhook to `/webhooks/whatsapp`.")
+    lines.push("4. In Meta App dashboard, set verify token to `WHATSAPP_CLOUD_VERIFY_TOKEN` and subscribe to `messages` webhook events.")
+    lines.push("5. Run `/help`, `/id`, `/ping` from your WhatsApp test phone, then send a normal message.")
+    if (!plan.updates.WHATSAPP_CLOUD_ALLOWED_WA_IDS) {
+      lines.push("6. Optional hardening: copy `/id` result into `WHATSAPP_CLOUD_ALLOWED_WA_IDS` and rerun `pnpm onboard`.")
+    }
   } else {
     lines.push("3. Open `http://127.0.0.1:8080` on this machine and test WebChat.")
-    lines.push("4. For phone access, set up Telegram or Discord later with `pnpm onboard`.")
+    lines.push("4. For phone access, set up Telegram, Discord, or WhatsApp later with `pnpm onboard`.")
   }
 
   lines.push("")
@@ -288,6 +297,8 @@ function buildNextSteps(plan: QuickstartPlan): string[] {
     lines.push("- `docs/channels/telegram.md`")
   } else if (plan.channel === "discord") {
     lines.push("- `docs/channels/discord.md`")
+  } else if (plan.channel === "whatsapp") {
+    lines.push("- `docs/channels/whatsapp.md`")
   }
   lines.push("- `docs/platform/onboarding.md`")
 
@@ -381,7 +392,7 @@ function buildQuickstartBanner(): void {
   console.log("======================================")
   console.log("")
   console.log("This wizard helps you:")
-  console.log("- choose a test channel (Telegram / Discord / WebChat)")
+  console.log("- choose a test channel (Telegram / Discord / WhatsApp / WebChat)")
   console.log("- choose a model provider")
   console.log("- write the minimum .env config for a phone-first quick test")
 }
@@ -454,9 +465,61 @@ async function collectQuickstartPlan(
       if (channelId) {
         updates.DISCORD_CHANNEL_ID = channelId
       }
+    } else if (channel === "whatsapp") {
+      const accessToken = await askInput(rl, "WHATSAPP_CLOUD_ACCESS_TOKEN", {
+        current: envValues.WHATSAPP_CLOUD_ACCESS_TOKEN ?? null,
+        optional: true,
+        placeholder: "Meta permanent/long-lived access token (leave blank to set later)",
+      })
+      const phoneNumberId = await askInput(rl, "WHATSAPP_CLOUD_PHONE_NUMBER_ID", {
+        current: envValues.WHATSAPP_CLOUD_PHONE_NUMBER_ID ?? null,
+        optional: true,
+        placeholder: "from Meta WhatsApp Cloud API dashboard",
+      })
+      const verifyTokenDefault =
+        envValues.WHATSAPP_CLOUD_VERIFY_TOKEN
+        || crypto.randomUUID().replaceAll("-", "")
+      const verifyToken = await askInput(rl, "WHATSAPP_CLOUD_VERIFY_TOKEN", {
+        current: envValues.WHATSAPP_CLOUD_VERIFY_TOKEN ?? null,
+        placeholder: "used by Meta webhook verification (auto-generated if blank)",
+        defaultValue: verifyTokenDefault,
+      })
+      const allowlist = await askInput(rl, "WHATSAPP_CLOUD_ALLOWED_WA_IDS", {
+        current: envValues.WHATSAPP_CLOUD_ALLOWED_WA_IDS ?? null,
+        optional: true,
+        placeholder: "optional allowlist (comma/newline wa_id), use /id later",
+      })
+      const apiVersion = await askInput(rl, "WHATSAPP_CLOUD_API_VERSION", {
+        current: envValues.WHATSAPP_CLOUD_API_VERSION ?? null,
+        optional: true,
+        placeholder: "default=v20.0",
+        defaultValue: envValues.WHATSAPP_CLOUD_API_VERSION || "v20.0",
+      })
+
+      updates.WHATSAPP_ENABLED = "true"
+      updates.WHATSAPP_MODE = "cloud"
+      if (accessToken) {
+        updates.WHATSAPP_CLOUD_ACCESS_TOKEN = accessToken
+      }
+      if (phoneNumberId) {
+        updates.WHATSAPP_CLOUD_PHONE_NUMBER_ID = phoneNumberId
+      }
+      if (verifyToken) {
+        updates.WHATSAPP_CLOUD_VERIFY_TOKEN = verifyToken
+      }
+      if (allowlist) {
+        updates.WHATSAPP_CLOUD_ALLOWED_WA_IDS = allowlist
+      }
+      if (apiVersion) {
+        updates.WHATSAPP_CLOUD_API_VERSION = apiVersion
+      }
     }
 
-    const setAutoStartGateway = await askYesNo(rl, "Set AUTO_START_GATEWAY=true for `pnpm dev`", false)
+    const setAutoStartGateway = await askYesNo(
+      rl,
+      "Set AUTO_START_GATEWAY=true for `pnpm dev`",
+      channel === "whatsapp",
+    )
     if (setAutoStartGateway) {
       updates.AUTO_START_GATEWAY = "true"
     }
