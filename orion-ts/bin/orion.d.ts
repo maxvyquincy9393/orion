@@ -8,6 +8,14 @@ export function shouldUseShellForCommand(command: string, platform?: string): bo
 export function shouldInvokeCli(importMetaUrl: string, argv1?: string | null, platform?: string): boolean
 export function isLikelyProfileName(value: string): boolean
 export function resolveProfileSelector(profileSelector: string, cwd?: string, homeDir?: string): string | null
+export function normalizeChannelName(value: string): "telegram" | "discord" | "whatsapp" | "webchat" | null
+export function normalizeWhatsAppLoginMode(value?: string | null): "scan" | "cloud" | null
+export function parseChannelsArgs(argv: string[]): {
+  channel: "telegram" | "discord" | "whatsapp" | "webchat" | null
+  mode: string | null
+  positionals: string[]
+  help: boolean
+}
 export function getProfilePaths(profileDir: string): {
   profileDir: string
   envPath: string

@@ -38,10 +38,23 @@ orion self-test
 orion wa scan
 ```
 
+OpenClaw-style namespace equivalent:
+
+```bash
+orion channels login --channel whatsapp
+orion channels status --channel whatsapp
+```
+
 Non-interactive (scriptable) variant:
 
 ```bash
 orion wa scan --yes --provider groq
+```
+
+Namespace variant:
+
+```bash
+orion channels login --channel whatsapp --non-interactive --provider groq
 ```
 
 This keeps WhatsApp auth/session files under your Orion profile state dir (for example `~/.orion/profiles/default/.orion/whatsapp-auth`) instead of the repo root.

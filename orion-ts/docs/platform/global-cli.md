@@ -23,9 +23,10 @@ This is now a **Phase 2 wrapper** (repo-linked runtime + profile state), not yet
   - `orion quickstart`
   - `orion setup`
   - `orion configure`
-  - `orion status`
-  - `orion dashboard`
-  - `orion logs`
+- `orion status`
+- `orion dashboard`
+- `orion logs`
+- `orion channels ...`
   - `orion wa scan`
   - `orion wa cloud`
 - Runs Orion commands with profile-scoped env variables:
@@ -96,6 +97,14 @@ orion wa scan --yes --provider groq
 orion all
 ```
 
+OpenClaw-style channels namespace (same result, more parity):
+
+```bash
+orion channels login --channel whatsapp --non-interactive --provider groq
+orion channels status --channel whatsapp
+orion all
+```
+
 Dev sandbox profile (isolated state):
 
 ```bash
@@ -117,6 +126,9 @@ orion configure
 orion status
 orion dashboard
 orion logs gateway
+orion channels help
+orion channels login --channel whatsapp
+orion channels status --channel whatsapp
 orion self-test
 orion doctor
 orion gateway
@@ -137,6 +149,11 @@ orion onboard -- --channel telegram --provider groq
 `--profile <name>` maps to `~/.orion/profiles/<name>`. Use a path (e.g. `--profile .tmp-profile`) if you want an explicit directory.
 
 `--dev` is a shortcut for using the isolated `dev` profile (`~/.orion/profiles/dev`).
+
+`orion channels ...` is an OpenClaw-style namespace facade:
+- `channels login --channel whatsapp` -> Orion WhatsApp QR/Cloud setup flow
+- `channels status` -> Orion readiness/self-test today
+- `channels logs` -> Orion live foreground logs today
 
 ## Current limitations (important)
 

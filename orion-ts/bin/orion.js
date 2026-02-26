@@ -13,6 +13,7 @@ const CLI_PROFILES_DIR_NAME = "profiles"
 const DEFAULT_PROFILE_NAME = "default"
 const DEV_PROFILE_NAME = "dev"
 const LOCAL_PACKAGE_NAME = "orion"
+const SUPPORTED_CHANNELS = ["telegram", "discord", "whatsapp", "webchat"]
 
 function testIcon(level) {
   if (level === "ok") return "OK"
@@ -47,6 +48,9 @@ function printHelp() {
   console.log("  orion dashboard                   Start gateway and print dashboard URL")
   console.log("  orion status                      Readiness/status check (self-test alias)")
   console.log("  orion logs [all|gateway]          Stream live logs by starting a target mode")
+  console.log("  orion channels login ...          OpenClaw-style channel login namespace (WhatsApp QR / Cloud)")
+  console.log("  orion channels status [--channel] Channel readiness/status alias")
+  console.log("  orion channels logs [--channel]   Channel log entrypoint (live logs fallback)")
   console.log("  orion self-test                   Check repo/profile/env readiness (beginner-friendly)")
   console.log("  orion wa scan                     WhatsApp QR setup (OpenClaw-style)")
   console.log("  orion wa cloud                    WhatsApp Cloud API setup")
@@ -65,6 +69,7 @@ function printHelp() {
   console.log("  orion link C:\\Users\\you\\orion\\orion-ts")
   console.log("  orion profile init")
   console.log("  orion --profile work wa scan --yes --provider groq")
+  console.log("  orion channels login --channel whatsapp --non-interactive --provider groq")
   console.log("  orion --dev dashboard")
   console.log("  orion wa scan")
   console.log("  orion all")
@@ -176,6 +181,73 @@ export function resolveProfileSelector(profileSelector, cwd = process.cwd(), hom
     return path.join(homeDir, normalized.slice(2))
   }
   return path.resolve(cwd, normalized)
+}
+
+export function normalizeChannelName(value) {
+  const normalized = normalizePathInput(value)?.toLowerCase() ?? null
+  if (!normalized) {
+    return null
+  }
+  return SUPPORTED_CHANNELS.includes(normalized) ? normalized : null
+}
+
+export function normalizeWhatsAppLoginMode(value) {
+  const normalized = normalizePathInput(value)?.toLowerCase() ?? null
+  if (!normalized) {
+    return "scan"
+  }
+  if (["scan", "qr", "baileys"].includes(normalized)) {
+    return "scan"
+  }
+  if (normalized === "cloud") {
+    return "cloud"
+  }
+  return null
+}
+
+export function parseChannelsArgs(argv) {
+  const args = [...argv]
+  let channel = null
+  let mode = null
+  let help = false
+  const positionals = []
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]
+    if (arg === "--help" || arg === "-h") {
+      help = true
+      continue
+    }
+    if (arg === "--channel" && args[i + 1]) {
+      const next = normalizeChannelName(args[i + 1])
+      if (!next) {
+        throw new Error(`Invalid --channel '${args[i + 1]}'`)
+      }
+      channel = next
+      i += 1
+      continue
+    }
+    if (arg.startsWith("--channel=")) {
+      const next = normalizeChannelName(arg.slice("--channel=".length))
+      if (!next) {
+        throw new Error(`Invalid --channel '${arg.slice("--channel=".length)}'`)
+      }
+      channel = next
+      continue
+    }
+    if (arg === "--mode" && args[i + 1]) {
+      mode = normalizePathInput(args[i + 1])?.toLowerCase() ?? null
+      i += 1
+      continue
+    }
+    if (arg.startsWith("--mode=")) {
+      mode = normalizePathInput(arg.slice("--mode=".length))?.toLowerCase() ?? null
+      continue
+    }
+    positionals.push(arg)
+  }
+
+  return { channel, mode, positionals, help }
 }
 
 export function parseOrionCliArgs(argv) {
@@ -808,6 +880,80 @@ async function handleDashboard(repoDir, profileDir) {
   await runPnpmScript(repoDir, profileDir, "gateway")
 }
 
+function printChannelsHelp() {
+  console.log("Orion Channels (OpenClaw-style namespace)")
+  console.log("=========================================")
+  console.log("")
+  console.log("Usage:")
+  console.log("  orion channels login --channel whatsapp [--mode scan|cloud] [-- ...args]")
+  console.log("  orion channels status [--channel whatsapp]")
+  console.log("  orion channels logs [all|gateway] [--channel whatsapp]")
+  console.log("")
+  console.log("Notes:")
+  console.log("  - `channels login` maps to the existing Orion setup/login flows.")
+  console.log("  - WhatsApp defaults to QR scan mode unless `--mode cloud` is provided.")
+  console.log("  - `channels status` currently reuses `orion status` (self-test readiness).")
+  console.log("  - `channels logs` currently reuses live foreground logs (`orion logs ...`).")
+}
+
+async function handleChannelsCommand(repoOverride, profileOverride, devMode, rest) {
+  const parsed = parseChannelsArgs(rest)
+  const [subcommandRaw, maybeChannelPositional, ...tailPositionals] = parsed.positionals
+  const subcommand = (subcommandRaw ?? "").toLowerCase()
+
+  if (parsed.help || !subcommand || subcommand === "help") {
+    printChannelsHelp()
+    return
+  }
+
+  const positionalChannel = normalizeChannelName(maybeChannelPositional ?? "")
+  const channel = parsed.channel ?? positionalChannel
+  const remainingPositionals = positionalChannel ? tailPositionals : (parsed.positionals.slice(1))
+
+  if (subcommand === "status") {
+    if (channel && channel !== "whatsapp") {
+      console.log(`Channel-specific status for '${channel}' is not implemented yet; showing global readiness.`)
+    }
+    await handleSelfTest(repoOverride, profileOverride, devMode)
+    return
+  }
+
+  const repoDir = await resolveRepoDir(repoOverride)
+  const profileDir = await resolveProfileDir(profileOverride, devMode)
+  await ensureProfileBootstrap(repoDir, profileDir)
+
+  if (subcommand === "logs") {
+    if (channel && channel !== "whatsapp") {
+      console.log(`Channel-specific log filtering for '${channel}' is not implemented yet; showing Orion live logs.`)
+    }
+    const targetArgs = channel ? ["all", ...remainingPositionals] : remainingPositionals
+    await handleLogs(repoDir, profileDir, targetArgs)
+    return
+  }
+
+  if (subcommand === "login") {
+    const resolvedChannel = channel ?? "whatsapp"
+    if (resolvedChannel === "whatsapp") {
+      const mode = normalizeWhatsAppLoginMode(parsed.mode)
+      if (!mode) {
+        throw new Error(`Invalid WhatsApp login mode '${parsed.mode}'. Use 'scan' or 'cloud'.`)
+      }
+      const targetScript = mode === "cloud" ? "wa:cloud" : "wa:scan"
+      await runPnpmScript(repoDir, profileDir, targetScript, remainingPositionals)
+      return
+    }
+
+    if (["telegram", "discord", "webchat"].includes(resolvedChannel)) {
+      console.log(`Channel '${resolvedChannel}' does not have a standalone login flow in Orion yet.`)
+      console.log("Launching onboarding quickstart for that channel instead.")
+      await runPnpmScript(repoDir, profileDir, "quickstart", ["--channel", resolvedChannel, ...remainingPositionals])
+      return
+    }
+  }
+
+  throw new Error("Unknown `orion channels` subcommand. Use `orion channels help`.")
+}
+
 async function handleCommand(repoOverride, profileOverride, devMode, positionals) {
   const [command, ...rest] = positionals
 
@@ -839,6 +985,11 @@ async function handleCommand(repoOverride, profileOverride, devMode, positionals
 
   if (command === "self-test" || command === "selftest" || command === "status") {
     await handleSelfTest(repoOverride, profileOverride, devMode)
+    return
+  }
+
+  if (command === "channels") {
+    await handleChannelsCommand(repoOverride, profileOverride, devMode, rest)
     return
   }
 

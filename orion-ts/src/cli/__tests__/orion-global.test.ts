@@ -7,6 +7,9 @@ import {
   getPnpmCommand,
   getNamedProfileDir,
   isLikelyProfileName,
+  normalizeChannelName,
+  normalizeWhatsAppLoginMode,
+  parseChannelsArgs,
   parseOrionCliArgs,
   parseEnvContentLoose,
   findOrionRepoUpwards,
@@ -101,6 +104,37 @@ describe("global orion CLI helpers", () => {
     expect(resolveProfileSelector("~/custom-profile", "C:\\repo", "C:\\Users\\me")).toBe(
       path.join("C:\\Users\\me", "custom-profile"),
     )
+  })
+
+  it("parses channels namespace args and strips channel/mode flags", () => {
+    const parsed = parseChannelsArgs([
+      "login",
+      "--channel",
+      "whatsapp",
+      "--mode",
+      "qr",
+      "--non-interactive",
+      "--provider",
+      "groq",
+    ])
+
+    expect(parsed).toEqual({
+      channel: "whatsapp",
+      mode: "qr",
+      help: false,
+      positionals: ["login", "--non-interactive", "--provider", "groq"],
+    })
+  })
+
+  it("normalizes supported channel names and whatsapp login modes", () => {
+    expect(normalizeChannelName("WhatsApp")).toBe("whatsapp")
+    expect(normalizeChannelName("unknown")).toBe(null)
+
+    expect(normalizeWhatsAppLoginMode(undefined as any)).toBe("scan")
+    expect(normalizeWhatsAppLoginMode("baileys")).toBe("scan")
+    expect(normalizeWhatsAppLoginMode("qr")).toBe("scan")
+    expect(normalizeWhatsAppLoginMode("cloud")).toBe("cloud")
+    expect(normalizeWhatsAppLoginMode("invalid")).toBe(null)
   })
 
   it("parses dotenv-like content for profile env checks", () => {

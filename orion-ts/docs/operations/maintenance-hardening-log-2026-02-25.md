@@ -385,3 +385,25 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
     - `orion setup --non-interactive --provider groq --channel whatsapp --whatsapp-mode scan --repo ... --profile .tmp-orion-profile`
     - `orion status --repo ... --profile .tmp-orion-profile`
     - `orion logs foo --repo ... --profile .tmp-orion-profile` (guidance path)
+
+## Follow-up Notes (pass 24)
+
+- OpenClaw-alignment tranche 3 (channels namespace facade):
+  - added `orion channels help|login|status|logs` namespace commands to global wrapper
+  - `orion channels login --channel whatsapp` maps to existing WhatsApp setup flow (`wa:scan` by default, `--mode cloud` supported)
+  - `orion channels status` currently reuses readiness/self-test (best available status surface today)
+  - `orion channels logs` currently reuses live foreground Orion logs / guidance path (no daemon log store yet)
+  - supports positional or flag channel selection (`whatsapp`, `telegram`, `discord`, `webchat`) and login mode normalization (`qr`/`baileys` => `scan`)
+- Added/extended tests:
+  - `src/cli/__tests__/orion-global.test.ts` (`parseChannelsArgs`, channel/mode normalization)
+- Documentation updates:
+  - `docs/platform/global-cli.md` (channels namespace examples and behavior notes)
+  - `docs/channels/whatsapp.md` (namespace equivalents for QR login)
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `21` test files passed / `86` tests passed
+  - real command smoke:
+    - `orion channels help`
+    - `orion channels login --channel whatsapp --non-interactive --provider groq --repo ... --profile .tmp-orion-profile`
+    - `orion channels status --channel whatsapp --repo ... --profile .tmp-orion-profile`
+    - `orion channels logs foo --repo ... --profile .tmp-orion-profile` (guidance path)
