@@ -1,0 +1,63 @@
+# Orion Onboarding (OpenClaw-inspired)
+
+Date: 2026-02-26
+
+## Goal
+
+Provide a fast local onboarding flow similar to OpenClaw's "setup + onboard" experience:
+
+- guided quickstart command
+- channel-first setup (Telegram / Discord / WebChat)
+- provider selection (Groq, OpenRouter, Anthropic, OpenAI, Gemini, Ollama)
+- explicit next steps for phone testing
+
+## Commands
+
+```bash
+pnpm setup
+```
+
+Alias for:
+
+```bash
+pnpm onboard
+```
+
+Optional flags:
+
+```bash
+pnpm onboard --channel telegram --provider groq
+pnpm onboard --channel discord --provider openrouter
+pnpm onboard --print-only
+pnpm onboard --yes
+```
+
+## What the wizard does
+
+1. Chooses a first test channel (`telegram`, `discord`, or `webchat`).
+2. Chooses a primary model provider.
+3. Collects minimal required env values.
+4. Writes `.env` (preserving comments and existing keys where possible).
+5. Prints channel-specific next steps and docs references.
+
+## Run modes (quick shortcuts)
+
+```bash
+pnpm all
+pnpm gateway
+pnpm gateway:watch
+```
+
+## Notes
+
+- The wizard writes `.env` in the repo root (`orion-ts/.env`).
+- Channel adapters are safe-by-default:
+  - Telegram: private chat only if `TELEGRAM_CHAT_ID` is unset
+  - Discord: DM only if `DISCORD_CHANNEL_ID` is unset
+- For production rollout, continue using `pnpm doctor`, migrations, and dedupe checks as documented in `docs/operations/maintenance-hardening-log-2026-02-25.md`.
+
+## Related docs
+
+- `docs/channels/telegram.md`
+- `docs/channels/discord.md`
+- `docs/platform/doctor.md`

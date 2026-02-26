@@ -1,0 +1,559 @@
+import fs from "node:fs/promises"
+import path from "node:path"
+import readline from "node:readline/promises"
+import { stdin as input, stdout as output } from "node:process"
+import { pathToFileURL } from "node:url"
+
+import dotenv from "dotenv"
+
+type ChannelChoice = "telegram" | "discord" | "webchat"
+type ProviderChoice = "groq" | "openrouter" | "anthropic" | "openai" | "gemini" | "ollama"
+
+type WriteMode = "write" | "print"
+
+interface OnboardArgs {
+  flow: "quickstart"
+  channel: ChannelChoice | null
+  provider: ProviderChoice | null
+  writeMode: WriteMode
+  yes: boolean
+}
+
+interface EnvTemplate {
+  content: string
+  source: ".env" | ".env.example" | "empty"
+}
+
+interface QuickstartPlan {
+  channel: ChannelChoice
+  provider: ProviderChoice
+  updates: Record<string, string>
+}
+
+const CHANNEL_CHOICES: ReadonlyArray<{ key: ChannelChoice; label: string; description: string }> = [
+  { key: "telegram", label: "Telegram (recommended)", description: "Fastest path for phone testing via Bot API" },
+  { key: "discord", label: "Discord", description: "Good for DMs or one allowlisted server channel" },
+  { key: "webchat", label: "WebChat (local browser)", description: "No external token needed; local-only testing" },
+]
+
+const PROVIDER_CHOICES: ReadonlyArray<{ key: ProviderChoice; label: string; description: string }> = [
+  { key: "groq", label: "Groq (recommended quick start)", description: "Fast and easy for chat testing" },
+  { key: "openrouter", label: "OpenRouter", description: "Many models behind one API key" },
+  { key: "anthropic", label: "Anthropic", description: "Claude API key" },
+  { key: "openai", label: "OpenAI", description: "OpenAI API key" },
+  { key: "gemini", label: "Gemini", description: "Google AI Studio / Gemini API key" },
+  { key: "ollama", label: "Ollama (local model)", description: "No paid API key required" },
+]
+
+function printHelp(): void {
+  console.log("Orion Onboarding (OpenClaw-inspired)")
+  console.log("====================================")
+  console.log("")
+  console.log("Usage:")
+  console.log("  pnpm onboard [--channel telegram|discord|webchat] [--provider groq|openrouter|anthropic|openai|gemini|ollama]")
+  console.log("  pnpm setup   # alias for quickstart wizard")
+  console.log("")
+  console.log("Options:")
+  console.log("  --flow quickstart   Only supported flow (default)")
+  console.log("  --channel <name>    Preselect a channel")
+  console.log("  --provider <name>   Preselect an AI provider")
+  console.log("  --print-only        Do not write .env; print the planned changes")
+  console.log("  --write             Force writing .env without print-only")
+  console.log("  --yes               Skip final confirmation prompt")
+  console.log("  --help, -h          Show this help")
+}
+
+function isChannelChoice(value: string): value is ChannelChoice {
+  return CHANNEL_CHOICES.some((item) => item.key === value)
+}
+
+function isProviderChoice(value: string): value is ProviderChoice {
+  return PROVIDER_CHOICES.some((item) => item.key === value)
+}
+
+export function parseOnboardArgs(argv: string[]): OnboardArgs {
+  let flow: "quickstart" = "quickstart"
+  let channel: ChannelChoice | null = null
+  let provider: ProviderChoice | null = null
+  let writeMode: WriteMode = "write"
+  let yes = false
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === "--help" || arg === "-h") {
+      printHelp()
+      process.exit(0)
+    }
+    if (arg === "--flow" && argv[i + 1]) {
+      const next = argv[i + 1]
+      i += 1
+      if (next !== "quickstart") {
+        throw new Error(`Unsupported --flow '${next}'. Only 'quickstart' is currently supported.`)
+      }
+      flow = "quickstart"
+      continue
+    }
+    if (arg === "--flow=quickstart") {
+      flow = "quickstart"
+      continue
+    }
+    if (arg === "--channel" && argv[i + 1]) {
+      const next = (argv[i + 1] ?? "").trim().toLowerCase()
+      i += 1
+      if (!isChannelChoice(next)) {
+        throw new Error(`Invalid --channel '${next}'`)
+      }
+      channel = next
+      continue
+    }
+    if (arg.startsWith("--channel=")) {
+      const next = arg.slice("--channel=".length).trim().toLowerCase()
+      if (!isChannelChoice(next)) {
+        throw new Error(`Invalid --channel '${next}'`)
+      }
+      channel = next
+      continue
+    }
+    if (arg === "--provider" && argv[i + 1]) {
+      const next = (argv[i + 1] ?? "").trim().toLowerCase()
+      i += 1
+      if (!isProviderChoice(next)) {
+        throw new Error(`Invalid --provider '${next}'`)
+      }
+      provider = next
+      continue
+    }
+    if (arg.startsWith("--provider=")) {
+      const next = arg.slice("--provider=".length).trim().toLowerCase()
+      if (!isProviderChoice(next)) {
+        throw new Error(`Invalid --provider '${next}'`)
+      }
+      provider = next
+      continue
+    }
+    if (arg === "--print-only") {
+      writeMode = "print"
+      continue
+    }
+    if (arg === "--write") {
+      writeMode = "write"
+      continue
+    }
+    if (arg === "--yes" || arg === "-y") {
+      yes = true
+      continue
+    }
+  }
+
+  return { flow, channel, provider, writeMode, yes }
+}
+
+function providerEnvKey(provider: ProviderChoice): "GROQ_API_KEY" | "OPENROUTER_API_KEY" | "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GEMINI_API_KEY" | "OLLAMA_BASE_URL" {
+  switch (provider) {
+    case "groq":
+      return "GROQ_API_KEY"
+    case "openrouter":
+      return "OPENROUTER_API_KEY"
+    case "anthropic":
+      return "ANTHROPIC_API_KEY"
+    case "openai":
+      return "OPENAI_API_KEY"
+    case "gemini":
+      return "GEMINI_API_KEY"
+    case "ollama":
+      return "OLLAMA_BASE_URL"
+  }
+}
+
+function readEnvValueMap(content: string): Record<string, string> {
+  try {
+    return dotenv.parse(content)
+  } catch {
+    return {}
+  }
+}
+
+function formatEnvValue(value: string): string {
+  if (/[\s#]/.test(value)) {
+    return JSON.stringify(value)
+  }
+  return value
+}
+
+function parseEnvLineKey(line: string): string | null {
+  const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/)
+  return match?.[1] ?? null
+}
+
+export function mergeEnvContent(baseContent: string, updates: Record<string, string>): string {
+  const normalizedBase = baseContent.replace(/\r\n/g, "\n")
+  const lines = normalizedBase.split("\n")
+  const out: string[] = []
+  const presentKeys = new Set<string>()
+
+  for (const line of lines) {
+    const key = parseEnvLineKey(line)
+    if (!key || !(key in updates)) {
+      out.push(line)
+      continue
+    }
+
+    out.push(`${key}=${formatEnvValue(updates[key] ?? "")}`)
+    presentKeys.add(key)
+  }
+
+  const missingEntries = Object.entries(updates).filter(([key]) => !presentKeys.has(key))
+  if (missingEntries.length > 0) {
+    if (out.length > 0 && out[out.length - 1] !== "") {
+      out.push("")
+    }
+    out.push("# Added by `pnpm onboard` quickstart wizard")
+    for (const [key, value] of missingEntries) {
+      out.push(`${key}=${formatEnvValue(value)}`)
+    }
+  }
+
+  return `${out.join("\n").replace(/\n+$/g, "")}\n`
+}
+
+async function loadEnvTemplate(cwd: string): Promise<EnvTemplate> {
+  const envPath = path.join(cwd, ".env")
+  const envExamplePath = path.join(cwd, ".env.example")
+
+  try {
+    return {
+      content: await fs.readFile(envPath, "utf-8"),
+      source: ".env",
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error
+    }
+  }
+
+  try {
+    return {
+      content: await fs.readFile(envExamplePath, "utf-8"),
+      source: ".env.example",
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error
+    }
+  }
+
+  return { content: "", source: "empty" }
+}
+
+function redactSecretValue(key: string, value: string): string {
+  if (!/_KEY$|TOKEN|PASSWORD|SECRET/.test(key)) {
+    return value
+  }
+  if (!value) {
+    return value
+  }
+  if (value.length <= 8) {
+    return `${value.slice(0, 2)}***`
+  }
+  return `${value.slice(0, 4)}***${value.slice(-2)}`
+}
+
+function buildNextSteps(plan: QuickstartPlan): string[] {
+  const lines: string[] = []
+
+  lines.push("Next steps:")
+  lines.push("1. Run `pnpm doctor` to validate config + ports.")
+  lines.push("2. Start Orion with channels: `pnpm dev -- --mode all`")
+
+  if (plan.channel === "telegram") {
+    lines.push("3. Open Telegram on your phone and DM your bot.")
+    lines.push("4. Run `/start`, `/id`, `/ping`, then send a normal message.")
+    if (!plan.updates.TELEGRAM_CHAT_ID) {
+      lines.push("5. Copy `/id` result into `TELEGRAM_CHAT_ID` (allowlist) and rerun `pnpm onboard`.")
+    }
+  } else if (plan.channel === "discord") {
+    lines.push("3. Enable Message Content Intent in Discord Developer Portal.")
+    lines.push("4. DM the bot (or use an allowlisted channel) and run `!help`, `!id`, `!ping`.")
+    if (!plan.updates.DISCORD_CHANNEL_ID) {
+      lines.push("5. If using a server channel, add the `!id` result to `DISCORD_CHANNEL_ID` and rerun `pnpm onboard`.")
+    }
+  } else {
+    lines.push("3. Open `http://127.0.0.1:8080` on this machine and test WebChat.")
+    lines.push("4. For phone access, set up Telegram or Discord later with `pnpm onboard`.")
+  }
+
+  lines.push("")
+  lines.push("Docs:")
+  if (plan.channel === "telegram") {
+    lines.push("- `docs/channels/telegram.md`")
+  } else if (plan.channel === "discord") {
+    lines.push("- `docs/channels/discord.md`")
+  }
+  lines.push("- `docs/platform/onboarding.md`")
+
+  return lines
+}
+
+async function askChoice<T extends string>(
+  rl: readline.Interface,
+  prompt: string,
+  choices: ReadonlyArray<{ key: T; label: string; description: string }>,
+): Promise<T> {
+  console.log("")
+  console.log(prompt)
+  choices.forEach((choice, index) => {
+    console.log(`  ${index + 1}. ${choice.label}`)
+    console.log(`     ${choice.description}`)
+  })
+
+  while (true) {
+    const raw = (await rl.question(`Select [1-${choices.length}] (default 1): `)).trim()
+    if (!raw) {
+      return choices[0].key
+    }
+    const index = Number.parseInt(raw, 10)
+    if (Number.isFinite(index) && index >= 1 && index <= choices.length) {
+      return choices[index - 1].key
+    }
+    const byKey = choices.find((choice) => choice.key === raw.toLowerCase())
+    if (byKey) {
+      return byKey.key
+    }
+    console.log("Invalid selection, try again.")
+  }
+}
+
+async function askInput(
+  rl: readline.Interface,
+  label: string,
+  opts: {
+    current?: string | null
+    placeholder?: string
+    optional?: boolean
+    defaultValue?: string
+  } = {},
+): Promise<string | null> {
+  const suffixParts: string[] = []
+  if (opts.current) {
+    suffixParts.push(`current=${redactSecretValue(label, opts.current)}`)
+  }
+  if (opts.optional) {
+    suffixParts.push("optional")
+  }
+  if (opts.placeholder) {
+    suffixParts.push(opts.placeholder)
+  }
+  const suffix = suffixParts.length > 0 ? ` (${suffixParts.join(", ")})` : ""
+
+  const prompt = `${label}${suffix}: `
+  const raw = (await rl.question(prompt)).trim()
+
+  if (!raw) {
+    if (opts.defaultValue !== undefined) {
+      return opts.defaultValue
+    }
+    return opts.optional ? null : null
+  }
+
+  return raw
+}
+
+async function askYesNo(
+  rl: readline.Interface,
+  prompt: string,
+  defaultYes = true,
+): Promise<boolean> {
+  const raw = (await rl.question(`${prompt} (${defaultYes ? "Y/n" : "y/N"}): `)).trim().toLowerCase()
+  if (!raw) {
+    return defaultYes
+  }
+  if (["y", "yes"].includes(raw)) {
+    return true
+  }
+  if (["n", "no"].includes(raw)) {
+    return false
+  }
+  return defaultYes
+}
+
+function buildQuickstartBanner(): void {
+  console.log("Orion Setup Wizard (OpenClaw-inspired)")
+  console.log("======================================")
+  console.log("")
+  console.log("This wizard helps you:")
+  console.log("- choose a test channel (Telegram / Discord / WebChat)")
+  console.log("- choose a model provider")
+  console.log("- write the minimum .env config for a phone-first quick test")
+}
+
+async function collectQuickstartPlan(
+  args: OnboardArgs,
+  envValues: Record<string, string>,
+): Promise<QuickstartPlan> {
+  const rl = readline.createInterface({ input, output })
+  try {
+    buildQuickstartBanner()
+
+    const channel = args.channel ?? await askChoice(rl, "Choose your first test channel", CHANNEL_CHOICES)
+    const provider = args.provider ?? await askChoice(rl, "Choose your primary model provider", PROVIDER_CHOICES)
+
+    const updates: Record<string, string> = {}
+
+    const providerKey = providerEnvKey(provider)
+    if (provider === "ollama") {
+      const baseUrl = await askInput(rl, "OLLAMA_BASE_URL", {
+        current: envValues.OLLAMA_BASE_URL ?? null,
+        placeholder: "default=http://localhost:11434",
+        defaultValue: envValues.OLLAMA_BASE_URL || "http://localhost:11434",
+      })
+      if (baseUrl) {
+        updates[providerKey] = baseUrl
+      }
+    } else {
+      const apiKey = await askInput(rl, providerKey, {
+        current: envValues[providerKey] ?? null,
+        optional: true,
+        placeholder: "leave blank to keep current / set later",
+      })
+      if (apiKey) {
+        updates[providerKey] = apiKey
+      }
+    }
+
+    if (channel === "telegram") {
+      const botToken = await askInput(rl, "TELEGRAM_BOT_TOKEN", {
+        current: envValues.TELEGRAM_BOT_TOKEN ?? null,
+        optional: true,
+        placeholder: "from @BotFather (leave blank to set later)",
+      })
+      const chatId = await askInput(rl, "TELEGRAM_CHAT_ID", {
+        current: envValues.TELEGRAM_CHAT_ID ?? null,
+        optional: true,
+        placeholder: "allowlist chat id (optional now, use /id later)",
+      })
+      if (botToken) {
+        updates.TELEGRAM_BOT_TOKEN = botToken
+      }
+      if (chatId) {
+        updates.TELEGRAM_CHAT_ID = chatId
+      }
+    } else if (channel === "discord") {
+      const botToken = await askInput(rl, "DISCORD_BOT_TOKEN", {
+        current: envValues.DISCORD_BOT_TOKEN ?? null,
+        optional: true,
+        placeholder: "Discord Developer Portal token (leave blank to set later)",
+      })
+      const channelId = await askInput(rl, "DISCORD_CHANNEL_ID", {
+        current: envValues.DISCORD_CHANNEL_ID ?? null,
+        optional: true,
+        placeholder: "allowlist channel id (optional; DMs work without it)",
+      })
+      if (botToken) {
+        updates.DISCORD_BOT_TOKEN = botToken
+      }
+      if (channelId) {
+        updates.DISCORD_CHANNEL_ID = channelId
+      }
+    }
+
+    const setAutoStartGateway = await askYesNo(rl, "Set AUTO_START_GATEWAY=true for `pnpm dev`", false)
+    if (setAutoStartGateway) {
+      updates.AUTO_START_GATEWAY = "true"
+    }
+
+    return { channel, provider, updates }
+  } finally {
+    rl.close()
+  }
+}
+
+function printPlannedChanges(plan: QuickstartPlan, envPath: string, templateSource: EnvTemplate["source"]): void {
+  console.log("")
+  console.log("Quickstart plan")
+  console.log("===============")
+  console.log(`Channel: ${plan.channel}`)
+  console.log(`Provider: ${plan.provider}`)
+  console.log(`Target env file: ${envPath} (base: ${templateSource})`)
+  console.log("")
+  if (Object.keys(plan.updates).length === 0) {
+    console.log("No env changes collected (you can still run the next steps and set values later).")
+    return
+  }
+  console.log("Env updates:")
+  for (const [key, value] of Object.entries(plan.updates)) {
+    console.log(`- ${key}=${redactSecretValue(key, value)}`)
+  }
+}
+
+async function writeEnvFile(cwd: string, template: EnvTemplate, updates: Record<string, string>): Promise<string> {
+  const envPath = path.join(cwd, ".env")
+  const merged = mergeEnvContent(template.content, updates)
+  await fs.writeFile(envPath, merged, "utf-8")
+  return envPath
+}
+
+async function runOnboarding(argv: string[]): Promise<void> {
+  const args = parseOnboardArgs(argv)
+  if (args.flow !== "quickstart") {
+    throw new Error(`Unsupported flow: ${args.flow}`)
+  }
+
+  const cwd = process.cwd()
+  const template = await loadEnvTemplate(cwd)
+  const envPath = path.join(cwd, ".env")
+  const currentEnv = readEnvValueMap(template.content)
+  const plan = await collectQuickstartPlan(args, currentEnv)
+
+  printPlannedChanges(plan, envPath, template.source)
+
+  if (args.writeMode === "print") {
+    console.log("")
+    console.log("Print-only mode: .env was not modified.")
+  } else {
+    let shouldWrite = args.yes
+    if (!shouldWrite) {
+      const rl = readline.createInterface({ input, output })
+      try {
+        shouldWrite = await askYesNo(rl, "Write these changes to .env now?", true)
+      } finally {
+        rl.close()
+      }
+    }
+
+    if (shouldWrite) {
+      await writeEnvFile(cwd, template, plan.updates)
+      console.log("")
+      console.log(`Wrote ${envPath}`)
+    } else {
+      console.log("")
+      console.log("Skipped writing .env")
+    }
+  }
+
+  console.log("")
+  for (const line of buildNextSteps(plan)) {
+    console.log(line)
+  }
+}
+
+export const __onboardTestUtils = {
+  parseOnboardArgs,
+  mergeEnvContent,
+  providerEnvKey,
+  buildNextSteps,
+  parseEnvLineKey,
+}
+
+async function main(): Promise<void> {
+  try {
+    await runOnboarding(process.argv.slice(2))
+  } catch (error) {
+    console.error(`Onboarding failed: ${error instanceof Error ? error.message : String(error)}`)
+    process.exit(1)
+  }
+}
+
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ""
+if (import.meta.url === invokedPath) {
+  void main()
+}

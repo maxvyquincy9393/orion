@@ -5,12 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/main.ts",
+    "all": "tsx src/main.ts --mode all",
+    "gateway": "tsx src/main.ts --mode gateway",
+    "gateway:watch": "tsx watch src/main.ts --mode gateway",
     "build": "tsup src/main.ts --format esm --dts --external playwright",
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:ci": "vitest run",
     "typecheck": "tsc --noEmit",
     "doctor": "tsx src/cli/doctor.ts",
+    "onboard": "tsx src/cli/onboard.ts",
+    "setup": "tsx src/cli/onboard.ts --flow quickstart",
     "dedupe:causal-graph": "tsx src/cli/causal-graph-dedupe.ts --apply",
     "dedupe:causal-graph:dry-run": "tsx src/cli/causal-graph-dedupe.ts --dry-run"
   },

@@ -205,3 +205,20 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
 - Regression verification:
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `18` test files passed / `60` tests passed
+
+## Follow-up Notes (pass 14)
+
+- Added OpenClaw-inspired onboarding/setup flow:
+  - `pnpm onboard` / `pnpm setup`
+  - guided quickstart for Telegram / Discord / WebChat + provider selection
+  - `.env` merge writer preserves comments and appends missing keys safely
+- Extracted/tested onboarding helper logic:
+  - `src/cli/onboard.ts`
+  - `src/cli/__tests__/onboard.test.ts`
+- Added onboarding docs + command shortcuts:
+  - `docs/platform/onboarding.md`
+  - `package.json` scripts: `all`, `gateway`, `gateway:watch`, `onboard`, `setup`
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `19` test files passed / `63` tests passed
+  - `pnpm onboard --help` renders expected quickstart usage text (verified outside sandbox)
