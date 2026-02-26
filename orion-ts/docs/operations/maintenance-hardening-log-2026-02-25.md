@@ -189,3 +189,19 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
 - Regression verification:
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `17` test files passed / `55` tests passed
+
+## Follow-up Notes (pass 13)
+
+- Added Discord HP-test channel adapter (`src/channels/discord.ts`) with:
+  - DM-only default when `DISCORD_CHANNEL_ID` is unset
+  - explicit allowlist support for guild channels
+  - `!help`/`/help`, `!id`/`/id`, `!ping`/`/ping`
+  - per-channel serialized processing using shared incoming-message service
+- Integrated Discord channel into `ChannelManager` startup + proactive send priority.
+- Added Discord channel helper tests:
+  - `src/channels/__tests__/discord.test.ts`
+- Added Discord quickstart + references doc:
+  - `docs/channels/discord.md`
+- Regression verification:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `18` test files passed / `60` tests passed
