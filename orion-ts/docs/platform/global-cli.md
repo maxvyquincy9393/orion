@@ -68,6 +68,7 @@ Initialize profile files (recommended once):
 ```bash
 orion profile init
 orion self-test
+orion self-test --fix
 ```
 
 Named profile shortcut (OpenClaw-style):
@@ -102,6 +103,7 @@ OpenClaw-style channels namespace (same result, more parity):
 ```bash
 orion channels login --channel whatsapp --non-interactive --provider groq
 orion channels status --channel whatsapp
+orion channels status --channel telegram
 orion all
 ```
 
@@ -129,7 +131,11 @@ orion logs gateway
 orion channels help
 orion channels login --channel whatsapp
 orion channels status --channel whatsapp
+orion channels status --channel telegram
+orion channels status --channel discord
+orion channels status --channel webchat
 orion self-test
+orion self-test --fix
 orion doctor
 orion gateway
 orion wa scan
@@ -144,6 +150,13 @@ orion onboard -- --channel telegram --provider groq
 - provider/WhatsApp mode basics
 - `pnpm` availability on PATH (with a hint to reopen terminal if PATH is stale)
 
+`orion self-test --fix` applies safe local fixes to the active profile:
+
+- bootstraps profile directories if missing
+- creates `permissions/permissions.yaml` template if missing
+- adds baseline env keys (database path, permissions file path, default user, log level)
+- enables `AUTO_START_GATEWAY=true` for WhatsApp Cloud mode if it is enabled but unset
+
 `--repo` and `--profile` are one-shot overrides for the current command. They do not rewrite your saved default link/profile unless you run `orion link`.
 
 `--profile <name>` maps to `~/.orion/profiles/<name>`. Use a path (e.g. `--profile .tmp-profile`) if you want an explicit directory.
@@ -152,7 +165,8 @@ orion onboard -- --channel telegram --provider groq
 
 `orion channels ...` is an OpenClaw-style namespace facade:
 - `channels login --channel whatsapp` -> Orion WhatsApp QR/Cloud setup flow
-- `channels status` -> Orion readiness/self-test today
+- `channels status --channel <name>` -> channel-focused readiness checks (WhatsApp/Telegram/Discord/WebChat)
+- `channels status` -> Orion global readiness/self-test
 - `channels logs` -> Orion live foreground logs today
 
 ## Current limitations (important)

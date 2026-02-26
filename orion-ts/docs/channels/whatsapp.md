@@ -35,6 +35,7 @@ If you installed the global wrapper:
 ```bash
 orion profile init
 orion self-test
+orion self-test --fix
 orion wa scan
 ```
 
@@ -43,6 +44,7 @@ OpenClaw-style namespace equivalent:
 ```bash
 orion channels login --channel whatsapp
 orion channels status --channel whatsapp
+orion channels logs --channel whatsapp
 ```
 
 Non-interactive (scriptable) variant:

@@ -407,3 +407,31 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
     - `orion channels login --channel whatsapp --non-interactive --provider groq --repo ... --profile .tmp-orion-profile`
     - `orion channels status --channel whatsapp --repo ... --profile .tmp-orion-profile`
     - `orion channels logs foo --repo ... --profile .tmp-orion-profile` (guidance path)
+
+## Follow-up Notes (pass 25)
+
+- OpenClaw-alignment tranche 4a (readiness polish for global CLI):
+  - added `orion self-test --fix` safe fix mode:
+    - bootstraps active profile directories
+    - creates profile `permissions/permissions.yaml` template if missing
+    - backfills baseline profile env keys (`DATABASE_URL`, `PERMISSIONS_FILE`, `DEFAULT_USER_ID`, `LOG_LEVEL`)
+    - auto-adds `AUTO_START_GATEWAY=true` when WhatsApp Cloud mode is enabled and missing
+  - `orion status --fix` now behaves the same as `orion self-test --fix`
+- Improved `orion channels status`:
+  - `orion channels status --channel <name>` now prints channel-focused readiness checks for:
+    - `whatsapp`
+    - `telegram`
+    - `discord`
+    - `webchat`
+  - channel status now exits non-zero when it reports channel errors (matching `orion self-test` exit-code behavior)
+- Improved `orion channels logs` UX:
+  - clearer note when channel-specific filtering is not implemented yet
+  - safer target forwarding (`all`/`gateway`) without duplicating target args
+- Added/extended tests:
+  - `src/cli/__tests__/orion-global.test.ts` (`parseSelfTestArgs`, Telegram/Discord/WebChat channel checks)
+- Documentation updates:
+  - `docs/platform/global-cli.md` (`self-test --fix`, channel-specific status examples)
+  - `docs/channels/whatsapp.md` (`self-test --fix`, `channels logs --channel whatsapp`)
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `21` test files passed / `89` tests passed

@@ -16,6 +16,11 @@ export function parseChannelsArgs(argv: string[]): {
   positionals: string[]
   help: boolean
 }
+export function parseSelfTestArgs(argv: string[]): {
+  fix: boolean
+  help: boolean
+  positionals: string[]
+}
 export function getProfilePaths(profileDir: string): {
   profileDir: string
   envPath: string
@@ -26,6 +31,15 @@ export function parseEnvContentLoose(content: string): Record<string, string>
 export function buildWhatsAppSelfTestChecks(
   envMap: Record<string, string>,
   profilePaths: { profileDir: string; envPath: string; workspaceDir: string; stateDir: string },
+): Array<{ level: "ok" | "warn" | "error"; label: string; detail: string }>
+export function buildTelegramSelfTestChecks(
+  envMap: Record<string, string>,
+): Array<{ level: "ok" | "warn" | "error"; label: string; detail: string }>
+export function buildDiscordSelfTestChecks(
+  envMap: Record<string, string>,
+): Array<{ level: "ok" | "warn" | "error"; label: string; detail: string }>
+export function buildWebchatSelfTestChecks(
+  envMap: Record<string, string>,
 ): Array<{ level: "ok" | "warn" | "error"; label: string; detail: string }>
 
 export function parseOrionCliArgs(argv: string[]): {

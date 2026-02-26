@@ -3,6 +3,9 @@ import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 
 import {
+  buildDiscordSelfTestChecks,
+  buildTelegramSelfTestChecks,
+  buildWebchatSelfTestChecks,
   buildWhatsAppSelfTestChecks,
   getPnpmCommand,
   getNamedProfileDir,
@@ -10,6 +13,7 @@ import {
   normalizeChannelName,
   normalizeWhatsAppLoginMode,
   parseChannelsArgs,
+  parseSelfTestArgs,
   parseOrionCliArgs,
   parseEnvContentLoose,
   findOrionRepoUpwards,
@@ -137,6 +141,14 @@ describe("global orion CLI helpers", () => {
     expect(normalizeWhatsAppLoginMode("invalid")).toBe(null)
   })
 
+  it("parses self-test flags without swallowing extra args", () => {
+    expect(parseSelfTestArgs(["--fix", "--help", "--foo"])).toEqual({
+      fix: true,
+      help: true,
+      positionals: ["--foo"],
+    })
+  })
+
   it("parses dotenv-like content for profile env checks", () => {
     const parsed = parseEnvContentLoose([
       "# comment",
@@ -177,6 +189,22 @@ describe("global orion CLI helpers", () => {
 
     expect(checks.find((check) => check.label === "WhatsApp Mode")?.detail).toContain("QR Scan")
     expect(checks.some((check) => check.label === "WhatsApp Cloud Config")).toBe(false)
+  })
+
+  it("reports Telegram and Discord defaults as DM/private-safe warnings", () => {
+    const telegram = buildTelegramSelfTestChecks({ TELEGRAM_BOT_TOKEN: "token" })
+    const discord = buildDiscordSelfTestChecks({ DISCORD_BOT_TOKEN: "token" })
+
+    expect(telegram.find((check) => check.label === "Telegram Allowlist")?.level).toBe("warn")
+    expect(discord.find((check) => check.label === "Discord Allowlist")?.level).toBe("warn")
+  })
+
+  it("reports WebChat URL using configured port fallback", () => {
+    const explicit = buildWebchatSelfTestChecks({ WEBCHAT_PORT: "9090" })
+    const fallback = buildWebchatSelfTestChecks({ WEBCHAT_PORT: "invalid" })
+
+    expect(explicit[0]?.detail).toContain("127.0.0.1:9090")
+    expect(fallback[0]?.detail).toContain("127.0.0.1:8080")
   })
 
   it("validates Orion repo by package name", async () => {
