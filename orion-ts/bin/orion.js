@@ -211,12 +211,17 @@ export function parseChannelsArgs(argv) {
   let channel = null
   let mode = null
   let help = false
+  let json = false
   const positionals = []
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]
     if (arg === "--help" || arg === "-h") {
       help = true
+      continue
+    }
+    if (arg === "--json") {
+      json = true
       continue
     }
     if (arg === "--channel" && args[i + 1]) {
@@ -248,13 +253,15 @@ export function parseChannelsArgs(argv) {
     positionals.push(arg)
   }
 
-  return { channel, mode, positionals, help }
+  return { channel, mode, positionals, help, json }
 }
 
 export function parseSelfTestArgs(argv) {
   const args = [...argv]
   let fix = false
+  let migrate = false
   let help = false
+  let json = false
   const positionals = []
 
   for (const arg of args) {
@@ -266,10 +273,18 @@ export function parseSelfTestArgs(argv) {
       fix = true
       continue
     }
+    if (arg === "--migrate") {
+      migrate = true
+      continue
+    }
+    if (arg === "--json") {
+      json = true
+      continue
+    }
     positionals.push(arg)
   }
 
-  return { fix, help, positionals }
+  return { fix, migrate, help, json, positionals }
 }
 
 export function parseOrionCliArgs(argv) {
@@ -798,11 +813,13 @@ function printSelfTestHelp() {
   console.log("===============")
   console.log("")
   console.log("Usage:")
-  console.log("  orion self-test [--fix]")
-  console.log("  orion status [--fix]")
+  console.log("  orion self-test [--fix] [--migrate] [--json]")
+  console.log("  orion status [--fix] [--migrate] [--json]")
   console.log("")
   console.log("Options:")
   console.log("  --fix   Apply safe local fixes (profile bootstrap, permissions template, env baseline keys)")
+  console.log("  --migrate   Run profile DB migration preflight (`prisma migrate deploy`) after fixes/checks")
+  console.log("  --json   Print machine-readable JSON output")
 }
 
 async function collectSelfTestChecks(repoDir, profileDir) {
@@ -957,6 +974,36 @@ async function maybeAutoMigrateProfileDb(repoDir, profileDir, triggerCommand) {
   console.log(summarizeMigrateOutput(result.stdout, result.stderr))
 }
 
+async function runProfileDbMigrationPreflight(repoDir, profileDir, triggerCommand) {
+  const { envMap } = await loadProfileEnvMap(profileDir)
+  const databaseUrl = (envMap.DATABASE_URL ?? "").trim()
+  if (!databaseUrl) {
+    return {
+      attempted: false,
+      ok: true,
+      message: "Skipped DB migration preflight (DATABASE_URL missing in active profile env).",
+    }
+  }
+
+  const result = await runChildCapture(getPnpmCommand(), ["--dir", repoDir, "exec", "prisma", "migrate", "deploy"], {
+    env: {
+      ...buildOrionChildEnv(process.env, profileDir),
+      DATABASE_URL: databaseUrl,
+      PRISMA_HIDE_UPDATE_MESSAGE: "1",
+    },
+  })
+
+  const summary = summarizeMigrateOutput(result.stdout, result.stderr)
+  return {
+    attempted: true,
+    ok: result.code === 0,
+    exitCode: result.code,
+    message: summary,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  }
+}
+
 async function printChannelStatus(repoDir, profileDir, channel) {
   const { profilePaths, envMap } = await loadProfileEnvMap(profileDir)
   let checks = []
@@ -975,17 +1022,14 @@ async function printChannelStatus(repoDir, profileDir, channel) {
 
   const errors = checks.filter((c) => c.level === "error").length
   const warnings = checks.filter((c) => c.level === "warn").length
-  console.log(`Orion Channel Status (${channel})`)
-  console.log("=".repeat(24 + channel.length))
-  console.log(`Repo:    ${repoDir}`)
-  console.log(`Profile: ${profilePaths.profileDir}`)
-  console.log("")
-  for (const check of checks) {
-    console.log(`${testIcon(check.level)} ${check.label} - ${check.detail}`)
+  return {
+    channel,
+    repoDir,
+    profileDir: profilePaths.profileDir,
+    checks,
+    errors,
+    warnings,
   }
-  console.log("")
-  console.log(`Summary: ${errors} errors, ${warnings} warnings`)
-  return { errors, warnings }
 }
 
 async function handleSelfTest(repoOverride, profileOverride, devMode = false, rest = []) {
@@ -997,14 +1041,48 @@ async function handleSelfTest(repoOverride, profileOverride, devMode = false, re
   const repoDir = await resolveRepoDir(repoOverride)
   const profileDir = await resolveProfileDir(profileOverride, devMode)
   let appliedFixes = []
+  let migration = null
   if (options.fix) {
     const fixResult = await applySelfTestFixes(repoDir, profileDir)
     appliedFixes = fixResult.fixes
+  }
+  if (options.migrate) {
+    try {
+      migration = await runProfileDbMigrationPreflight(repoDir, profileDir, "self-test --migrate")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      migration = {
+        attempted: true,
+        ok: false,
+        message,
+        stdout: "",
+        stderr: message,
+      }
+    }
   }
   const { checks, profilePaths } = await collectSelfTestChecks(repoDir, profileDir)
 
   const errors = checks.filter((c) => c.level === "error").length
   const warnings = checks.filter((c) => c.level === "warn").length
+  const summary = { errors, warnings }
+  const output = {
+    command: "self-test",
+    repoDir,
+    profileDir: profilePaths.profileDir,
+    checks,
+    summary,
+    fixes: {
+      requested: options.fix,
+      applied: appliedFixes,
+    },
+    migration: options.migrate ? migration : null,
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(output, null, 2))
+    const migrationFailed = options.migrate && migration && !migration.ok
+    process.exit(errors > 0 || migrationFailed ? 1 : 0)
+  }
 
   console.log("Orion Self-Test")
   console.log("===============")
@@ -1018,6 +1096,18 @@ async function handleSelfTest(repoOverride, profileOverride, devMode = false, re
 
   console.log("")
   console.log(`Summary: ${errors} errors, ${warnings} warnings`)
+  if (options.migrate && migration) {
+    console.log("")
+    if (migration.ok) {
+      console.log(`DB Migration: ${migration.message}`)
+    } else {
+      console.log(`DB Migration: failed (${migration.message})`)
+      const preview = String(migration.stderr || migration.stdout || "").trim()
+      if (preview) {
+        console.log(preview)
+      }
+    }
+  }
   if (options.fix) {
     console.log("")
     if (appliedFixes.length > 0) {
@@ -1036,7 +1126,8 @@ async function handleSelfTest(repoOverride, profileOverride, devMode = false, re
     console.log("- `orion all` (start Orion)")
   }
 
-  process.exit(errors > 0 ? 1 : 0)
+  const migrationFailed = options.migrate && migration && !migration.ok
+  process.exit(errors > 0 || migrationFailed ? 1 : 0)
 }
 
 async function resolveRepoDirWithAutoDetect(repoOverride) {
@@ -1323,11 +1414,36 @@ async function handleChannelsCommand(repoOverride, profileOverride, devMode, res
       const repoDir = await resolveRepoDir(repoOverride)
       const profileDir = await resolveProfileDir(profileOverride, devMode)
       await ensureProfileBootstrap(repoDir, profileDir)
-      const summary = await printChannelStatus(repoDir, profileDir, channel)
-      process.exit(summary.errors > 0 ? 1 : 0)
+      const status = await printChannelStatus(repoDir, profileDir, channel)
+      if (parsed.json) {
+        console.log(JSON.stringify({
+          command: "channels status",
+          channel: status.channel,
+          repoDir: status.repoDir,
+          profileDir: status.profileDir,
+          checks: status.checks,
+          summary: {
+            errors: status.errors,
+            warnings: status.warnings,
+          },
+        }, null, 2))
+      } else {
+        console.log(`Orion Channel Status (${channel})`)
+        console.log("=".repeat(24 + channel.length))
+        console.log(`Repo:    ${repoDir}`)
+        console.log(`Profile: ${status.profileDir}`)
+        console.log("")
+        for (const check of status.checks) {
+          console.log(`${testIcon(check.level)} ${check.label} - ${check.detail}`)
+        }
+        console.log("")
+        console.log(`Summary: ${status.errors} errors, ${status.warnings} warnings`)
+      }
+      process.exit(status.errors > 0 ? 1 : 0)
       return
     }
-    await handleSelfTest(repoOverride, profileOverride, devMode, remainingPositionals)
+    const passthroughArgs = parsed.json ? [...remainingPositionals, "--json"] : remainingPositionals
+    await handleSelfTest(repoOverride, profileOverride, devMode, passthroughArgs)
     return
   }
 

@@ -127,7 +127,19 @@ describe("global orion CLI helpers", () => {
       channel: "whatsapp",
       mode: "qr",
       help: false,
+      json: false,
       positionals: ["login", "--non-interactive", "--provider", "groq"],
+    })
+  })
+
+  it("parses channels status --json without swallowing other args", () => {
+    const parsed = parseChannelsArgs(["status", "--channel", "telegram", "--json", "--verbose"])
+    expect(parsed).toEqual({
+      channel: "telegram",
+      mode: null,
+      help: false,
+      json: true,
+      positionals: ["status", "--verbose"],
     })
   })
 
@@ -143,9 +155,11 @@ describe("global orion CLI helpers", () => {
   })
 
   it("parses self-test flags without swallowing extra args", () => {
-    expect(parseSelfTestArgs(["--fix", "--help", "--foo"])).toEqual({
+    expect(parseSelfTestArgs(["--fix", "--migrate", "--json", "--help", "--foo"])).toEqual({
       fix: true,
+      migrate: true,
       help: true,
+      json: true,
       positionals: ["--foo"],
     })
   })

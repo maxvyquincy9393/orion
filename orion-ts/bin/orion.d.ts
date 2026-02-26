@@ -15,10 +15,13 @@ export function parseChannelsArgs(argv: string[]): {
   mode: string | null
   positionals: string[]
   help: boolean
+  json: boolean
 }
 export function parseSelfTestArgs(argv: string[]): {
   fix: boolean
+  migrate: boolean
   help: boolean
+  json: boolean
   positionals: string[]
 }
 export function getProfilePaths(profileDir: string): {

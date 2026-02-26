@@ -470,3 +470,20 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `src/cli/__tests__/orion-global.test.ts` (`isProfileEnvLikelyConfigured` helper for smart entrypoint heuristics)
 - Documentation updates:
   - `docs/platform/global-cli.md` (bare `orion` smart entrypoint + auto-migrate preflight notes)
+
+## Follow-up Notes (pass 28)
+
+- CLI support/automation parity improvements:
+  - added `--json` output mode for:
+    - `orion self-test`
+    - `orion status`
+    - `orion channels status --channel <name>`
+  - added `--migrate` option to `orion self-test` / `orion status`
+    - runs profile-scoped `prisma migrate deploy` preflight and includes result in output
+    - combines cleanly with `--fix` and `--json` (support-friendly repair workflow)
+- Channel status behavior:
+  - `orion channels status --json` now forwards JSON mode to global self-test when no explicit channel is selected
+- Added/extended tests:
+  - `src/cli/__tests__/orion-global.test.ts` (`parseSelfTestArgs` and `parseChannelsArgs` coverage for `--migrate` / `--json`)
+- Documentation updates:
+  - `docs/platform/global-cli.md` (`--json`, `--migrate`, machine-readable status examples)
