@@ -87,4 +87,27 @@ describe("onboard cli helpers", () => {
     expect(text).toContain("Linked Devices")
     expect(text).toContain("WHATSAPP_MODE=baileys")
   })
+
+  it("uses global `orion` command hints when wrapper env is present", () => {
+    const commands = __onboardTestUtils.defaultNextStepCommands({
+      ORION_ENV_FILE: "C:\\Users\\test\\.orion\\profiles\\default\\.env",
+    } as any)
+
+    const steps = __onboardTestUtils.buildNextSteps(
+      {
+        channel: "whatsapp",
+        provider: "groq",
+        updates: {
+          WHATSAPP_ENABLED: "true",
+          WHATSAPP_MODE: "baileys",
+        },
+      },
+      commands,
+    )
+
+    const text = steps.join("\n")
+    expect(text).toContain("`orion doctor`")
+    expect(text).toContain("`orion all`")
+    expect(text).not.toContain("`pnpm all`")
+  })
 })

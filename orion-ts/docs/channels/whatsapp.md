@@ -38,6 +38,12 @@ orion self-test
 orion wa scan
 ```
 
+Non-interactive (scriptable) variant:
+
+```bash
+orion wa scan --yes --provider groq
+```
+
 This keeps WhatsApp auth/session files under your Orion profile state dir (for example `~/.orion/profiles/default/.orion/whatsapp-auth`) instead of the repo root.
 
 or use the general wizard:
@@ -47,7 +53,8 @@ pnpm quickstart
 ```
 
 1. Run Orion:
-   - `pnpm all`
+   - repo mode: `pnpm all`
+   - global wrapper mode: `orion all`
 2. Wait for WhatsApp QR code in terminal.
 3. On your phone:
    - WhatsApp -> Linked Devices -> Link a Device

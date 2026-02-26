@@ -335,3 +335,20 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
 - Validation:
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `21` test files passed / `80` tests passed
+
+## Follow-up Notes (pass 22)
+
+- Improved beginner/non-interactive WhatsApp QR onboarding for OpenClaw-style global CLI usage:
+  - `orion wa scan --yes --provider groq` is now truly non-interactive (skips optional prompts, uses defaults, writes env directly).
+  - global wrapper now forwards extra args after `orion wa scan` / `orion wa cloud` to underlying onboarding scripts.
+- Fixed onboarding UX mismatch when called from global `orion` wrapper:
+  - next-step instructions now suggest `orion doctor` / `orion all` / `orion onboard` when wrapper env is detected.
+  - removed duplicated/conflicting `pnpm all` QR step wording in WhatsApp QR next steps.
+- Added tests/docs:
+  - `src/cli/__tests__/onboard.test.ts` (global-wrapper command hints).
+  - `docs/platform/global-cli.md` (scriptable `orion wa scan --yes --provider groq` example).
+  - `docs/channels/whatsapp.md` (non-interactive variant + repo vs global wrapper start commands).
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `21` test files passed / `81` tests passed
+  - real command smoke (outside sandbox): `orion wa scan --yes --provider groq --repo ... --profile .tmp-orion-profile` exits 0 and writes WhatsApp QR config without prompts

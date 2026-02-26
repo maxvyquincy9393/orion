@@ -770,12 +770,13 @@ async function handleCommand(repoOverride, profileOverride, positionals) {
 
   if (command === "wa") {
     const sub = (rest[0] ?? "").toLowerCase()
+    const waArgs = rest.slice(1)
     if (sub === "scan") {
-      await runPnpmScript(repoDir, profileDir, "wa:scan")
+      await runPnpmScript(repoDir, profileDir, "wa:scan", waArgs)
       return
     }
     if (sub === "cloud") {
-      await runPnpmScript(repoDir, profileDir, "wa:cloud")
+      await runPnpmScript(repoDir, profileDir, "wa:cloud", waArgs)
       return
     }
     throw new Error("Unknown `orion wa` subcommand. Use `orion wa scan` or `orion wa cloud`.")

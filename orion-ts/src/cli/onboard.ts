@@ -38,6 +38,12 @@ interface QuickstartPlan {
   updates: Record<string, string>
 }
 
+interface NextStepCommands {
+  doctor: string
+  all: string
+  onboard: string
+}
+
 const CHANNEL_CHOICES: ReadonlyArray<{ key: ChannelChoice; label: string; description: string }> = [
   { key: "telegram", label: "Telegram (recommended)", description: "Fastest path for phone testing via Bot API" },
   { key: "discord", label: "Discord", description: "Good for DMs or one allowlisted server channel" },
@@ -75,7 +81,7 @@ function printHelp(): void {
   console.log("  --provider <name>   Preselect an AI provider")
   console.log("  --print-only        Do not write .env; print the planned changes")
   console.log("  --write             Force writing .env without print-only")
-  console.log("  --yes               Skip final confirmation prompt")
+  console.log("  --yes               Non-interactive mode: use defaults, skip optional prompts, and skip final confirmation")
   console.log("  --help, -h          Show this help")
 }
 
@@ -309,24 +315,43 @@ function redactSecretValue(key: string, value: string): string {
   return `${value.slice(0, 4)}***${value.slice(-2)}`
 }
 
-function buildNextSteps(plan: QuickstartPlan): string[] {
+function defaultNextStepCommands(env: NodeJS.ProcessEnv = process.env): NextStepCommands {
+  const usingGlobalWrapper = [env.ORION_ENV_FILE, env.ORION_WORKSPACE, env.ORION_STATE_DIR]
+    .some((value) => typeof value === "string" && value.trim().length > 0)
+
+  if (usingGlobalWrapper) {
+    return {
+      doctor: "orion doctor",
+      all: "orion all",
+      onboard: "orion onboard",
+    }
+  }
+
+  return {
+    doctor: "pnpm doctor",
+    all: "pnpm all",
+    onboard: "pnpm onboard",
+  }
+}
+
+function buildNextSteps(plan: QuickstartPlan, commands: NextStepCommands = defaultNextStepCommands()): string[] {
   const lines: string[] = []
 
   lines.push("Next steps:")
-  lines.push("1. Run `pnpm doctor` to validate config + ports.")
-  lines.push("2. Start Orion with channels: `pnpm dev -- --mode all`")
+  lines.push(`1. Run \`${commands.doctor}\` to validate config + ports.`)
+  lines.push(`2. Start Orion with channels: \`${commands.all}\``)
 
   if (plan.channel === "telegram") {
     lines.push("3. Open Telegram on your phone and DM your bot.")
     lines.push("4. Run `/start`, `/id`, `/ping`, then send a normal message.")
     if (!plan.updates.TELEGRAM_CHAT_ID) {
-      lines.push("5. Copy `/id` result into `TELEGRAM_CHAT_ID` (allowlist) and rerun `pnpm onboard`.")
+      lines.push(`5. Copy \`/id\` result into \`TELEGRAM_CHAT_ID\` (allowlist) and rerun \`${commands.onboard}\`.`)
     }
   } else if (plan.channel === "discord") {
     lines.push("3. Enable Message Content Intent in Discord Developer Portal.")
     lines.push("4. DM the bot (or use an allowlisted channel) and run `!help`, `!id`, `!ping`.")
     if (!plan.updates.DISCORD_CHANNEL_ID) {
-      lines.push("5. If using a server channel, add the `!id` result to `DISCORD_CHANNEL_ID` and rerun `pnpm onboard`.")
+      lines.push(`5. If using a server channel, add the \`!id\` result to \`DISCORD_CHANNEL_ID\` and rerun \`${commands.onboard}\`.`)
     }
   } else if (plan.channel === "whatsapp") {
     const isCloudMode = (plan.updates.WHATSAPP_MODE ?? "").trim().toLowerCase() === "cloud"
@@ -335,17 +360,17 @@ function buildNextSteps(plan: QuickstartPlan): string[] {
       lines.push("4. In Meta App dashboard, set verify token to `WHATSAPP_CLOUD_VERIFY_TOKEN` and subscribe to `messages` webhook events.")
       lines.push("5. Run `/help`, `/id`, `/ping` from your WhatsApp test phone, then send a normal message.")
       if (!plan.updates.WHATSAPP_CLOUD_ALLOWED_WA_IDS) {
-        lines.push("6. Optional hardening: copy `/id` result into `WHATSAPP_CLOUD_ALLOWED_WA_IDS` and rerun `pnpm onboard`.")
+        lines.push(`6. Optional hardening: copy \`/id\` result into \`WHATSAPP_CLOUD_ALLOWED_WA_IDS\` and rerun \`${commands.onboard}\`.`)
       }
     } else {
-      lines.push("3. Run `pnpm all` and wait for the WhatsApp QR code in terminal.")
+      lines.push("3. Wait for the WhatsApp QR code in terminal.")
       lines.push("4. On your phone: WhatsApp -> Linked Devices -> Link a Device, then scan the QR.")
       lines.push("5. Send `/help`, `/id`, `/ping`, then a normal message from a test chat.")
       lines.push("6. If QR does not appear, make sure `baileys` is installed and `WHATSAPP_MODE=baileys`.")
     }
   } else {
     lines.push("3. Open `http://127.0.0.1:8080` on this machine and test WebChat.")
-    lines.push("4. For phone access, set up Telegram, Discord, or WhatsApp later with `pnpm onboard`.")
+    lines.push(`4. For phone access, set up Telegram, Discord, or WhatsApp later with \`${commands.onboard}\`.`)
   }
 
   lines.push("")
@@ -459,18 +484,59 @@ async function collectQuickstartPlan(
   args: OnboardArgs,
   envValues: Record<string, string>,
 ): Promise<QuickstartPlan> {
-  const rl = readline.createInterface({ input, output })
+  const nonInteractive = args.yes
+  const rl = nonInteractive ? null : readline.createInterface({ input, output })
   try {
     buildQuickstartBanner()
+    if (nonInteractive) {
+      console.log("")
+      console.log("Non-interactive mode enabled (`--yes`): using defaults and skipping optional prompts.")
+    }
 
-    const channel = args.channel ?? await askChoice(rl, "Choose your first test channel", CHANNEL_CHOICES)
-    const provider = args.provider ?? await askChoice(rl, "Choose your primary model provider", PROVIDER_CHOICES)
+    const choose = async <T extends string>(
+      selected: T | null,
+      prompt: string,
+      choices: ReadonlyArray<{ key: T; label: string; description: string }>,
+    ): Promise<T> => {
+      if (selected) {
+        return selected
+      }
+      if (nonInteractive) {
+        return choices[0].key
+      }
+      return askChoice(rl!, prompt, choices)
+    }
+
+    const askInputMaybe = async (
+      label: string,
+      opts: {
+        current?: string | null
+        placeholder?: string
+        optional?: boolean
+        defaultValue?: string
+      } = {},
+    ): Promise<string | null> => {
+      if (nonInteractive) {
+        return opts.defaultValue ?? null
+      }
+      return askInput(rl!, label, opts)
+    }
+
+    const askYesNoMaybe = async (prompt: string, defaultYes = true): Promise<boolean> => {
+      if (nonInteractive) {
+        return defaultYes
+      }
+      return askYesNo(rl!, prompt, defaultYes)
+    }
+
+    const channel = await choose(args.channel, "Choose your first test channel", CHANNEL_CHOICES)
+    const provider = await choose(args.provider, "Choose your primary model provider", PROVIDER_CHOICES)
 
     const updates: Record<string, string> = {}
 
     const providerKey = providerEnvKey(provider)
     if (provider === "ollama") {
-      const baseUrl = await askInput(rl, "OLLAMA_BASE_URL", {
+      const baseUrl = await askInputMaybe("OLLAMA_BASE_URL", {
         current: envValues.OLLAMA_BASE_URL ?? null,
         placeholder: "default=http://localhost:11434",
         defaultValue: envValues.OLLAMA_BASE_URL || "http://localhost:11434",
@@ -479,7 +545,7 @@ async function collectQuickstartPlan(
         updates[providerKey] = baseUrl
       }
     } else {
-      const apiKey = await askInput(rl, providerKey, {
+      const apiKey = await askInputMaybe(providerKey, {
         current: envValues[providerKey] ?? null,
         optional: true,
         placeholder: "leave blank to keep current / set later",
@@ -490,12 +556,12 @@ async function collectQuickstartPlan(
     }
 
     if (channel === "telegram") {
-      const botToken = await askInput(rl, "TELEGRAM_BOT_TOKEN", {
+      const botToken = await askInputMaybe("TELEGRAM_BOT_TOKEN", {
         current: envValues.TELEGRAM_BOT_TOKEN ?? null,
         optional: true,
         placeholder: "from @BotFather (leave blank to set later)",
       })
-      const chatId = await askInput(rl, "TELEGRAM_CHAT_ID", {
+      const chatId = await askInputMaybe("TELEGRAM_CHAT_ID", {
         current: envValues.TELEGRAM_CHAT_ID ?? null,
         optional: true,
         placeholder: "allowlist chat id (optional now, use /id later)",
@@ -507,12 +573,12 @@ async function collectQuickstartPlan(
         updates.TELEGRAM_CHAT_ID = chatId
       }
     } else if (channel === "discord") {
-      const botToken = await askInput(rl, "DISCORD_BOT_TOKEN", {
+      const botToken = await askInputMaybe("DISCORD_BOT_TOKEN", {
         current: envValues.DISCORD_BOT_TOKEN ?? null,
         optional: true,
         placeholder: "Discord Developer Portal token (leave blank to set later)",
       })
-      const channelId = await askInput(rl, "DISCORD_CHANNEL_ID", {
+      const channelId = await askInputMaybe("DISCORD_CHANNEL_ID", {
         current: envValues.DISCORD_CHANNEL_ID ?? null,
         optional: true,
         placeholder: "allowlist channel id (optional; DMs work without it)",
@@ -525,17 +591,17 @@ async function collectQuickstartPlan(
       }
     } else if (channel === "whatsapp") {
       updates.WHATSAPP_ENABLED = "true"
-      const whatsAppMode = args.whatsappMode ?? await askChoice(rl, "Choose WhatsApp setup mode", WHATSAPP_MODE_CHOICES)
+      const whatsAppMode = await choose(args.whatsappMode, "Choose WhatsApp setup mode", WHATSAPP_MODE_CHOICES)
 
       if (whatsAppMode === "scan") {
         updates.WHATSAPP_MODE = "baileys"
       } else {
-        const accessToken = await askInput(rl, "WHATSAPP_CLOUD_ACCESS_TOKEN", {
+        const accessToken = await askInputMaybe("WHATSAPP_CLOUD_ACCESS_TOKEN", {
           current: envValues.WHATSAPP_CLOUD_ACCESS_TOKEN ?? null,
           optional: true,
           placeholder: "Meta permanent/long-lived access token (leave blank to set later)",
         })
-        const phoneNumberId = await askInput(rl, "WHATSAPP_CLOUD_PHONE_NUMBER_ID", {
+        const phoneNumberId = await askInputMaybe("WHATSAPP_CLOUD_PHONE_NUMBER_ID", {
           current: envValues.WHATSAPP_CLOUD_PHONE_NUMBER_ID ?? null,
           optional: true,
           placeholder: "from Meta WhatsApp Cloud API dashboard",
@@ -543,17 +609,17 @@ async function collectQuickstartPlan(
         const verifyTokenDefault =
           envValues.WHATSAPP_CLOUD_VERIFY_TOKEN
           || crypto.randomUUID().replaceAll("-", "")
-        const verifyToken = await askInput(rl, "WHATSAPP_CLOUD_VERIFY_TOKEN", {
+        const verifyToken = await askInputMaybe("WHATSAPP_CLOUD_VERIFY_TOKEN", {
           current: envValues.WHATSAPP_CLOUD_VERIFY_TOKEN ?? null,
           placeholder: "used by Meta webhook verification (auto-generated if blank)",
           defaultValue: verifyTokenDefault,
         })
-        const allowlist = await askInput(rl, "WHATSAPP_CLOUD_ALLOWED_WA_IDS", {
+        const allowlist = await askInputMaybe("WHATSAPP_CLOUD_ALLOWED_WA_IDS", {
           current: envValues.WHATSAPP_CLOUD_ALLOWED_WA_IDS ?? null,
           optional: true,
           placeholder: "optional allowlist (comma/newline wa_id), use /id later",
         })
-        const apiVersion = await askInput(rl, "WHATSAPP_CLOUD_API_VERSION", {
+        const apiVersion = await askInputMaybe("WHATSAPP_CLOUD_API_VERSION", {
           current: envValues.WHATSAPP_CLOUD_API_VERSION ?? null,
           optional: true,
           placeholder: "default=v20.0",
@@ -579,8 +645,7 @@ async function collectQuickstartPlan(
       }
     }
 
-    const setAutoStartGateway = await askYesNo(
-      rl,
+    const setAutoStartGateway = await askYesNoMaybe(
       "Set AUTO_START_GATEWAY=true for `pnpm dev`",
       channel === "whatsapp" && updates.WHATSAPP_MODE === "cloud",
     )
@@ -590,7 +655,7 @@ async function collectQuickstartPlan(
 
     return { channel, provider, updates }
   } finally {
-    rl.close()
+    rl?.close()
   }
 }
 
@@ -669,6 +734,7 @@ export const __onboardTestUtils = {
   mergeEnvContent,
   providerEnvKey,
   buildNextSteps,
+  defaultNextStepCommands,
   parseEnvLineKey,
 }
 

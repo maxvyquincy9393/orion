@@ -76,6 +76,13 @@ orion wa scan
 orion all
 ```
 
+Scriptable quick setup (no prompts, uses defaults + QR mode):
+
+```bash
+orion wa scan --yes --provider groq
+orion all
+```
+
 Then scan QR from your phone:
 
 - WhatsApp -> Linked Devices -> Link a Device
