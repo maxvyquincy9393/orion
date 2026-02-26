@@ -40,6 +40,37 @@ export function buildWhatsAppSelfTestChecks(
   envMap: Record<string, string>,
   profilePaths: { profileDir: string; envPath: string; workspaceDir: string; stateDir: string },
 ): Array<{ level: "ok" | "warn" | "error"; label: string; detail: string }>
+export function summarizeWhatsAppBaileysCreds(rawCreds: unknown): {
+  parseable: boolean
+  paired: boolean
+  maskedJid: string | null
+  registered: boolean | null
+  hasIdentityMaterial: boolean
+}
+export function inspectWhatsAppBaileysAuthState(
+  authDir: string,
+  fsModule?: {
+    readdir: (path: string) => Promise<string[]>
+    readFile: (path: string, encoding: string) => Promise<string>
+    stat: (path: string) => Promise<{ mtime?: Date }>
+  },
+): Promise<{
+  authDir: string
+  exists: boolean
+  entryCount: number
+  credsPath: string
+  credsExists: boolean
+  credsMtime: string | null
+  readError: string | null
+  parseError: string | null
+  creds: {
+    parseable: boolean
+    paired: boolean
+    maskedJid: string | null
+    registered: boolean | null
+    hasIdentityMaterial: boolean
+  }
+}>
 export function buildTelegramSelfTestChecks(
   envMap: Record<string, string>,
 ): Array<{ level: "ok" | "warn" | "error"; label: string; detail: string }>

@@ -9,6 +9,7 @@ import {
   buildTelegramSelfTestChecks,
   buildWebchatSelfTestChecks,
   buildWhatsAppSelfTestChecks,
+  inspectWhatsAppBaileysAuthState,
   getPnpmCommand,
   getNamedProfileDir,
   isLikelyProfileName,
@@ -22,6 +23,7 @@ import {
   getProfilePaths,
   isOrionRepoDir,
   resolveProfileSelector,
+  summarizeWhatsAppBaileysCreds,
   shouldUseShellForCommand,
   shouldInvokeCli,
 } from "../../../bin/orion.js"
@@ -209,6 +211,14 @@ describe("global orion CLI helpers", () => {
     })
   })
 
+  it("parses dotenv content with UTF-8 BOM prefix (Windows Set-Content)", () => {
+    const parsed = parseEnvContentLoose("\uFEFFWHATSAPP_ENABLED=true\nWHATSAPP_MODE=baileys\n")
+    expect(parsed).toMatchObject({
+      WHATSAPP_ENABLED: "true",
+      WHATSAPP_MODE: "baileys",
+    })
+  })
+
   it("reports WhatsApp Cloud config errors when required keys are missing", () => {
     const checks = buildWhatsAppSelfTestChecks(
       {
@@ -233,6 +243,76 @@ describe("global orion CLI helpers", () => {
 
     expect(checks.find((check) => check.label === "WhatsApp Mode")?.detail).toContain("QR Scan")
     expect(checks.some((check) => check.label === "WhatsApp Cloud Config")).toBe(false)
+  })
+
+  it("summarizes paired WhatsApp Baileys creds without exposing raw jid", () => {
+    const summary = summarizeWhatsAppBaileysCreds({
+      me: { id: "628123456789:12@s.whatsapp.net" },
+      registered: true,
+      advSecretKey: "secret",
+      registrationId: 123,
+    })
+
+    expect(summary).toMatchObject({
+      parseable: true,
+      paired: true,
+      registered: true,
+      hasIdentityMaterial: true,
+    })
+    expect(summary.maskedJid).toContain("@s.whatsapp.net")
+    expect(summary.maskedJid).not.toContain("628123456789")
+  })
+
+  it("inspects WhatsApp auth dir runtime state from creds.json", async () => {
+    const authState = await inspectWhatsAppBaileysAuthState(
+      "C:\\Users\\me\\.orion\\profiles\\default\\.orion\\whatsapp-auth",
+      {
+        readdir: vi.fn(async () => ["creds.json", "session-foo.json"]),
+        readFile: vi.fn(async () => JSON.stringify({
+          me: { id: "628123456789:12@s.whatsapp.net" },
+          registered: true,
+          advSecretKey: "secret",
+        })),
+        stat: vi.fn(async () => ({ mtime: new Date("2026-02-26T16:00:00.000Z") })),
+      } as any,
+    )
+
+    expect(authState.exists).toBe(true)
+    expect(authState.entryCount).toBe(2)
+    expect(authState.credsExists).toBe(true)
+    expect(authState.creds.paired).toBe(true)
+    expect(authState.creds.maskedJid).toContain("@s.whatsapp.net")
+    expect(authState.credsMtime).toBe("2026-02-26T16:00:00.000Z")
+    expect(authState.parseError).toBeNull()
+    expect(authState.readError).toBeNull()
+  })
+
+  it("handles missing or malformed WhatsApp auth state without throwing", async () => {
+    const missing = await inspectWhatsAppBaileysAuthState(
+      "C:\\Users\\me\\.orion\\profiles\\default\\.orion\\whatsapp-auth",
+      {
+        readdir: vi.fn(async () => {
+          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+        }),
+        readFile: vi.fn(),
+        stat: vi.fn(),
+      } as any,
+    )
+    expect(missing.exists).toBe(false)
+    expect(missing.readError).toBeNull()
+
+    const malformed = await inspectWhatsAppBaileysAuthState(
+      "C:\\Users\\me\\.orion\\profiles\\default\\.orion\\whatsapp-auth",
+      {
+        readdir: vi.fn(async () => ["creds.json"]),
+        readFile: vi.fn(async () => "{bad json"),
+        stat: vi.fn(async () => ({ mtime: new Date("2026-02-26T16:00:00.000Z") })),
+      } as any,
+    )
+    expect(malformed.exists).toBe(true)
+    expect(malformed.credsExists).toBe(true)
+    expect(malformed.parseError).toBeTruthy()
+    expect(malformed.creds.paired).toBe(false)
   })
 
   it("reports Telegram and Discord defaults as DM/private-safe warnings", () => {

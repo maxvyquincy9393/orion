@@ -498,3 +498,20 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `src/cli/__tests__/orion-global.test.ts` (`parseDashboardArgs`)
 - Documentation updates:
   - `docs/platform/global-cli.md` (`orion dashboard --open` examples)
+
+## Follow-up Notes (pass 30)
+
+- OpenClaw-style CLI status parity (channel runtime hints):
+  - `orion channels status --channel whatsapp` now augments readiness checks with runtime auth-state inspection for Baileys QR mode:
+    - auth dir existence / file count
+    - `creds.json` presence + parseability
+    - paired-session hint via masked WhatsApp JID (without exposing raw account id)
+    - machine-readable `runtime` payload in `--json` output
+  - Cloud mode status now also reports allowlist posture (`WHATSAPP_CLOUD_ALLOWED_WA_IDS`) in channel status output
+- Windows profile `.env` parsing hardening:
+  - `parseEnvContentLoose()` now strips UTF-8 BOM at file start / line start (common when users edit with PowerShell `Set-Content` or some editors)
+  - prevents false negatives in CLI readiness/status checks (e.g. `WHATSAPP_ENABLED=true` being ignored)
+- Help text polish:
+  - `orion channels help` now clarifies `channels status --channel ...` is channel-focused status with runtime hints where supported, while bare `channels status` remains global self-test
+- Added/extended tests:
+  - `src/cli/__tests__/orion-global.test.ts` (WhatsApp auth-state inspection + creds summary helpers)

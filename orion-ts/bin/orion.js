@@ -508,9 +508,9 @@ function buildOrionChildEnv(parentEnv, profileDir) {
 
 export function parseEnvContentLoose(content) {
   const out = {}
-  const normalized = String(content ?? "").replace(/\r\n/g, "\n")
+  const normalized = String(content ?? "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
   for (const rawLine of normalized.split("\n")) {
-    const line = rawLine.trim()
+    const line = rawLine.replace(/^\uFEFF/, "").trim()
     if (!line || line.startsWith("#")) {
       continue
     }
@@ -640,6 +640,239 @@ export function buildWhatsAppSelfTestChecks(envMap, profilePaths) {
   }
 
   return checks
+}
+
+function isNodeErrorCode(error, code) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === code)
+}
+
+function asRecordObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  return value
+}
+
+function maskMiddleToken(value) {
+  const raw = typeof value === "string" ? value.trim() : ""
+  if (!raw) {
+    return null
+  }
+  if (raw.length <= 2) {
+    return `${raw[0] ?? "*"}*`
+  }
+  if (raw.length <= 6) {
+    return `${raw.slice(0, 1)}***${raw.slice(-1)}`
+  }
+  return `${raw.slice(0, 3)}***${raw.slice(-2)}`
+}
+
+function maskWhatsAppJid(jid) {
+  const raw = typeof jid === "string" ? jid.trim() : ""
+  if (!raw) {
+    return null
+  }
+  const atIndex = raw.indexOf("@")
+  const localPart = atIndex >= 0 ? raw.slice(0, atIndex) : raw
+  const domainPart = atIndex >= 0 ? raw.slice(atIndex + 1) : ""
+  const [primaryId, ...deviceParts] = localPart.split(":")
+  const maskedPrimary = maskMiddleToken(primaryId) ?? "***"
+  const maskedLocal = deviceParts.length > 0
+    ? [maskedPrimary, ...deviceParts].join(":")
+    : maskedPrimary
+  return domainPart ? `${maskedLocal}@${domainPart}` : maskedLocal
+}
+
+function formatStatusTimestamp(value) {
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+    return null
+  }
+  return value.toISOString()
+}
+
+export function summarizeWhatsAppBaileysCreds(rawCreds) {
+  const root = asRecordObject(rawCreds)
+  if (!root) {
+    return {
+      parseable: false,
+      paired: false,
+      maskedJid: null,
+      registered: null,
+      hasIdentityMaterial: false,
+    }
+  }
+
+  const me = asRecordObject(root.me)
+  const rawJid = typeof me?.id === "string" && me.id.trim().length > 0 ? me.id.trim() : null
+  const advSecretKey = typeof root.advSecretKey === "string" ? root.advSecretKey.trim() : ""
+  const registrationId = typeof root.registrationId === "number" && Number.isFinite(root.registrationId)
+  const noiseKey = asRecordObject(root.noiseKey)
+
+  return {
+    parseable: true,
+    paired: Boolean(rawJid),
+    maskedJid: rawJid ? maskWhatsAppJid(rawJid) : null,
+    registered: typeof root.registered === "boolean" ? root.registered : null,
+    hasIdentityMaterial: Boolean(advSecretKey || registrationId || noiseKey),
+  }
+}
+
+export async function inspectWhatsAppBaileysAuthState(authDir, fsModule = fs) {
+  const credsPath = path.join(authDir, "creds.json")
+  const result = {
+    authDir,
+    exists: false,
+    entryCount: 0,
+    credsPath,
+    credsExists: false,
+    credsMtime: null,
+    readError: null,
+    parseError: null,
+    creds: summarizeWhatsAppBaileysCreds(null),
+  }
+
+  let entries = []
+  try {
+    const rawEntries = await fsModule.readdir(authDir)
+    entries = Array.isArray(rawEntries) ? rawEntries.map((entry) => String(entry)) : []
+    result.exists = true
+    result.entryCount = entries.length
+  } catch (error) {
+    if (isNodeErrorCode(error, "ENOENT")) {
+      return result
+    }
+    result.readError = error instanceof Error ? error.message : String(error)
+    return result
+  }
+
+  result.credsExists = entries.some((entry) => entry.toLowerCase() === "creds.json")
+  if (!result.credsExists) {
+    return result
+  }
+
+  try {
+    const raw = await fsModule.readFile(credsPath, "utf-8")
+    result.creds = summarizeWhatsAppBaileysCreds(JSON.parse(raw))
+  } catch (error) {
+    result.parseError = error instanceof Error ? error.message : String(error)
+  }
+
+  try {
+    const stat = await fsModule.stat(credsPath)
+    result.credsMtime = formatStatusTimestamp(stat?.mtime)
+  } catch (error) {
+    if (!isNodeErrorCode(error, "ENOENT")) {
+      const message = error instanceof Error ? error.message : String(error)
+      result.readError = result.readError ?? `Failed to stat creds.json: ${message}`
+    }
+  }
+
+  return result
+}
+
+async function buildWhatsAppChannelStatusChecks(envMap, profilePaths) {
+  const checks = buildWhatsAppSelfTestChecks(envMap, profilePaths)
+  const enabled = isTruthyEnv(envMap.WHATSAPP_ENABLED ?? "")
+  const mode = (envMap.WHATSAPP_MODE ?? "baileys").trim().toLowerCase()
+
+  if (!enabled || (mode !== "baileys" && mode !== "cloud")) {
+    return { checks, runtime: null }
+  }
+
+  if (mode === "cloud") {
+    const allowlistRaw = (envMap.WHATSAPP_CLOUD_ALLOWED_WA_IDS ?? "").trim()
+    const allowlistCount = allowlistRaw
+      ? allowlistRaw.split(",").map((item) => item.trim()).filter(Boolean).length
+      : 0
+    checks.push({
+      level: allowlistCount > 0 ? "ok" : "warn",
+      label: "WhatsApp Cloud Allowlist",
+      detail: allowlistCount > 0
+        ? `${allowlistCount} allowed sender(s) configured`
+        : "No WHATSAPP_CLOUD_ALLOWED_WA_IDS set (inbound access is open to senders who can message the business number)",
+    })
+    return {
+      checks,
+      runtime: {
+        mode: "cloud",
+        allowlistConfigured: allowlistCount > 0,
+        allowlistCount,
+      },
+    }
+  }
+
+  const authDir = path.join(profilePaths.stateDir, "whatsapp-auth")
+  const auth = await inspectWhatsAppBaileysAuthState(authDir)
+
+  if (auth.readError) {
+    checks.push({
+      level: "error",
+      label: "WhatsApp Auth Runtime",
+      detail: `Failed to inspect auth state dir: ${auth.readError}`,
+    })
+  } else if (!auth.exists) {
+    checks.push({
+      level: "warn",
+      label: "WhatsApp Session",
+      detail: "Auth state dir does not exist yet (start `orion all` to generate QR login state)",
+    })
+  } else {
+    checks.push({
+      level: "ok",
+      label: "WhatsApp Auth Files",
+      detail: `${auth.entryCount} file(s) found in auth state dir`,
+    })
+
+    if (!auth.credsExists) {
+      checks.push({
+        level: "warn",
+        label: "WhatsApp Session",
+        detail: "Auth dir exists but creds.json is missing (run `orion all` and scan QR, or clear stale auth dir)",
+      })
+    } else if (auth.parseError) {
+      checks.push({
+        level: "error",
+        label: "WhatsApp Session",
+        detail: `creds.json is unreadable (${auth.parseError})`,
+      })
+    } else if (auth.creds.paired) {
+      const identity = auth.creds.maskedJid ? ` as ${auth.creds.maskedJid}` : ""
+      const updated = auth.credsMtime ? ` (creds updated ${auth.credsMtime})` : ""
+      checks.push({
+        level: "ok",
+        label: "WhatsApp Session",
+        detail: `Paired session detected${identity}${updated}`,
+      })
+    } else {
+      checks.push({
+        level: "warn",
+        label: "WhatsApp Session",
+        detail: auth.creds.hasIdentityMaterial
+          ? "Auth keys exist but account is not paired yet (start `orion all` and scan QR)"
+          : "No usable WhatsApp credentials yet (start `orion all` and scan QR)",
+      })
+    }
+  }
+
+  return {
+    checks,
+    runtime: {
+      mode: "baileys",
+      auth: {
+        authDir: auth.authDir,
+        exists: auth.exists,
+        entryCount: auth.entryCount,
+        credsExists: auth.credsExists,
+        credsMtime: auth.credsMtime,
+        readError: auth.readError,
+        parseError: auth.parseError,
+        paired: auth.creds.paired,
+        maskedJid: auth.creds.maskedJid,
+        registered: auth.creds.registered,
+        hasIdentityMaterial: auth.creds.hasIdentityMaterial,
+      },
+    },
+  }
 }
 
 export function buildTelegramSelfTestChecks(envMap) {
@@ -1036,9 +1269,12 @@ async function runProfileDbMigrationPreflight(repoDir, profileDir, triggerComman
 async function printChannelStatus(repoDir, profileDir, channel) {
   const { profilePaths, envMap } = await loadProfileEnvMap(profileDir)
   let checks = []
+  let runtime = null
 
   if (channel === "whatsapp") {
-    checks = buildWhatsAppSelfTestChecks(envMap, profilePaths)
+    const result = await buildWhatsAppChannelStatusChecks(envMap, profilePaths)
+    checks = result.checks
+    runtime = result.runtime
   } else if (channel === "telegram") {
     checks = buildTelegramSelfTestChecks(envMap)
   } else if (channel === "discord") {
@@ -1058,6 +1294,7 @@ async function printChannelStatus(repoDir, profileDir, channel) {
     checks,
     errors,
     warnings,
+    runtime,
   }
 }
 
@@ -1464,7 +1701,8 @@ function printChannelsHelp() {
   console.log("Notes:")
   console.log("  - `channels login` maps to the existing Orion setup/login flows.")
   console.log("  - WhatsApp defaults to QR scan mode unless `--mode cloud` is provided.")
-  console.log("  - `channels status` currently reuses `orion status` (self-test readiness).")
+  console.log("  - `channels status --channel <name>` prints channel-focused readiness (and runtime auth/session hints where supported).")
+  console.log("  - `channels status` without `--channel` reuses `orion status` (global self-test).")
   console.log("  - `channels logs` currently reuses live foreground logs (`orion logs ...`).")
 }
 
@@ -1495,6 +1733,7 @@ async function handleChannelsCommand(repoOverride, profileOverride, devMode, res
           repoDir: status.repoDir,
           profileDir: status.profileDir,
           checks: status.checks,
+          runtime: status.runtime ?? null,
           summary: {
             errors: status.errors,
             warnings: status.warnings,

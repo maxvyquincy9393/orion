@@ -44,8 +44,11 @@ OpenClaw-style namespace equivalent:
 ```bash
 orion channels login --channel whatsapp
 orion channels status --channel whatsapp
+orion channels status --channel whatsapp --json
 orion channels logs --channel whatsapp
 ```
+
+`orion channels status --channel whatsapp` now reports runtime auth/session hints for QR mode (for example: auth dir missing, `creds.json` unreadable, or paired session detected), not just env readiness.
 
 Non-interactive (scriptable) variant:
 
