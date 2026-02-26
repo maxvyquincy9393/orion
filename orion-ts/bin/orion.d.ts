@@ -2,6 +2,9 @@ export function getCliConfigDir(): string
 export function getCliConfigPath(): string
 export function getProfilesRootDir(): string
 export function getDefaultProfileDir(): string
+export function getPnpmCommand(platform?: string): string
+export function shouldUseShellForCommand(command: string, platform?: string): boolean
+export function shouldInvokeCli(importMetaUrl: string, argv1?: string | null, platform?: string): boolean
 export function getProfilePaths(profileDir: string): {
   profileDir: string
   envPath: string

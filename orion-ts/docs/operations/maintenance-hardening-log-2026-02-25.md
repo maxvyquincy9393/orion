@@ -314,3 +314,24 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `21` test files passed / `77` tests passed
   - `node bin/orion.js self-test --repo . --profile .tmp-orion-profile` prints actionable report (sandbox: `EPERM`; escalated run reports `ENOENT` when `pnpm` is not on PATH in that shell)
+
+## Follow-up Notes (pass 21)
+
+- Global `orion` CLI Windows hardening + bug fixes from real end-to-end testing:
+  - fixed Windows direct-execution detection for npm shim/symlink/casing edge cases (`orion --help` no longer silently exits)
+  - wrapper now uses `pnpm.cmd` on Windows and plain `pnpm` elsewhere
+  - wrapper/self-test spawn helpers now enable `shell` only for Windows `.cmd/.bat` commands (fixes false `pnpm` failure in `orion self-test`)
+  - `orion profile init --repo ... --profile ...` and `orion init` with overrides no longer force-write `~/.orion/cli.json` (override stays per-command)
+- Added/extended tests:
+  - `src/cli/__tests__/orion-global.test.ts` (Windows invoke path, `pnpm.cmd`, shell-for-cmd rule)
+- Global CLI flow verified on Windows:
+  - `npm install -g .`
+  - `orion --help`
+  - `orion repo`
+  - `orion profile init --repo ... --profile .tmp-orion-profile`
+  - `orion self-test --repo ... --profile .tmp-orion-profile` (outside sandbox: `OK pnpm`)
+  - `orion doctor --repo ... --profile .tmp-orion-profile`
+  - `orion wa scan --repo ... --profile .tmp-orion-profile` starts WhatsApp QR wizard and shows provider prompt (interactive smoke)
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `21` test files passed / `80` tests passed

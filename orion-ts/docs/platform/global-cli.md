@@ -100,6 +100,8 @@ orion onboard -- --channel telegram --provider groq
 - provider/WhatsApp mode basics
 - `pnpm` availability on PATH (with a hint to reopen terminal if PATH is stale)
 
+`--repo` and `--profile` are one-shot overrides for the current command. They do not rewrite your saved default link/profile unless you run `orion link`.
+
 ## Current limitations (important)
 
 Phase 2 is still **repo-backed**:

@@ -4,11 +4,14 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   buildWhatsAppSelfTestChecks,
+  getPnpmCommand,
   parseOrionCliArgs,
   parseEnvContentLoose,
   findOrionRepoUpwards,
   getProfilePaths,
   isOrionRepoDir,
+  shouldUseShellForCommand,
+  shouldInvokeCli,
 } from "../../../bin/orion.js"
 
 describe("global orion CLI helpers", () => {
@@ -37,6 +40,28 @@ describe("global orion CLI helpers", () => {
       positionals: [],
       help: true,
     })
+  })
+
+  it("matches direct execution paths case-insensitively on Windows", () => {
+    const ok = shouldInvokeCli(
+      "file:///C:/Users/test/AppData/Roaming/npm/node_modules/orion/bin/orion.js",
+      "c:\\Users\\test\\AppData\\Roaming\\npm\\node_modules\\orion\\bin\\orion.js",
+      "win32",
+    )
+
+    expect(ok).toBe(true)
+  })
+
+  it("uses pnpm.cmd on Windows and pnpm elsewhere", () => {
+    expect(getPnpmCommand("win32")).toBe("pnpm.cmd")
+    expect(getPnpmCommand("linux")).toBe("pnpm")
+  })
+
+  it("uses shell only for Windows cmd/bat wrappers", () => {
+    expect(shouldUseShellForCommand("pnpm.cmd", "win32")).toBe(true)
+    expect(shouldUseShellForCommand("build.BAT", "win32")).toBe(true)
+    expect(shouldUseShellForCommand("node", "win32")).toBe(false)
+    expect(shouldUseShellForCommand("pnpm", "linux")).toBe(false)
   })
 
   it("builds profile-relative env/workspace/state paths", () => {

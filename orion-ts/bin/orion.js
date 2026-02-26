@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
+import fsSync from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import os from "node:os"
 import { spawn } from "node:child_process"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { fileURLToPath } from "node:url"
 
 const CLI_CONFIG_DIR_NAME = ".orion"
 const CLI_CONFIG_FILE_NAME = "cli.json"
@@ -16,6 +17,17 @@ function testIcon(level) {
   if (level === "ok") return "OK"
   if (level === "warn") return "WARN"
   return "ERR"
+}
+
+export function getPnpmCommand(platform = process.platform) {
+  return platform === "win32" ? "pnpm.cmd" : "pnpm"
+}
+
+export function shouldUseShellForCommand(command, platform = process.platform) {
+  if (platform !== "win32") {
+    return false
+  }
+  return /\.(cmd|bat)$/i.test(String(command ?? "").trim())
 }
 
 function printHelp() {
@@ -55,6 +67,46 @@ function normalizePathInput(value) {
   }
   const trimmed = value.trim().replace(/^"(.*)"$/, "$1")
   return trimmed || null
+}
+
+export function shouldInvokeCli(importMetaUrl, argv1, platform = process.platform) {
+  if (!argv1) {
+    return false
+  }
+
+  const importPath = path.resolve(fileURLToPath(importMetaUrl))
+  const invokedPath = path.resolve(argv1)
+
+  let normalizedImport = importPath
+  let normalizedInvoked = invokedPath
+
+  try {
+    normalizedImport = fsSync.realpathSync.native
+      ? fsSync.realpathSync.native(importPath)
+      : fsSync.realpathSync(importPath)
+  } catch {
+    normalizedImport = importPath
+  }
+
+  try {
+    normalizedInvoked = fsSync.realpathSync.native
+      ? fsSync.realpathSync.native(invokedPath)
+      : fsSync.realpathSync(invokedPath)
+  } catch {
+    normalizedInvoked = invokedPath
+  }
+
+  if (platform === "win32") {
+    if (normalizedImport.toLowerCase() === normalizedInvoked.toLowerCase()) {
+      return true
+    }
+  } else if (normalizedImport === normalizedInvoked) {
+    return true
+  }
+
+  // Fallback for npm shim / symlink edge cases where the invoked path resolves differently
+  // but the process was clearly launched with this script filename.
+  return path.basename(normalizedImport).toLowerCase() === path.basename(normalizedInvoked).toLowerCase()
 }
 
 export function getCliConfigDir() {
@@ -302,7 +354,7 @@ async function pathExists(targetPath) {
 async function runChildCapture(command, args, options = {}) {
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "pipe"],
-    shell: false,
+    shell: shouldUseShellForCommand(command),
     ...options,
   })
 
@@ -466,7 +518,7 @@ async function collectSelfTestChecks(repoDir, profileDir) {
   checks.push(...buildWhatsAppSelfTestChecks(envMap, profilePaths))
 
   try {
-    const pnpm = await runChildCapture("pnpm", ["--version"])
+    const pnpm = await runChildCapture(getPnpmCommand(), ["--version"])
     checks.push({
       level: pnpm.code === 0 ? "ok" : "error",
       label: "pnpm",
@@ -582,7 +634,7 @@ async function resolveProfileDir(profileOverride) {
 async function runChild(command, args, options = {}) {
   const child = spawn(command, args, {
     stdio: "inherit",
-    shell: false,
+    shell: shouldUseShellForCommand(command),
     ...options,
   })
 
@@ -600,14 +652,14 @@ async function runChild(command, args, options = {}) {
 
 async function runPnpmScript(repoDir, profileDir, script, extraArgs = []) {
   const args = ["--dir", repoDir, script, ...extraArgs]
-  const code = await runChild("pnpm", args, {
+  const code = await runChild(getPnpmCommand(), args, {
     env: buildOrionChildEnv(process.env, profileDir),
   })
   process.exit(code)
 }
 
 async function runPnpmRaw(repoDir, profileDir, args) {
-  const code = await runChild("pnpm", ["--dir", repoDir, ...args], {
+  const code = await runChild(getPnpmCommand(), ["--dir", repoDir, ...args], {
     env: buildOrionChildEnv(process.env, profileDir),
   })
   process.exit(code)
@@ -649,7 +701,9 @@ async function handleProfile(repoOverride, profileOverride, subcommand) {
 
   if (subcommand === "init") {
     const paths = await ensureProfileBootstrap(repoDir, profileDir)
-    await saveCliConfig({ ...(await loadCliConfig()), repoDir, profileDir })
+    if (!repoOverride && !profileOverride) {
+      await saveCliConfig({ ...(await loadCliConfig()), repoDir, profileDir })
+    }
     console.log(`Profile ready: ${paths.profileDir}`)
     console.log(`Env: ${paths.envPath}`)
     console.log(`Workspace: ${paths.workspaceDir}`)
@@ -699,7 +753,9 @@ async function handleCommand(repoOverride, profileOverride, positionals) {
 
   if (command === "init") {
     await ensureProfileBootstrap(repoDir, profileDir)
-    await saveCliConfig({ ...(await loadCliConfig()), repoDir, profileDir })
+    if (!repoOverride && !profileOverride) {
+      await saveCliConfig({ ...(await loadCliConfig()), repoDir, profileDir })
+    }
     await runPnpmScript(repoDir, profileDir, "quickstart")
     return
   }
@@ -765,7 +821,6 @@ export async function main(argv = process.argv.slice(2)) {
   }
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ""
-if (import.meta.url === invokedPath) {
+if (shouldInvokeCli(import.meta.url, process.argv[1])) {
   void main()
 }
