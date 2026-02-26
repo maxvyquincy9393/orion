@@ -2,9 +2,12 @@ export function getCliConfigDir(): string
 export function getCliConfigPath(): string
 export function getProfilesRootDir(): string
 export function getDefaultProfileDir(): string
+export function getNamedProfileDir(profileName: string): string
 export function getPnpmCommand(platform?: string): string
 export function shouldUseShellForCommand(command: string, platform?: string): boolean
 export function shouldInvokeCli(importMetaUrl: string, argv1?: string | null, platform?: string): boolean
+export function isLikelyProfileName(value: string): boolean
+export function resolveProfileSelector(profileSelector: string, cwd?: string, homeDir?: string): string | null
 export function getProfilePaths(profileDir: string): {
   profileDir: string
   envPath: string
@@ -20,6 +23,7 @@ export function buildWhatsAppSelfTestChecks(
 export function parseOrionCliArgs(argv: string[]): {
   repoOverride: string | null
   profileOverride: string | null
+  dev: boolean
   positionals: string[]
   help: boolean
 }

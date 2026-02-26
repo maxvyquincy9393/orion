@@ -5,11 +5,14 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildWhatsAppSelfTestChecks,
   getPnpmCommand,
+  getNamedProfileDir,
+  isLikelyProfileName,
   parseOrionCliArgs,
   parseEnvContentLoose,
   findOrionRepoUpwards,
   getProfilePaths,
   isOrionRepoDir,
+  resolveProfileSelector,
   shouldUseShellForCommand,
   shouldInvokeCli,
 } from "../../../bin/orion.js"
@@ -28,8 +31,17 @@ describe("global orion CLI helpers", () => {
     expect(parsed).toEqual({
       repoOverride: "C:\\repo\\orion-ts",
       profileOverride: "C:\\Users\\me\\.orion\\profiles\\test",
+      dev: false,
       positionals: ["wa", "scan"],
       help: false,
+    })
+  })
+
+  it("parses --dev global flag", () => {
+    const parsed = parseOrionCliArgs(["--dev", "dashboard"])
+    expect(parsed).toMatchObject({
+      dev: true,
+      positionals: ["dashboard"],
     })
   })
 
@@ -37,6 +49,7 @@ describe("global orion CLI helpers", () => {
     expect(parseOrionCliArgs(["--help"])).toEqual({
       repoOverride: null,
       profileOverride: null,
+      dev: false,
       positionals: [],
       help: true,
     })
@@ -69,6 +82,25 @@ describe("global orion CLI helpers", () => {
     expect(paths.envPath).toContain(`${path.sep}.env`)
     expect(paths.workspaceDir).toContain(`${path.sep}workspace`)
     expect(paths.stateDir).toContain(`${path.sep}.orion`)
+  })
+
+  it("maps profile names to ~/.orion/profiles/<name>", () => {
+    expect(isLikelyProfileName("work")).toBe(true)
+    expect(isLikelyProfileName("C:\\Users\\me\\.orion\\profiles\\work")).toBe(false)
+    expect(isLikelyProfileName("./local-profile")).toBe(false)
+
+    const resolved = resolveProfileSelector("work", "C:\\repo", "C:\\Users\\me")
+    expect(resolved).toBe(path.join("C:\\Users\\me", ".orion", "profiles", "work"))
+    expect(getNamedProfileDir("work")).toContain(`${path.sep}.orion${path.sep}profiles${path.sep}work`)
+  })
+
+  it("supports explicit profile paths and tilde expansion", () => {
+    expect(resolveProfileSelector("./profiles/test", "C:\\repo", "C:\\Users\\me")).toBe(
+      path.resolve("C:\\repo", "./profiles/test"),
+    )
+    expect(resolveProfileSelector("~/custom-profile", "C:\\repo", "C:\\Users\\me")).toBe(
+      path.join("C:\\Users\\me", "custom-profile"),
+    )
   })
 
   it("parses dotenv-like content for profile env checks", () => {

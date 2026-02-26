@@ -352,3 +352,36 @@ That directory is intentionally ignored in `.gitignore` so tracked docs stay cle
   - `pnpm typecheck` passes
   - `pnpm test:ci` => `21` test files passed / `81` tests passed
   - real command smoke (outside sandbox): `orion wa scan --yes --provider groq --repo ... --profile .tmp-orion-profile` exits 0 and writes WhatsApp QR config without prompts
+
+## Follow-up Notes (pass 23)
+
+- OpenClaw-alignment tranche 1 + 2 (CLI surface + flag parity):
+  - added wrapper command surface parity aliases:
+    - `orion setup`, `orion configure`, `orion dashboard`, `orion status`, `orion logs`
+  - `orion status` now aliases readiness/self-test flow (OpenClaw-like status entrypoint)
+  - `orion logs` provides a foreground live-log fallback (`all` / `gateway`) and clear guidance when daemon-style log storage is unavailable
+  - `orion dashboard` prints dashboard URL (`http://127.0.0.1:<gateway-port>`) then starts gateway foreground mode
+- Added global flag parity primitives:
+  - `--profile <name>` now maps to `~/.orion/profiles/<name>` (while explicit paths still work)
+  - `--dev` uses isolated `~/.orion/profiles/dev` profile
+  - `orion quickstart/setup/configure/init` now forward extra onboarding args (e.g. `--non-interactive`, `--provider`, `--channel`)
+- Onboarding parser parity:
+  - added `--non-interactive` alias for `--yes`
+  - accepted `--wizard` as compatibility no-op
+  - non-interactive banner now references both `--yes` and `--non-interactive`
+- Added/extended tests:
+  - `src/cli/__tests__/orion-global.test.ts` (`--dev`, profile-name mapping, profile selector path/tilde handling)
+  - `src/cli/__tests__/onboard.test.ts` (`--non-interactive`, `--wizard` compatibility parse path)
+- Documentation updates:
+  - `docs/platform/global-cli.md` (command parity, named profiles, `--dev`, scriptable setup examples)
+  - `docs/platform/onboarding.md` (`--non-interactive`, global wrapper setup examples)
+- Validation:
+  - `pnpm typecheck` passes
+  - `pnpm test:ci` => `21` test files passed / `84` tests passed
+  - real command smoke:
+    - `orion --help`
+    - `orion profile --repo ... --profile work` => resolves `~/.orion/profiles/work`
+    - `orion --dev profile --repo ...` => resolves `~/.orion/profiles/dev`
+    - `orion setup --non-interactive --provider groq --channel whatsapp --whatsapp-mode scan --repo ... --profile .tmp-orion-profile`
+    - `orion status --repo ... --profile .tmp-orion-profile`
+    - `orion logs foo --repo ... --profile .tmp-orion-profile` (guidance path)

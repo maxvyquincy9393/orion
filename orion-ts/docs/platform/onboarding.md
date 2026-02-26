@@ -36,6 +36,7 @@ pnpm onboard -- --channel discord --provider openrouter
 pnpm onboard -- --channel whatsapp --whatsapp-mode scan --provider openrouter
 pnpm onboard -- --print-only
 pnpm onboard -- --yes
+pnpm onboard -- --non-interactive
 ```
 
 Beginner shortcuts:
@@ -52,6 +53,12 @@ orion link <path-to-orion-ts>
 orion profile init
 orion self-test
 orion wa scan
+```
+
+OpenClaw-style scriptable variant (no prompts):
+
+```bash
+orion setup --non-interactive --channel whatsapp --whatsapp-mode scan --provider groq
 ```
 
 See:
@@ -78,6 +85,7 @@ pnpm gateway:watch
 ## Notes
 
 - The wizard writes `.env` in the repo root (`orion-ts/.env`).
+- When launched via global `orion` wrapper, the wizard writes the active profile env file (`~/.orion/profiles/<name>/.env` or your explicit `--profile` path).
 - Channel adapters are safe-by-default:
   - Telegram: private chat only if `TELEGRAM_CHAT_ID` is unset
   - Discord: DM only if `DISCORD_CHANNEL_ID` is unset

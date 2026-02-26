@@ -10,7 +10,8 @@ describe("onboard cli helpers", () => {
       "groq",
       "--whatsapp-mode=scan",
       "--print-only",
-      "--yes",
+      "--non-interactive",
+      "--wizard",
     ])
 
     expect(parsed).toMatchObject({

@@ -11,6 +11,7 @@ const CLI_CONFIG_DIR_NAME = ".orion"
 const CLI_CONFIG_FILE_NAME = "cli.json"
 const CLI_PROFILES_DIR_NAME = "profiles"
 const DEFAULT_PROFILE_NAME = "default"
+const DEV_PROFILE_NAME = "dev"
 const LOCAL_PACKAGE_NAME = "orion"
 
 function testIcon(level) {
@@ -39,8 +40,13 @@ function printHelp() {
   console.log("  orion repo                        Show linked repo path")
   console.log("  orion profile                     Show active profile path")
   console.log("  orion profile init                Create ~/.orion profile files (env/workspace/state)")
+  console.log("  orion setup                       OpenClaw-style setup alias (quickstart wizard)")
   console.log("  orion init                        Bootstrap profile + run quickstart wizard")
   console.log("  orion quickstart                  Run onboarding wizard")
+  console.log("  orion configure                   Re-run onboarding wizard (configure alias)")
+  console.log("  orion dashboard                   Start gateway and print dashboard URL")
+  console.log("  orion status                      Readiness/status check (self-test alias)")
+  console.log("  orion logs [all|gateway]          Stream live logs by starting a target mode")
   console.log("  orion self-test                   Check repo/profile/env readiness (beginner-friendly)")
   console.log("  orion wa scan                     WhatsApp QR setup (OpenClaw-style)")
   console.log("  orion wa cloud                    WhatsApp Cloud API setup")
@@ -51,12 +57,15 @@ function printHelp() {
   console.log("")
   console.log("Options:")
   console.log("  --repo <path>                     Override linked repo for this command")
-  console.log("  --profile <path>                  Override profile dir for this command")
+  console.log("  --profile <name|path>             Use a named profile (~/.orion/profiles/<name>) or an explicit path")
+  console.log("  --dev                             Use isolated dev profile (~/.orion/profiles/dev)")
   console.log("  --help, -h                        Show help")
   console.log("")
   console.log("Examples:")
   console.log("  orion link C:\\Users\\you\\orion\\orion-ts")
   console.log("  orion profile init")
+  console.log("  orion --profile work wa scan --yes --provider groq")
+  console.log("  orion --dev dashboard")
   console.log("  orion wa scan")
   console.log("  orion all")
 }
@@ -125,16 +134,61 @@ export function getDefaultProfileDir() {
   return path.join(getProfilesRootDir(), DEFAULT_PROFILE_NAME)
 }
 
+export function getNamedProfileDir(profileName) {
+  return path.join(getProfilesRootDir(), profileName)
+}
+
+export function isLikelyProfileName(value) {
+  const normalized = normalizePathInput(value)
+  if (!normalized) {
+    return false
+  }
+
+  if (normalized === "~" || normalized.startsWith("~/") || normalized.startsWith("~\\")) {
+    return false
+  }
+  if (normalized.startsWith(".") || normalized.startsWith("/") || normalized.startsWith("\\\\")) {
+    return false
+  }
+  if (/^[A-Za-z]:[\\/]/.test(normalized)) {
+    return false
+  }
+  if (normalized.includes("/") || normalized.includes("\\")) {
+    return false
+  }
+  return true
+}
+
+export function resolveProfileSelector(profileSelector, cwd = process.cwd(), homeDir = os.homedir()) {
+  const normalized = normalizePathInput(profileSelector)
+  if (!normalized) {
+    return null
+  }
+
+  if (isLikelyProfileName(normalized)) {
+    return path.join(homeDir, CLI_CONFIG_DIR_NAME, CLI_PROFILES_DIR_NAME, normalized)
+  }
+
+  if (normalized === "~") {
+    return homeDir
+  }
+  if (normalized.startsWith("~/") || normalized.startsWith("~\\")) {
+    return path.join(homeDir, normalized.slice(2))
+  }
+  return path.resolve(cwd, normalized)
+}
+
 export function parseOrionCliArgs(argv) {
   const args = [...argv]
   let repoOverride = null
   let profileOverride = null
+  let dev = false
   const positionals = []
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]
     if (arg === "--help" || arg === "-h") {
-      return { repoOverride: null, profileOverride: null, positionals: [], help: true }
+      return { repoOverride: null, profileOverride: null, dev: false, positionals: [], help: true }
     }
     if (arg === "--repo" && args[i + 1]) {
       repoOverride = normalizePathInput(args[i + 1])
@@ -154,10 +208,14 @@ export function parseOrionCliArgs(argv) {
       profileOverride = normalizePathInput(arg.slice("--profile=".length))
       continue
     }
+    if (arg === "--dev") {
+      dev = true
+      continue
+    }
     positionals.push(arg)
   }
 
-  return { repoOverride, profileOverride, positionals, help: false }
+  return { repoOverride, profileOverride, dev, positionals, help: false }
 }
 
 export async function loadCliConfig(fsModule = fs) {
@@ -547,9 +605,9 @@ async function collectSelfTestChecks(repoDir, profileDir) {
   return { checks, profilePaths }
 }
 
-async function handleSelfTest(repoOverride, profileOverride) {
+async function handleSelfTest(repoOverride, profileOverride, devMode = false) {
   const repoDir = await resolveRepoDir(repoOverride)
-  const profileDir = await resolveProfileDir(profileOverride)
+  const profileDir = await resolveProfileDir(profileOverride, devMode)
   const { checks, profilePaths } = await collectSelfTestChecks(repoDir, profileDir)
 
   const errors = checks.filter((c) => c.level === "error").length
@@ -612,20 +670,24 @@ async function resolveRepoDir(repoOverride) {
   throw new Error("No Orion repo linked. Run `orion link <path-to-orion-ts>` first.")
 }
 
-async function resolveProfileDir(profileOverride) {
+async function resolveProfileDir(profileOverride, devMode = false) {
   if (profileOverride) {
-    return path.resolve(process.cwd(), profileOverride)
+    return resolveProfileSelector(profileOverride) ?? getDefaultProfileDir()
+  }
+
+  if (devMode) {
+    return getNamedProfileDir(DEV_PROFILE_NAME)
   }
 
   const envProfile = normalizePathInput(process.env.ORION_PROFILE_DIR ?? "")
   if (envProfile) {
-    return path.resolve(envProfile)
+    return resolveProfileSelector(envProfile) ?? getDefaultProfileDir()
   }
 
   const cfg = await loadCliConfig()
   const linkedProfile = normalizePathInput(typeof cfg.profileDir === "string" ? cfg.profileDir : "")
   if (linkedProfile) {
-    return path.resolve(linkedProfile)
+    return resolveProfileSelector(linkedProfile) ?? getDefaultProfileDir()
   }
 
   return getDefaultProfileDir()
@@ -665,7 +727,7 @@ async function runPnpmRaw(repoDir, profileDir, args) {
   process.exit(code)
 }
 
-async function handleLink(targetPathArg, profileOverride) {
+async function handleLink(targetPathArg, profileOverride, devMode = false) {
   const candidate = targetPathArg
     ? path.resolve(process.cwd(), targetPathArg)
     : await findOrionRepoUpwards(process.cwd())
@@ -678,7 +740,7 @@ async function handleLink(targetPathArg, profileOverride) {
     throw new Error(`Not an Orion repo: ${candidate}`)
   }
 
-  const profileDir = await resolveProfileDir(profileOverride)
+  const profileDir = await resolveProfileDir(profileOverride, devMode)
   await saveCliConfig({ repoDir: candidate, profileDir })
   console.log(`Linked Orion repo: ${candidate}`)
   console.log(`Active profile: ${profileDir}`)
@@ -690,9 +752,9 @@ async function handleRepo(repoOverride) {
   console.log(repoDir)
 }
 
-async function handleProfile(repoOverride, profileOverride, subcommand) {
+async function handleProfile(repoOverride, profileOverride, subcommand, devMode = false) {
   const repoDir = await resolveRepoDir(repoOverride)
-  const profileDir = await resolveProfileDir(profileOverride)
+  const profileDir = await resolveProfileDir(profileOverride, devMode)
 
   if (!subcommand || subcommand === "show") {
     console.log(profileDir)
@@ -714,7 +776,39 @@ async function handleProfile(repoOverride, profileOverride, subcommand) {
   throw new Error("Unknown `orion profile` subcommand. Use `orion profile` or `orion profile init`.")
 }
 
-async function handleCommand(repoOverride, profileOverride, positionals) {
+async function detectGatewayPortFromProfileEnv(profileDir) {
+  try {
+    const raw = await fs.readFile(getProfilePaths(profileDir).envPath, "utf-8")
+    const envMap = parseEnvContentLoose(raw)
+    const parsed = Number.parseInt(envMap.GATEWAY_PORT ?? "", 10)
+    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 65535) {
+      return parsed
+    }
+  } catch {
+    // Best-effort only; fallback below.
+  }
+  return 18789
+}
+
+async function handleLogs(repoDir, profileDir, rest) {
+  const target = (rest[0] ?? "all").toLowerCase()
+  if (target !== "all" && target !== "gateway") {
+    console.log("Orion does not run a persistent daemon log store yet.")
+    console.log("Use `orion logs all` or `orion logs gateway` to stream live logs by starting a process.")
+    return
+  }
+  console.log(`Streaming live logs via \`orion ${target}\` (foreground process). Press Ctrl+C to stop.`)
+  await runPnpmScript(repoDir, profileDir, target)
+}
+
+async function handleDashboard(repoDir, profileDir) {
+  const gatewayPort = await detectGatewayPortFromProfileEnv(profileDir)
+  console.log(`Dashboard URL: http://127.0.0.1:${gatewayPort}`)
+  console.log("Starting gateway in foreground (Ctrl+C to stop)...")
+  await runPnpmScript(repoDir, profileDir, "gateway")
+}
+
+async function handleCommand(repoOverride, profileOverride, devMode, positionals) {
   const [command, ...rest] = positionals
 
   if (!command || command === "help") {
@@ -723,7 +817,7 @@ async function handleCommand(repoOverride, profileOverride, positionals) {
   }
 
   if (command === "link") {
-    await handleLink(rest[0] ?? null, profileOverride)
+    await handleLink(rest[0] ?? null, profileOverride, devMode)
     return
   }
 
@@ -739,32 +833,37 @@ async function handleCommand(repoOverride, profileOverride, positionals) {
   }
 
   if (command === "profile") {
-    await handleProfile(repoOverride, profileOverride, (rest[0] ?? "").toLowerCase() || null)
+    await handleProfile(repoOverride, profileOverride, (rest[0] ?? "").toLowerCase() || null, devMode)
     return
   }
 
-  if (command === "self-test" || command === "selftest") {
-    await handleSelfTest(repoOverride, profileOverride)
+  if (command === "self-test" || command === "selftest" || command === "status") {
+    await handleSelfTest(repoOverride, profileOverride, devMode)
     return
   }
 
   const repoDir = await resolveRepoDir(repoOverride)
-  const profileDir = await resolveProfileDir(profileOverride)
+  const profileDir = await resolveProfileDir(profileOverride, devMode)
 
   if (command === "init") {
     await ensureProfileBootstrap(repoDir, profileDir)
     if (!repoOverride && !profileOverride) {
       await saveCliConfig({ ...(await loadCliConfig()), repoDir, profileDir })
     }
-    await runPnpmScript(repoDir, profileDir, "quickstart")
+    await runPnpmScript(repoDir, profileDir, "quickstart", rest)
     return
   }
 
   // Commands below run Orion using the linked profile env/state instead of the repo root.
   await ensureProfileBootstrap(repoDir, profileDir)
 
-  if (command === "quickstart" || command === "setup") {
-    await runPnpmScript(repoDir, profileDir, "quickstart")
+  if (command === "quickstart" || command === "setup" || command === "configure") {
+    await runPnpmScript(repoDir, profileDir, "quickstart", rest)
+    return
+  }
+
+  if (command === "dashboard") {
+    await handleDashboard(repoDir, profileDir)
     return
   }
 
@@ -784,6 +883,11 @@ async function handleCommand(repoOverride, profileOverride, positionals) {
 
   if (command === "all" || command === "doctor" || command === "gateway") {
     await runPnpmScript(repoDir, profileDir, command)
+    return
+  }
+
+  if (command === "logs") {
+    await handleLogs(repoDir, profileDir, rest)
     return
   }
 
@@ -811,7 +915,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   try {
-    await handleCommand(parsed.repoOverride, parsed.profileOverride, parsed.positionals)
+    await handleCommand(parsed.repoOverride, parsed.profileOverride, parsed.dev, parsed.positionals)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(`Orion CLI error: ${message}`)

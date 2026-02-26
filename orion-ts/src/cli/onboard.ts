@@ -82,6 +82,8 @@ function printHelp(): void {
   console.log("  --print-only        Do not write .env; print the planned changes")
   console.log("  --write             Force writing .env without print-only")
   console.log("  --yes               Non-interactive mode: use defaults, skip optional prompts, and skip final confirmation")
+  console.log("  --non-interactive   Alias for --yes (OpenClaw-style automation flag)")
+  console.log("  --wizard            Compatibility no-op (reserved for setup parity)")
   console.log("  --help, -h          Show this help")
 }
 
@@ -183,8 +185,11 @@ export function parseOnboardArgs(argv: string[]): OnboardArgs {
       writeMode = "write"
       continue
     }
-    if (arg === "--yes" || arg === "-y") {
+    if (arg === "--yes" || arg === "-y" || arg === "--non-interactive") {
       yes = true
+      continue
+    }
+    if (arg === "--wizard") {
       continue
     }
   }
@@ -490,7 +495,7 @@ async function collectQuickstartPlan(
     buildQuickstartBanner()
     if (nonInteractive) {
       console.log("")
-      console.log("Non-interactive mode enabled (`--yes`): using defaults and skipping optional prompts.")
+      console.log("Non-interactive mode enabled (`--yes` / `--non-interactive`): using defaults and skipping optional prompts.")
     }
 
     const choose = async <T extends string>(
