@@ -61,7 +61,7 @@ const DEFAULT_CONFIG: HybridConfig = {
   rrfK: 60,
   ftsWeight: 0.4,
   vectorWeight: 0.6,
-  scoreThreshold: 0.1,
+  scoreThreshold: 0.01,
 }
 
 const MIN_RRF_WEIGHT = 0.01
@@ -81,19 +81,16 @@ const SHORT_TECHNICAL_TOKENS = new Set([
 ])
 
 /**
- * Compute RRF score for a result
- * 
- * RRF(d) = Σ(1 / (k + r(d)))
+ * Compute weighted RRF score contribution for one source.
+ *
+ * Weighted RRF(d) = Σ(w_i * (1 / (k + r_i(d))))
  * where:
+ * - w_i = source weight
  * - k = constant (typically 60)
- * - r(d) = rank of document d in list i
- * 
- * @param ranks - Array of ranks from different sources
- * @param k - RRF constant
- * @returns RRF score
+ * - r_i(d) = rank of document d in source i
  */
-function computeRRFScore(ranks: number[], k: number): number {
-  return ranks.reduce((sum, rank) => sum + (1 / (k + rank)), 0)
+function computeWeightedRRFScore(rank: number, weight: number, k: number): number {
+  return weight * (1 / (k + rank))
 }
 
 /**
@@ -438,27 +435,19 @@ export class HybridRetriever {
       }
     }
 
-    // Compute RRF scores and convert to final results
+    // Compute weighted RRF scores and convert to final results
     const fused: SearchResult[] = []
     
     for (const [id, data] of scoreMap) {
-      const ranks: number[] = []
-      
-      // Add weighted ranks from each source
+      let rrfScore = 0
+
       if (data.ranks.fts) {
-        // Apply FTS weight by adjusting effective rank
-        const effectiveRank = data.ranks.fts / this.config.ftsWeight
-        ranks.push(effectiveRank)
+        rrfScore += computeWeightedRRFScore(data.ranks.fts, this.config.ftsWeight, this.config.rrfK)
       }
       
       if (data.ranks.vector) {
-        // Apply vector weight by adjusting effective rank
-        const effectiveRank = data.ranks.vector / this.config.vectorWeight
-        ranks.push(effectiveRank)
+        rrfScore += computeWeightedRRFScore(data.ranks.vector, this.config.vectorWeight, this.config.rrfK)
       }
-
-      // Compute RRF score
-      const rrfScore = computeRRFScore(ranks, this.config.rrfK)
 
       fused.push({
         id,
@@ -526,5 +515,6 @@ export const hybridRetriever = new HybridRetriever()
 export const __hybridRetrieverTestUtils = {
   buildFTSQuery,
   normalizeHybridConfig,
+  computeWeightedRRFScore,
   SHORT_TECHNICAL_TOKENS: new Set(SHORT_TECHNICAL_TOKENS),
 }

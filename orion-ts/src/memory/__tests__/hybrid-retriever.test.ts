@@ -48,4 +48,9 @@ describe("HybridRetriever helpers", () => {
     expect(__hybridRetrieverTestUtils.SHORT_TECHNICAL_TOKENS.has("go")).toBe(true)
     expect(__hybridRetrieverTestUtils.SHORT_TECHNICAL_TOKENS.has("js")).toBe(true)
   })
+
+  it("uses weighted standard RRF formula", () => {
+    const score = __hybridRetrieverTestUtils.computeWeightedRRFScore(1, 0.6, 60)
+    expect(score).toBeCloseTo(0.6 * (1 / 61))
+  })
 })
