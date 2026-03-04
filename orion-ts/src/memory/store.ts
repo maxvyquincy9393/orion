@@ -40,6 +40,7 @@ const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
 const EMBEDDING_REQUEST_TIMEOUT_MS = 8_000
 const PENDING_FEEDBACK_MAX_AGE_MS = 30 * 60 * 1000
+const EMBEDDING_CACHE_MAX_ENTRIES = 512
 
 interface MemoryRow extends Record<string, unknown> {
   id: string
@@ -89,23 +90,79 @@ export interface BuildContextResult {
   retrievedMemoryIds: string[]
 }
 
+function hashFeature(input: string): number {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return hash >>> 0
+}
+
+function normalizeVector(vector: number[]): number[] {
+  const squaredSum = vector.reduce((sum, value) => sum + (value * value), 0)
+  if (!Number.isFinite(squaredSum) || squaredSum <= 0) {
+    return vector
+  }
+  const norm = Math.sqrt(squaredSum)
+  return vector.map((value) => value / norm)
+}
+
+/**
+ * Deterministic lexical fallback embedding.
+ *
+ * This is intentionally simple and local-only, but preserves token overlap
+ * better than pseudo-random sin-based vectors.
+ */
 function hashToVector(text: string): number[] {
-  const vector: number[] = []
-  let hash = 0
+  const normalizedText = text
+    .toLowerCase()
+    .normalize("NFKC")
+    .trim()
 
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash
+  const vector = new Array(VECTOR_DIMENSION).fill(0)
+  if (!normalizedText) {
+    return vector
   }
 
-  for (let i = 0; i < VECTOR_DIMENSION; i += 1) {
-    const seed = (hash + i * 31) ^ text.length
-    const value = Math.sin(seed) * 10000
-    vector.push(value - Math.floor(value))
+  const rawTokens = normalizedText.match(/[a-z0-9_]+/g) ?? []
+  const tokens = rawTokens.length > 0
+    ? rawTokens
+    : [normalizedText.slice(0, 128)]
+
+  const baseWeight = 1 / Math.sqrt(tokens.length)
+
+  for (const token of tokens) {
+    const truncated = token.slice(0, 64)
+    if (!truncated) {
+      continue
+    }
+
+    const tokenHash = hashFeature(truncated)
+
+    // Multiple signed projections per token for better spread.
+    for (let projection = 0; projection < 3; projection += 1) {
+      const mixed = (tokenHash + Math.imul(0x9e3779b1, projection + 1)) >>> 0
+      const index = mixed % VECTOR_DIMENSION
+      const sign = ((mixed >>> 31) & 1) === 0 ? 1 : -1
+      vector[index] += sign * baseWeight
+    }
+
+    // Add short n-gram signals to improve lexical similarity for close variants.
+    const maxGramOffset = Math.min(truncated.length - 3, 5)
+    for (let i = 0; i <= maxGramOffset; i += 1) {
+      const gram = truncated.slice(i, i + 3)
+      if (gram.length < 3) {
+        continue
+      }
+      const gramHash = hashFeature(gram)
+      const gramIndex = gramHash % VECTOR_DIMENSION
+      const gramSign = ((gramHash >>> 30) & 1) === 0 ? 1 : -1
+      vector[gramIndex] += gramSign * (baseWeight * 0.5)
+    }
   }
 
-  return vector
+  return normalizeVector(vector)
 }
 
 async function openAIEmbed(text: string): Promise<number[] | null> {
@@ -117,16 +174,17 @@ async function openAIEmbed(text: string): Promise<number[] | null> {
     const result = await fetchJsonWithTimeout<{ data?: Array<{ embedding?: number[] }> }>(
       "https://api.openai.com/v1/embeddings",
       {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${config.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${config.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: DEFAULT_EMBEDDING_MODEL,
+          input: text,
+          dimensions: VECTOR_DIMENSION,
+        }),
       },
-      body: JSON.stringify({
-        model: DEFAULT_EMBEDDING_MODEL,
-        input: text,
-      }),
-    },
       EMBEDDING_REQUEST_TIMEOUT_MS,
     )
 
@@ -155,18 +213,18 @@ async function ollamaEmbed(text: string): Promise<number[] | null> {
     : "http://localhost:11434"
 
   try {
-    const result = await fetchJsonWithTimeout<{ embedding?: number[] }>(
-      `${baseUrl.replace(/\/+$/, "")}/api/embeddings`,
+    const result = await fetchJsonWithTimeout<{ embedding?: number[]; embeddings?: number[][] }>(
+      `${baseUrl.replace(/\/+$/, "")}/api/embed`,
       {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: OLLAMA_EMBEDDING_MODEL,
+          input: text,
+        }),
       },
-      body: JSON.stringify({
-        model: OLLAMA_EMBEDDING_MODEL,
-        prompt: text,
-      }),
-    },
       EMBEDDING_REQUEST_TIMEOUT_MS,
     )
 
@@ -175,7 +233,7 @@ async function ollamaEmbed(text: string): Promise<number[] | null> {
       return null
     }
 
-    const embedding = result.data?.embedding
+    const embedding = result.data?.embeddings?.[0] ?? result.data?.embedding
 
     if (!embedding || embedding.length !== VECTOR_DIMENSION) {
       log.warn("Unexpected embedding dimension", { expected: VECTOR_DIMENSION, got: embedding?.length })
@@ -193,6 +251,24 @@ export class MemoryStore {
   private db: lancedb.Connection | null = null
   private table: lancedb.Table | null = null
   private initialized = false
+  private embeddingCache = new Map<string, number[]>()
+
+  private getCachedEmbedding(text: string): number[] | null {
+    const cached = this.embeddingCache.get(text)
+    return cached ? [...cached] : null
+  }
+
+  private setCachedEmbedding(text: string, vector: number[]): void {
+    this.embeddingCache.set(text, [...vector])
+    if (this.embeddingCache.size <= EMBEDDING_CACHE_MAX_ENTRIES) {
+      return
+    }
+
+    const oldestKey = this.embeddingCache.keys().next().value
+    if (typeof oldestKey === "string") {
+      this.embeddingCache.delete(oldestKey)
+    }
+  }
 
   private async createMemoryTable(): Promise<lancedb.Table> {
     if (!this.db) {
@@ -235,7 +311,7 @@ export class MemoryStore {
         const firstVector = sampleRows[0]?.vector
         const firstVectorLength =
           Array.isArray(firstVector)
-          || (typeof firstVector === "object" && firstVector !== null && "length" in firstVector)
+            || (typeof firstVector === "object" && firstVector !== null && "length" in firstVector)
             ? Number((firstVector as { length: number }).length)
             : null
 
@@ -261,19 +337,37 @@ export class MemoryStore {
   }
 
   async embed(text: string): Promise<number[]> {
+    const cacheKey = text.trim()
+    if (cacheKey) {
+      const cached = this.getCachedEmbedding(cacheKey)
+      if (cached) {
+        return cached
+      }
+    }
+
     const ollamaResult = await ollamaEmbed(text)
 
     if (ollamaResult) {
+      if (cacheKey) {
+        this.setCachedEmbedding(cacheKey, ollamaResult)
+      }
       return ollamaResult
     }
 
     const openAIResult = await openAIEmbed(text)
     if (openAIResult) {
+      if (cacheKey) {
+        this.setCachedEmbedding(cacheKey, openAIResult)
+      }
       return openAIResult
     }
 
     log.debug("using hash-based fallback embedding")
-    return hashToVector(text)
+    const fallback = hashToVector(text)
+    if (cacheKey) {
+      this.setCachedEmbedding(cacheKey, fallback)
+    }
+    return fallback
   }
 
   async save(
@@ -564,3 +658,7 @@ export class MemoryStore {
 }
 
 export const memory = new MemoryStore()
+
+export const __memoryStoreTestUtils = {
+  hashToVector,
+}

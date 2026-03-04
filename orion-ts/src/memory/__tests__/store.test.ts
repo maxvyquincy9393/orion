@@ -1,7 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import config from "../../config.js"
-import { MemoryStore } from "../store.js"
+import { MemoryStore, __memoryStoreTestUtils } from "../store.js"
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  const length = Math.min(a.length, b.length)
+  let dot = 0
+  let normA = 0
+  let normB = 0
+
+  for (let i = 0; i < length; i += 1) {
+    dot += a[i] * b[i]
+    normA += a[i] * a[i]
+    normB += b[i] * b[i]
+  }
+
+  if (normA <= 0 || normB <= 0) {
+    return 0
+  }
+
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB))
+}
 
 describe("MemoryStore", () => {
   let originalFetch: typeof globalThis.fetch
@@ -57,5 +76,30 @@ describe("MemoryStore", () => {
     const consumed = store.consumePendingFeedback("u1")
 
     expect(consumed).toBeNull()
+  })
+
+  it("fallback embedding preserves lexical proximity better than unrelated text", () => {
+    const anchor = __memoryStoreTestUtils.hashToVector("deploy app to production pipeline")
+    const near = __memoryStoreTestUtils.hashToVector("deploy application to production pipeline")
+    const far = __memoryStoreTestUtils.hashToVector("buy groceries and cook dinner tonight")
+
+    expect(cosineSimilarity(anchor, near)).toBeGreaterThan(cosineSimilarity(anchor, far))
+  })
+
+  it("embed caches repeated text to avoid duplicate provider calls", async () => {
+    const store = new MemoryStore()
+    config.OPENAI_API_KEY = ""
+
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    }) as Response) as typeof globalThis.fetch
+
+    const first = await store.embed("cache me")
+    const second = await store.embed("cache me")
+
+    expect(first).toEqual(second)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
   })
 })
