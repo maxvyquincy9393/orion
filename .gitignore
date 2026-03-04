@@ -56,3 +56,7 @@ test-results/
 *.db
 *.sqlite
 *.sqlite3
+
+# Local pnpm artifact folders that may appear inside tracked desktop node_modules
+apps/desktop/node_modules/.pnpm/@types+plist@3.0.5/
+apps/desktop/node_modules/.pnpm/dmg-license@1.0.11/
