@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest"
+import crypto from "node:crypto"
+
+import { describe, expect, it, vi } from "vitest"
 
 import { __gatewayTestUtils } from "../server.js"
 
@@ -14,6 +16,15 @@ describe("gateway/server helpers", () => {
   it("does not authorize global admin endpoint when ADMIN_TOKEN is unset", () => {
     expect(__gatewayTestUtils.isAdminTokenAuthorized(undefined, undefined)).toBe(false)
     expect(__gatewayTestUtils.isAdminTokenAuthorized("x", undefined)).toBe(false)
+  })
+
+  it("uses timing-safe comparison for admin token checks", () => {
+    const spy = vi.spyOn(crypto, "timingSafeEqual")
+
+    expect(__gatewayTestUtils.isAdminTokenAuthorized("secret", "secret")).toBe(true)
+    expect(__gatewayTestUtils.isAdminTokenAuthorized("wrong", "secret")).toBe(false)
+
+    expect(spy).toHaveBeenCalled()
   })
 
   it("normalizes client messages and rejects non-object payloads", () => {

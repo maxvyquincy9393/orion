@@ -10,9 +10,13 @@
  * - Auth/pairing checks (before message reaches pipeline)
  * - Transport-level validation/normalization
  * - Usage summary API endpoints
+ * - Rate limiting, CORS, security headers
  */
 
 import crypto from "node:crypto"
+import { readFileSync } from "node:fs"
+import { resolve, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import Fastify from "fastify"
 import websocketPlugin from "@fastify/websocket"
@@ -36,13 +40,98 @@ import {
 
 const logger = createLogger("gateway")
 
+// ── Constants ────────────────────────────────────────────────────────────────
+
 const MAX_USAGE_DAYS = 30
 const DEFAULT_USAGE_DAYS = 7
+
+/** Maximum request body size (1 MB) to prevent memory DoS */
+const MAX_BODY_SIZE = 1_048_576
+
+/** Rate limit: max requests per window per IP */
+const RATE_LIMIT_MAX = 60
+const RATE_LIMIT_WINDOW_MS = 60_000
+
+/** CORS: allowed origins (configurable via GATEWAY_CORS_ORIGINS env var, comma-separated) */
+const ALLOWED_ORIGINS: ReadonlySet<string> = new Set(
+  (process.env.GATEWAY_CORS_ORIGINS ?? `http://127.0.0.1:${config.WEBCHAT_PORT},http://localhost:${config.WEBCHAT_PORT}`)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+
+/** Read version from package.json once at startup */
+function readPackageVersion(): string {
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url))
+    const pkgPath = resolve(__dirname, "..", "..", "package.json")
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version?: string }
+    return pkg.version ?? "0.0.0"
+  } catch {
+    return "0.0.0"
+  }
+}
+
+const APP_VERSION = readPackageVersion()
+
+// ── Rate Limiter ─────────────────────────────────────────────────────────────
+
+interface RateLimitEntry {
+  count: number
+  windowStart: number
+}
+
+const rateLimitStore = new Map<string, RateLimitEntry>()
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const entry = rateLimitStore.get(ip)
+
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    rateLimitStore.set(ip, { count: 1, windowStart: now })
+    return false
+  }
+
+  entry.count++
+  return entry.count > RATE_LIMIT_MAX
+}
+
+function getRateLimitRemaining(ip: string): number {
+  const entry = rateLimitStore.get(ip)
+  if (!entry) return RATE_LIMIT_MAX
+  const now = Date.now()
+  if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS) return RATE_LIMIT_MAX
+  return Math.max(0, RATE_LIMIT_MAX - entry.count)
+}
+
+// Cleanup stale rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now()
+  for (const [ip, entry] of rateLimitStore) {
+    if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS * 2) {
+      rateLimitStore.delete(ip)
+    }
+  }
+}, 300_000).unref()
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 type SocketLike = {
   send: (payload: string) => void
   close: (code?: number) => void
-  on: (event: "message" | "close", handler: (...args: any[]) => void) => void
+  on: (event: "message" | "close", handler: (...args: unknown[]) => void) => void
+}
+
+/** Typed gateway response payloads */
+interface GatewayResponse {
+  type: string
+  requestId?: unknown
+  [key: string]: unknown
+}
+
+interface GatewayErrorResponse extends GatewayResponse {
+  type: "error"
+  message: string
 }
 
 interface GatewayClientMessage {
@@ -87,12 +176,65 @@ function isConfiguredAdminToken(token: string | undefined): token is string {
   return typeof token === "string" && token.trim().length > 0
 }
 
+function timingSafeTokenEquals(candidate: string, expected: string): boolean {
+  const candidateBuffer = Buffer.from(candidate)
+  const expectedBuffer = Buffer.from(expected)
+
+  if (candidateBuffer.length !== expectedBuffer.length) {
+    // Equalize work on mismatch to reduce timing side-channel signal.
+    const maxLength = Math.max(candidateBuffer.length, expectedBuffer.length, 1)
+    const candidatePadded = Buffer.alloc(maxLength)
+    const expectedPadded = Buffer.alloc(maxLength)
+    candidateBuffer.copy(candidatePadded)
+    expectedBuffer.copy(expectedPadded)
+    crypto.timingSafeEqual(candidatePadded, expectedPadded)
+    return false
+  }
+
+  return crypto.timingSafeEqual(candidateBuffer, expectedBuffer)
+}
+
 function isAdminTokenAuthorized(candidate: unknown, configuredToken: string | undefined): boolean {
   if (!isConfiguredAdminToken(configuredToken)) {
     return false
   }
 
-  return typeof candidate === "string" && candidate === configuredToken
+  if (typeof candidate !== "string") {
+    return false
+  }
+
+  return timingSafeTokenEquals(candidate, configuredToken)
+}
+
+/**
+ * Extract admin token from Authorization header (preferred) or query string (legacy).
+ * Authorization: Bearer <token> takes precedence over ?adminToken=.
+ */
+function extractAdminToken(req: { headers: Record<string, string | undefined>; query: Record<string, unknown> }): string | null {
+  const authHeader = req.headers.authorization
+  if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+    const token = authHeader.slice(7).trim()
+    if (token.length > 0) return token
+  }
+  // Legacy fallback — query string (log warning)
+  const queryToken = req.query.adminToken
+  if (typeof queryToken === "string" && queryToken.trim().length > 0) {
+    logger.warn("admin token passed via query string — use Authorization header instead")
+    return queryToken.trim()
+  }
+  return null
+}
+
+/**
+ * Extract Bearer token from Authorization header for API auth.
+ */
+function extractBearerToken(req: { headers: Record<string, string | undefined> }): string | null {
+  const authHeader = req.headers.authorization
+  if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+    const token = authHeader.slice(7).trim()
+    return token.length > 0 ? token : null
+  }
+  return null
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -167,7 +309,10 @@ function buildStatusPayload(requestId: unknown) {
 }
 
 export class GatewayServer {
-  private app = Fastify({ logger: false })
+  private app = Fastify({
+    logger: false,
+    bodyLimit: MAX_BODY_SIZE,
+  })
   private clients = new Map<string, SocketLike>()
   private voiceSessions = new Map<string, () => void>() // userId -> stop function
 
@@ -178,9 +323,62 @@ export class GatewayServer {
   private registerRoutes(): void {
     this.app.register(websocketPlugin)
 
+    // ── Security Headers ───────────────────────────────────────────
+    this.app.addHook("onRequest", async (_req, reply) => {
+      reply.header("X-Content-Type-Options", "nosniff")
+      reply.header("X-Frame-Options", "DENY")
+      reply.header("X-XSS-Protection", "1; mode=block")
+      reply.header("Referrer-Policy", "strict-origin-when-cross-origin")
+      reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+      if (process.env.NODE_ENV === "production") {
+        reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+      }
+    })
+
+    // ── CORS (origin-restricted) ───────────────────────────────────
+    this.app.addHook("onRequest", async (req, reply) => {
+      const origin = req.headers.origin
+      if (origin && ALLOWED_ORIGINS.has(origin)) {
+        reply.header("Access-Control-Allow-Origin", origin)
+        reply.header("Vary", "Origin")
+      }
+      reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+      reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+      reply.header("Access-Control-Max-Age", "86400")
+      if (req.method === "OPTIONS") {
+        return reply.code(204).send()
+      }
+    })
+
+    // ── Rate Limiting ──────────────────────────────────────────────
+    this.app.addHook("onRequest", async (req, reply) => {
+      // Skip rate limiting for health checks
+      if (req.url === "/health") return
+
+      const ip = req.ip
+      if (isRateLimited(ip)) {
+        logger.warn("rate limit exceeded", { ip, url: req.url })
+        return reply.code(429).send({
+          error: "Too many requests",
+          retryAfterSeconds: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000),
+        })
+      }
+      reply.header("X-RateLimit-Limit", String(RATE_LIMIT_MAX))
+      reply.header("X-RateLimit-Remaining", String(getRateLimitRemaining(ip)))
+    })
+
+    // ── Global Error Handler ───────────────────────────────────────
+    this.app.setErrorHandler(async (error: Error, _req, reply) => {
+      logger.error("unhandled route error", { error: error.message, stack: error.stack })
+      const statusCode = (error as Error & { statusCode?: number }).statusCode ?? 500
+      return reply.code(statusCode).send({
+        error: error.message ?? "Internal Server Error",
+      })
+    })
+
     this.app.register(async (app) => {
-      app.get("/ws", { websocket: true }, async (socket: SocketLike, req: any) => {
-        const token = this.extractToken(req)
+      app.get("/ws", { websocket: true }, async (socket, req) => {
+        const token = this.extractToken(req as unknown as { headers: Record<string, string | undefined>; query: Record<string, unknown> })
         const auth = await authenticateWebSocket(token)
         if (!auth) {
           const failure = getAuthFailure(token)
@@ -194,26 +392,39 @@ export class GatewayServer {
           return
         }
 
-        await this.attachAuthenticatedClient(socket, auth)
+        await this.attachAuthenticatedClient(socket as unknown as SocketLike, auth)
       })
 
       app.get("/health", async () => ({
         status: "ok",
-        uptime: process.uptime(),
+        version: APP_VERSION,
+        uptime: Math.floor(process.uptime()),
         engines: orchestrator.getAvailableEngines(),
         channels: channelManager.getConnectedChannels(),
         users: multiUser.listUsers().length,
+        memory: { initialized: true },
+        daemon: daemon.isRunning(),
       }))
 
       app.post<{ Body?: { message?: unknown; userId?: unknown } }>(
         "/message",
         async (req, reply) => {
+          // Require Bearer token authentication
+          const token = extractBearerToken(req as { headers: Record<string, string | undefined> })
+          if (!token) {
+            return reply.code(401).send({ error: "Authorization header with Bearer token required" })
+          }
+          const auth = await authenticateWebSocket(token)
+          if (!auth) {
+            return reply.code(403).send({ error: "Invalid or expired token" })
+          }
+
           const message = asString(req.body?.message)
           if (message === null) {
             return reply.code(400).send({ error: "Invalid body: 'message' must be a string" })
           }
 
-          const userId = asString(req.body?.userId) ?? config.DEFAULT_USER_ID
+          const userId = auth.userId
           const response = await this.handleUserMessage(userId, message, "webchat")
           return { response }
         },
@@ -248,14 +459,29 @@ export class GatewayServer {
 
       app.get<{ Querystring: { userId?: string; days?: string } }>(
         "/api/usage/summary",
-        async (req) => {
-          const userId = req.query.userId ?? config.DEFAULT_USER_ID
+        async (req, reply) => {
+          // Require Bearer token authentication
+          const token = extractBearerToken(req as { headers: Record<string, string | undefined> })
+          if (!token) {
+            return reply.code(401).send({ error: "Authorization header with Bearer token required" })
+          }
+          const auth = await authenticateWebSocket(token)
+          if (!auth) {
+            return reply.code(403).send({ error: "Invalid or expired token" })
+          }
+
+          // Users can only query their own usage unless they pass a userId AND are the owner
+          const requestedUserId = req.query.userId ?? auth.userId
+          if (requestedUserId !== auth.userId && !multiUser.isOwner(auth.userId)) {
+            return reply.code(403).send({ error: "Cannot query another user's usage" })
+          }
+
           const days = parseDaysParam(req.query.days)
           const { startDate, endDate } = buildDateRange(days)
-          const summary = await usageTracker.getUserSummary(userId, startDate, endDate)
+          const summary = await usageTracker.getUserSummary(requestedUserId, startDate, endDate)
 
           return {
-            userId,
+            userId: requestedUserId,
             period: { start: startDate, end: endDate, days },
             summary,
           }
@@ -270,7 +496,11 @@ export class GatewayServer {
             return reply.code(503).send({ error: "Admin usage endpoint is not configured" })
           }
 
-          if (!isAdminTokenAuthorized(req.query.adminToken, configuredAdminToken)) {
+          // Accept admin token from Authorization header (preferred) or query string (legacy)
+          const adminCandidate = extractAdminToken(
+            req as { headers: Record<string, string | undefined>; query: Record<string, unknown> },
+          )
+          if (!isAdminTokenAuthorized(adminCandidate, configuredAdminToken)) {
             return reply.code(401).send({ error: "Unauthorized" })
           }
 
@@ -282,6 +512,89 @@ export class GatewayServer {
             period: { start: startDate, end: endDate, days },
             summary,
           }
+        },
+      )
+
+      // ── Model Selection API ──────────────────────────────────────────
+
+      app.get("/api/models", async (req, reply) => {
+        // Require auth for model listing
+        const token = extractBearerToken(req as { headers: Record<string, string | undefined> })
+        if (!token) {
+          return reply.code(401).send({ error: "Authorization header with Bearer token required" })
+        }
+        const auth = await authenticateWebSocket(token)
+        if (!auth) {
+          return reply.code(403).send({ error: "Invalid or expired token" })
+        }
+
+        const available = orchestrator.getAvailableEngines()
+        const { ENGINE_MODEL_CATALOG } = await import("../engines/model-preferences.js")
+
+        const engines = available.map((name) => ({
+          name,
+          displayName: ENGINE_MODEL_CATALOG[name]?.displayName ?? name,
+          models: ENGINE_MODEL_CATALOG[name]?.models ?? [],
+        }))
+
+        return { engines, count: engines.length }
+      })
+
+      app.post<{ Body?: { userId?: string; engine?: string; model?: string } }>(
+        "/api/models/select",
+        async (req, reply) => {
+          // Require auth for model selection
+          const token = extractBearerToken(req as { headers: Record<string, string | undefined> })
+          if (!token) {
+            return reply.code(401).send({ error: "Authorization header with Bearer token required" })
+          }
+          const auth = await authenticateWebSocket(token)
+          if (!auth) {
+            return reply.code(403).send({ error: "Invalid or expired token" })
+          }
+
+          const { modelPreferences } = await import("../engines/model-preferences.js")
+          const userId = auth.userId
+          const engine = asString(req.body?.engine)
+          const model = asString(req.body?.model)
+
+          if (!engine) {
+            return reply.code(400).send({ error: "'engine' is required" })
+          }
+
+          const available = orchestrator.getAvailableEngines()
+          if (!available.includes(engine)) {
+            return reply.code(400).send({
+              error: `Engine '${engine}' is not available`,
+              available,
+            })
+          }
+
+          const pref = model
+            ? modelPreferences.setModel(userId, engine, model)
+            : modelPreferences.setEngine(userId, engine)
+
+          return { ok: true, userId, preference: pref }
+        },
+      )
+
+      app.delete<{ Querystring: { userId?: string } }>(
+        "/api/models/select",
+        async (req, reply) => {
+          // Require auth for model reset
+          const token = extractBearerToken(req as { headers: Record<string, string | undefined> })
+          if (!token) {
+            return reply.code(401).send({ error: "Authorization header with Bearer token required" })
+          }
+          const auth = await authenticateWebSocket(token)
+          if (!auth) {
+            return reply.code(403).send({ error: "Invalid or expired token" })
+          }
+
+          const { modelPreferences } = await import("../engines/model-preferences.js")
+          const userId = auth.userId
+          modelPreferences.reset(userId)
+          return { ok: true, userId, preference: "auto" }
         },
       )
     })
@@ -299,7 +612,8 @@ export class GatewayServer {
 
     safeSend(socket, buildConnectedPayload(clientId))
 
-    socket.on("message", async (raw: Buffer) => {
+    socket.on("message", async (...args: unknown[]) => {
+      const raw = args[0] as Buffer
       if (socketClosed) {
         return
       }
@@ -322,7 +636,7 @@ export class GatewayServer {
     })
   }
 
-  private async handle(msg: GatewayClientMessage, auth?: AuthContext, socket?: SocketLike): Promise<any> {
+  private async handle(msg: GatewayClientMessage, auth?: AuthContext, socket?: SocketLike): Promise<GatewayResponse> {
     const userId = auth?.userId ?? msg.userId ?? config.DEFAULT_USER_ID
 
     await multiUser.getOrCreate(userId, "gateway")
@@ -390,7 +704,7 @@ export class GatewayServer {
     userId: string,
     msg: GatewayClientMessage,
     socket?: SocketLike,
-  ): Promise<any> {
+  ): Promise<GatewayResponse> {
     if (!socket) {
       return { type: "error", message: "Voice mode requires an active WebSocket", requestId: msg.requestId }
     }
@@ -445,12 +759,12 @@ export class GatewayServer {
     }
   }
 
-  private async handleVoiceStop(userId: string, requestId?: unknown): Promise<any> {
+  private async handleVoiceStop(userId: string, requestId?: unknown): Promise<GatewayResponse> {
     this.stopVoiceSession(userId, "client request")
     return { type: "voice_stopped", requestId }
   }
 
-  private async handleWakeWord(userId: string, msg: GatewayClientMessage): Promise<any> {
+  private async handleWakeWord(userId: string, msg: GatewayClientMessage): Promise<GatewayResponse> {
     const keyword = msg.keyword ?? "orion"
     const windowSeconds = msg.windowSeconds ?? 2
 
@@ -492,20 +806,20 @@ export class GatewayServer {
     }
   }
 
-  private extractToken(req: any): string | null {
-    const queryToken = req?.query?.token
+  private extractToken(req: { headers: Record<string, string | undefined>; query: Record<string, unknown> }): string | null {
+    const queryToken = req.query?.token
     if (typeof queryToken === "string" && queryToken.trim().length > 0) {
       return queryToken.trim()
     }
 
     if (Array.isArray(queryToken)) {
-      const first = queryToken.find((value) => typeof value === "string" && value.trim().length > 0)
+      const first = (queryToken as unknown[]).find((value) => typeof value === "string" && (value as string).trim().length > 0)
       if (typeof first === "string") {
         return first.trim()
       }
     }
 
-    const authHeader = req?.headers?.authorization
+    const authHeader = req.headers?.authorization
     if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
       const token = authHeader.slice(7).trim()
       return token.length > 0 ? token : null
@@ -522,4 +836,9 @@ export const __gatewayTestUtils = {
   isAdminTokenAuthorized,
   normalizeIncomingClientMessage,
   estimateTokensFromText,
+  extractAdminToken,
+  isRateLimited,
+  RATE_LIMIT_MAX,
+  RATE_LIMIT_WINDOW_MS,
+  APP_VERSION,
 }
