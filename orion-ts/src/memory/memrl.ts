@@ -121,6 +121,12 @@ function normalizeSimilarityThreshold(value: number): number {
   return clamp(value, 0, 1)
 }
 
+function computeEffectiveReward(explicitReward: number, taskSuccess: boolean): number {
+  const normalizedExplicit = clamp(explicitReward, 0, 1)
+  const successSignal = taskSuccess ? 1 : 0
+  return clamp((normalizedExplicit * 0.7) + (successSignal * 0.3), 0, 1)
+}
+
 /**
  * Convert LanceDB distance/score to similarity score (0-1)
  */
@@ -229,22 +235,32 @@ export class MemRLUpdater {
       return
     }
 
-    // Compute effective reward combining explicit and implicit signals
-    const clampedReward = clamp(feedback.reward, 0, 1)
-    const successSignal = feedback.taskSuccess ? 1 : 0
-    const effectiveReward = clamp((clampedReward * this.gamma) + (successSignal * (1 - this.gamma)), 0, 1)
+    // Compute effective reward combining explicit and implicit signals.
+    // gamma remains strictly a temporal discount factor in Bellman updates.
+    const effectiveReward = computeEffectiveReward(feedback.reward, feedback.taskSuccess)
+
+    const nodes = await prisma.memoryNode.findMany({
+      where: {
+        id: {
+          in: uniqueIds,
+        },
+      },
+      select: {
+        id: true,
+        userId: true,
+        utilityScore: true,
+        qValue: true,
+        metadata: true,
+      },
+    })
+
+    const nodeById = new Map(nodes.map((node) => [node.id, node]))
+    const fallbackNextMaxQByUser = new Map<string, number>()
 
     // Update each memory with Bellman Q-value and utility
     await Promise.all(uniqueIds.map(async (memoryId) => {
       try {
-        const node = await prisma.memoryNode.findUnique({
-          where: { id: memoryId },
-          select: { 
-            utilityScore: true,
-            qValue: true,
-            metadata: true,
-          },
-        })
+        const node = nodeById.get(memoryId)
 
         if (!node) {
           return
@@ -252,19 +268,49 @@ export class MemRLUpdater {
 
         // Get current Q-value (default to utility if not set)
         const currentQ = node.qValue ?? node.utilityScore
-        
-        // Estimate next max Q (simplified - in practice could look ahead)
-        const nextMaxQ = feedback.taskSuccess ? 0.9 : 0.3
-        
+
+        const peerMaxQ = nodes
+          .filter((candidate) => candidate.userId === node.userId && candidate.id !== memoryId)
+          .map((candidate) => candidate.qValue ?? candidate.utilityScore)
+
+        let nextMaxQ = peerMaxQ.length > 0
+          ? Math.max(...peerMaxQ)
+          : Number.NaN
+
+        if (!Number.isFinite(nextMaxQ)) {
+          if (fallbackNextMaxQByUser.has(node.userId)) {
+            nextMaxQ = fallbackNextMaxQByUser.get(node.userId) ?? 0.5
+          } else {
+            const successor = await prisma.memoryNode.findFirst({
+              where: {
+                userId: node.userId,
+                id: { not: memoryId },
+              },
+              orderBy: { qValue: "desc" },
+              select: {
+                qValue: true,
+                utilityScore: true,
+              },
+            })
+
+            nextMaxQ = successor
+              ? (successor.qValue ?? successor.utilityScore)
+              : 0.5
+            fallbackNextMaxQByUser.set(node.userId, nextMaxQ)
+          }
+        }
+
+        nextMaxQ = clamp(nextMaxQ, -1, 1)
+
         // Bellman update: Q = Q + α * (r + γ * maxQ' - Q)
         const bellmanUpdate = currentQ + this.qAlpha * (effectiveReward + this.gamma * nextMaxQ - currentQ)
-        const newQValue = clamp(bellmanUpdate, 0.05, 0.99)
-        
+        const newQValue = clamp(bellmanUpdate, -1, 1)
+
         // Traditional utility update with exponential moving average
         const newUtility = clamp(
           node.utilityScore + this.alpha * (effectiveReward - node.utilityScore),
-          0.05,
-          0.99,
+          0,
+          1,
         )
 
         // Update metadata with IEU triplet info
@@ -304,6 +350,7 @@ export class MemRLUpdater {
           newUtility,
           oldQ: currentQ,
           newQ: newQValue,
+          nextMaxQ,
           reward: effectiveReward,
         })
       } catch (error) {
@@ -512,4 +559,5 @@ export const __memrlTestUtils = {
   toSimilarityScore,
   extractIntent,
   normalizeSimilarityThreshold,
+  computeEffectiveReward,
 }

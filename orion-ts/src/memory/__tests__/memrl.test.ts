@@ -38,4 +38,11 @@ describe("MemRL helpers", () => {
     expect(intent).toBe("Plan a migration")
     expect(intent.length).toBeLessThanOrEqual(200)
   })
+
+  it("blends explicit reward with task-success signal deterministically", () => {
+    expect(__memrlTestUtils.computeEffectiveReward(0.8, false)).toBeCloseTo(0.56)
+    expect(__memrlTestUtils.computeEffectiveReward(0.8, true)).toBeCloseTo(0.86)
+    expect(__memrlTestUtils.computeEffectiveReward(-10, false)).toBe(0)
+    expect(__memrlTestUtils.computeEffectiveReward(10, true)).toBe(1)
+  })
 })
