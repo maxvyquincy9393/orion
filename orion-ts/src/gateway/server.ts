@@ -37,6 +37,7 @@ import {
   getAuthFailure,
   type AuthContext,
 } from "./auth-middleware.js"
+import { createRateLimiter } from "./rate-limiter.js"
 
 const logger = createLogger("gateway")
 
@@ -83,42 +84,22 @@ const CSRF_EXEMPT_PATH_PREFIXES = ["/webhooks/"]
 
 // ── Rate Limiter ─────────────────────────────────────────────────────────────
 
-interface RateLimitEntry {
-  count: number
-  windowStart: number
-}
-
-const rateLimitStore = new Map<string, RateLimitEntry>()
+const rateLimiter = createRateLimiter({
+  maxRequests: RATE_LIMIT_MAX,
+  windowMs: RATE_LIMIT_WINDOW_MS,
+})
 
 function isRateLimited(ip: string): boolean {
-  const now = Date.now()
-  const entry = rateLimitStore.get(ip)
-
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitStore.set(ip, { count: 1, windowStart: now })
-    return false
-  }
-
-  entry.count++
-  return entry.count > RATE_LIMIT_MAX
+  return rateLimiter.consume(ip).limited
 }
 
 function getRateLimitRemaining(ip: string): number {
-  const entry = rateLimitStore.get(ip)
-  if (!entry) return RATE_LIMIT_MAX
-  const now = Date.now()
-  if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS) return RATE_LIMIT_MAX
-  return Math.max(0, RATE_LIMIT_MAX - entry.count)
+  return rateLimiter.getRemaining(ip)
 }
 
 // Cleanup stale rate limit entries every 5 minutes
 setInterval(() => {
-  const now = Date.now()
-  for (const [ip, entry] of rateLimitStore) {
-    if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS * 2) {
-      rateLimitStore.delete(ip)
-    }
-  }
+  rateLimiter.cleanup()
 }, 300_000).unref()
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -540,15 +521,16 @@ export class GatewayServer {
       if (req.url === "/health") return
 
       const ip = req.ip
-      if (isRateLimited(ip)) {
+      const decision = rateLimiter.consume(ip)
+      if (decision.limited) {
         logger.warn("rate limit exceeded", { ip, url: req.url })
         return reply.code(429).send({
           error: "Too many requests",
-          retryAfterSeconds: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000),
+          retryAfterSeconds: Math.max(1, Math.ceil(decision.retryAfterMs / 1000)),
         })
       }
-      reply.header("X-RateLimit-Limit", String(RATE_LIMIT_MAX))
-      reply.header("X-RateLimit-Remaining", String(getRateLimitRemaining(ip)))
+      reply.header("X-RateLimit-Limit", String(decision.limit))
+      reply.header("X-RateLimit-Remaining", String(decision.remaining))
     })
 
     // ── Global Error Handler ───────────────────────────────────────
