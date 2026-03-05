@@ -167,12 +167,13 @@ function filterText(content: string, options: FilterTextOptions): PromptFilterRe
       sanitized: options.addSanitizedPrefix ? `${SANITIZED_PREFIX}${sanitizedBody}` : sanitizedBody,
     }
   } catch (error) {
-    // Fail-open by design to preserve availability; downstream layers still
-    // apply affordance checks and output scanning.
+    // Fail closed on internal errors to avoid allowing injected input.
     log.error(options.logErrorMessage, error)
+    const blocked = "[BLOCKED]"
     return {
-      safe: true,
-      sanitized: content,
+      safe: false,
+      reason: "Prompt filter internal error",
+      sanitized: options.addSanitizedPrefix ? `${SANITIZED_PREFIX}${blocked}` : blocked,
     }
   }
 }

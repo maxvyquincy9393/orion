@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { filterPrompt, filterToolResult } from "../prompt-filter.js"
 
@@ -38,5 +38,18 @@ describe("prompt-filter", () => {
     expect(result.reason).toBe("Direct injection pattern detected")
     expect(result.sanitized.startsWith("[CONTENT SANITIZED] ")).toBe(false)
     expect(result.sanitized).toContain("[BLOCKED]")
+  })
+
+  it("fails closed when internal matcher throws", () => {
+    const spy = vi.spyOn(RegExp.prototype, "test").mockImplementation(() => {
+      throw new Error("regex failure")
+    })
+
+    const result = filterPrompt("safe content", "u1")
+    expect(result.safe).toBe(false)
+    expect(result.reason).toBe("Prompt filter internal error")
+    expect(result.sanitized).toContain("[CONTENT SANITIZED] [BLOCKED]")
+
+    spy.mockRestore()
   })
 })
