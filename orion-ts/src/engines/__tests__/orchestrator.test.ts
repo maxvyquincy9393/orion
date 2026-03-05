@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import config from "../../config.js"
 import { engineStats } from "../engine-stats.js"
@@ -37,6 +37,7 @@ describe("Orchestrator", () => {
   afterEach(() => {
     config.ENGINE_STATS_ENABLED = originalEngineStatsEnabled
     engineStats.reset()
+    vi.restoreAllMocks()
   })
 
   it("routes to OpenRouter when it is the only available reasoning engine", () => {
@@ -81,5 +82,78 @@ describe("Orchestrator", () => {
     expect(groqMetrics.errorRate).toBe(1)
     expect(openRouterMetrics.callCount).toBe(1)
     expect(openRouterMetrics.errorRate).toBe(0)
+  })
+
+  it("opens circuit after repeated failures and skips unhealthy engine", async () => {
+    const orchestrator = new Orchestrator()
+    let groqCalls = 0
+    let fallbackCalls = 0
+
+    const groq = makeEngine("groq", async () => {
+      groqCalls += 1
+      throw new Error("groq unavailable")
+    })
+    const openRouter = makeEngine("openrouter", async () => {
+      fallbackCalls += 1
+      return "fallback response"
+    })
+
+    installEngines(orchestrator, [groq, openRouter])
+
+    for (let i = 0; i < 5; i += 1) {
+      const output = await orchestrator.generate("reasoning", { prompt: "hello" })
+      expect(output).toBe("fallback response")
+    }
+
+    // Circuit should now be open for groq; next call should skip it.
+    const output = await orchestrator.generate("reasoning", { prompt: "hello" })
+    expect(output).toBe("fallback response")
+    expect(groqCalls).toBe(5)
+    expect(fallbackCalls).toBe(6)
+  })
+
+  it("allows engine probe again after cooldown and closes on success", async () => {
+    const orchestrator = new Orchestrator()
+    let groqCalls = 0
+    let fallbackCalls = 0
+    let now = 0
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now)
+
+    const groq = makeEngine("groq", async () => {
+      groqCalls += 1
+      if (groqCalls <= 5) {
+        throw new Error("temporary outage")
+      }
+      return "recovered"
+    })
+    const openRouter = makeEngine("openrouter", async () => {
+      fallbackCalls += 1
+      return "fallback"
+    })
+
+    installEngines(orchestrator, [groq, openRouter])
+
+    for (let i = 0; i < 5; i += 1) {
+      const output = await orchestrator.generate("reasoning", { prompt: "hello" })
+      expect(output).toBe("fallback")
+    }
+
+    // Still in cooldown; groq should remain skipped.
+    now = 30_000
+    expect(await orchestrator.generate("reasoning", { prompt: "hello" })).toBe("fallback")
+    expect(groqCalls).toBe(5)
+
+    // Cooldown expired; groq should be probed and recover.
+    now = 61_000
+    expect(await orchestrator.generate("reasoning", { prompt: "hello" })).toBe("recovered")
+    expect(groqCalls).toBe(6)
+
+    // Circuit should be closed now; groq continues serving.
+    now = 62_000
+    expect(await orchestrator.generate("reasoning", { prompt: "hello" })).toBe("recovered")
+    expect(groqCalls).toBe(7)
+
+    expect(fallbackCalls).toBe(6)
+    nowSpy.mockRestore()
   })
 })
