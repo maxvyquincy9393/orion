@@ -68,6 +68,9 @@ describe("CausalGraph integration (mocked)", () => {
       findFirst: MockFn<any>
     }
     causalEdge: {
+      findUnique: MockFn<any>
+      update: MockFn<any>
+      create: MockFn<any>
       findMany: MockFn<any>
     }
     hyperEdge: {
@@ -96,6 +99,9 @@ describe("CausalGraph integration (mocked)", () => {
       .mockResolvedValueOnce({ id: "node-b" })
       .mockResolvedValue({ id: "node-x" })
     prismaMock.causalNode.findFirst.mockResolvedValue(null)
+    prismaMock.causalEdge.findUnique.mockResolvedValue(null)
+    prismaMock.causalEdge.update.mockResolvedValue({ id: "edge-1", strength: 0.7, evidence: 2 })
+    prismaMock.causalEdge.create.mockResolvedValue({ id: "edge-1" })
     prismaMock.causalEdge.findMany.mockResolvedValue([])
 
     prismaMock.hyperEdge.findMany.mockResolvedValue([])
@@ -287,5 +293,36 @@ describe("CausalGraph integration (mocked)", () => {
         evidence: 3,
       },
     ])
+  })
+
+  it("rejects new edges that would introduce a causal cycle", async () => {
+    const graph = new CausalGraph()
+
+    prismaMock.causalNode.findMany.mockResolvedValue([
+      { id: "node-a", event: "A", eventKey: "a", createdAt: new Date() },
+      { id: "node-b", event: "B", eventKey: "b", createdAt: new Date() },
+    ])
+
+    prismaMock.causalEdge.findUnique.mockResolvedValue(null)
+    prismaMock.causalEdge.findMany
+      .mockResolvedValueOnce([]) // A -> B, no path from B to A
+      .mockResolvedValueOnce([{ toId: "node-b" }]) // B -> A, path A -> B already exists
+
+    orchestratorMock.generate
+      .mockResolvedValueOnce(`{"events":[],"causes":[{"cause":"A","effect":"B","confidence":0.9}],"hyperEdges":[]}`)
+      .mockResolvedValueOnce(`{"events":[],"causes":[{"cause":"B","effect":"A","confidence":0.9}],"hyperEdges":[]}`)
+
+    await graph.extractAndUpdate("user-1", "Observed over time: event A consistently causes event B.")
+    await graph.extractAndUpdate("user-1", "Observed over time: event B now appears to cause event A.")
+
+    expect(prismaMock.causalEdge.create).toHaveBeenCalledTimes(1)
+    expect(prismaMock.causalEdge.create).toHaveBeenCalledWith({
+      data: {
+        userId: "user-1",
+        fromId: "node-a",
+        toId: "node-b",
+        strength: 0.9,
+      },
+    })
   })
 })

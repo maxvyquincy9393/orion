@@ -55,6 +55,27 @@ interface PrismaLikeKnownError {
   meta?: PrismaLikeErrorMeta
 }
 
+type CycleRejectionReason = "self_loop" | "path_to_source"
+
+export interface CausalGraphCycleErrorDetails {
+  code: "CAUSAL_GRAPH_CYCLE"
+  userId: string
+  fromId: string
+  toId: string
+  reason: CycleRejectionReason
+}
+
+export class CausalGraphCycleError extends Error {
+  readonly code = "CAUSAL_GRAPH_CYCLE"
+  readonly details: CausalGraphCycleErrorDetails
+
+  constructor(details: CausalGraphCycleErrorDetails) {
+    super(`reject edge ${details.fromId}->${details.toId}: ${details.reason}`)
+    this.name = "CausalGraphCycleError"
+    this.details = details
+  }
+}
+
 function clamp(value: number, min = 0, max = 1): number {
   if (Number.isNaN(value)) {
     return min
@@ -435,6 +456,16 @@ export class CausalGraph {
     toId: string,
     confidence: number,
   ): Promise<void> {
+    if (fromId === toId) {
+      throw new CausalGraphCycleError({
+        code: "CAUSAL_GRAPH_CYCLE",
+        userId,
+        fromId,
+        toId,
+        reason: "self_loop",
+      })
+    }
+
     const existingEdge = await prisma.causalEdge.findUnique({
       where: { fromId_toId: { fromId, toId } },
     })
@@ -448,6 +479,17 @@ export class CausalGraph {
         },
       })
       return
+    }
+
+    const createsCycle = await this.wouldCreateCycle(userId, fromId, toId)
+    if (createsCycle) {
+      throw new CausalGraphCycleError({
+        code: "CAUSAL_GRAPH_CYCLE",
+        userId,
+        fromId,
+        toId,
+        reason: "path_to_source",
+      })
     }
 
     try {
@@ -521,7 +563,20 @@ export class CausalGraph {
         if (!fromId || !toId) {
           continue
         }
-        await this.upsertCausalEdge(userId, fromId, toId, cause.confidence)
+        try {
+          await this.upsertCausalEdge(userId, fromId, toId, cause.confidence)
+        } catch (error) {
+          if (error instanceof CausalGraphCycleError) {
+            log.warn("causal edge rejected because it forms a cycle", {
+              userId,
+              cause: cause.cause,
+              effect: cause.effect,
+              details: error.details,
+            })
+            continue
+          }
+          throw error
+        }
       }
 
       const hyperEdgesToPersist = new Map<string, ExtractedHyperEdge>()
@@ -740,6 +795,43 @@ export class CausalGraph {
     } catch (error) {
       log.error("addHyperEdge failed", { userId, relation, error })
     }
+  }
+
+  private async wouldCreateCycle(userId: string, fromId: string, toId: string): Promise<boolean> {
+    if (fromId === toId) {
+      return true
+    }
+
+    const visited = new Set<string>([toId])
+    let frontier: string[] = [toId]
+
+    while (frontier.length > 0) {
+      const edges = await prisma.causalEdge.findMany({
+        where: {
+          userId,
+          fromId: {
+            in: frontier,
+          },
+        },
+        select: {
+          toId: true,
+        },
+      })
+
+      const nextFrontier: string[] = []
+      for (const edge of edges) {
+        if (edge.toId === fromId) {
+          return true
+        }
+        if (!visited.has(edge.toId)) {
+          visited.add(edge.toId)
+          nextFrontier.push(edge.toId)
+        }
+      }
+      frontier = nextFrontier
+    }
+
+    return false
   }
 
   async queryHyperEdges(userId: string, query: string): Promise<Array<{
