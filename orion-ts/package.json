@@ -23,7 +23,8 @@
     "wa:scan": "tsx src/cli/onboard.ts --flow quickstart --channel whatsapp --whatsapp-mode scan",
     "wa:cloud": "tsx src/cli/onboard.ts --flow quickstart --channel whatsapp --whatsapp-mode cloud",
     "dedupe:causal-graph": "tsx src/cli/causal-graph-dedupe.ts --apply",
-    "dedupe:causal-graph:dry-run": "tsx src/cli/causal-graph-dedupe.ts --dry-run"
+    "dedupe:causal-graph:dry-run": "tsx src/cli/causal-graph-dedupe.ts --dry-run",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",
@@ -46,20 +47,27 @@
     "grammy": "^1.40.0",
     "groq-sdk": "^0.37.0",
     "js-yaml": "^4.1.0",
+    "msedge-tts": "^2.0.4",
     "node-cron": "^4.2.1",
     "openai": "^6.22.0",
     "p-queue": "^9.1.0",
+    "qrcode-terminal": "^0.12.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.3.0",
     "@types/ws": "^8.18.1",
-    "playwright": "^1.58.2",
+    "@vitest/coverage-v8": "4.0.18",
+    "minimatch": "^10.2.4",
     "prisma": "^6.19.2",
+    "rollup": "^4.59.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.58.2"
   }
 }
