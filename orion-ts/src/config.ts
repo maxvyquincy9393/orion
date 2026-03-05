@@ -122,6 +122,9 @@ const ConfigSchema = z.object({
   VOICE_LANGUAGE: z.string().default(""),
   // Channel Send permission (T-1.6)
   ALLOW_PROACTIVE_CHANNEL_SEND: boolFromEnv.default(false),
+  // Daemon trigger controls
+  DAEMON_TRIGGER_COOLDOWN_MINUTES: intFromEnv.default(30),
+  DAEMON_TRIGGER_DEDUP_ENABLED: boolFromEnv.default(true),
   // Phase I-3: Session Compaction
   SESSION_COMPACTION_ENABLED: boolFromEnv.default(true),
   SESSION_CONTEXT_WINDOW_TOKENS: intFromEnv.default(32_000),

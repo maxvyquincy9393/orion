@@ -1,4 +1,4 @@
-﻿import { PrismaClient, Prisma, type Message, type Thread, type TriggerLog } from "@prisma/client"
+import { PrismaClient, Prisma, type Message, type Thread, type TriggerLog } from "@prisma/client"
 
 import { createLogger } from "../logger.js"
 
@@ -34,9 +34,10 @@ function fallbackMessage(
   content: string,
   channel?: string,
   metadata?: unknown,
-): Message {
+): Message & { __fallback: true } {
   return {
     id: `fallback-${Date.now()}`,
+    __fallback: true as const,
     userId,
     role,
     content,
@@ -46,9 +47,10 @@ function fallbackMessage(
   }
 }
 
-function fallbackThread(userId: string, state = "open", context?: unknown): Thread {
+function fallbackThread(userId: string, state = "open", context?: unknown): Thread & { __fallback: true } {
   return {
     id: `fallback-${Date.now()}`,
+    __fallback: true as const,
     userId,
     state,
     context: context === undefined ? null : (context as Prisma.JsonValue),
@@ -61,9 +63,10 @@ function fallbackTriggerLog(
   userId: string,
   triggerName: string,
   actedOn: boolean,
-): TriggerLog {
+): TriggerLog & { __fallback: true } {
   return {
     id: `fallback-${Date.now()}`,
+    __fallback: true as const,
     userId,
     triggerName,
     actedOn,
@@ -213,4 +216,30 @@ export async function getTriggerLogs(
     log.error("getTriggerLogs failed", error)
     return []
   }
+}
+
+export async function getLatestTriggerLog(
+  userId: string,
+  triggerName: string,
+): Promise<TriggerLog | null> {
+  try {
+    return await prisma.triggerLog.findFirst({
+      where: {
+        userId,
+        triggerName,
+      },
+      orderBy: {
+        firedAt: "desc",
+      },
+    })
+  } catch (error) {
+    log.error("getLatestTriggerLog failed", error)
+    return null
+  }
+}
+
+
+/** Check if a database result is a fallback (operation failed silently). */
+export function isFallback<T>(result: T): result is T & { __fallback: true } {
+  return typeof result === 'object' && result !== null && '__fallback' in result && (result as Record<string, unknown>).__fallback === true
 }
