@@ -33,6 +33,8 @@ import { filterPromptWithAffordance, type PromptSafetyResult } from "../security
 import { outputScanner, type OutputScanResult } from "../security/output-scanner.js"
 import { sessionStore } from "../sessions/session-store.js"
 import { createLogger } from "../logger.js"
+import { incrementMemoryRetrieval } from "../observability/metrics.js"
+import { withSpan } from "../observability/tracing.js"
 import { responseCritic } from "./critic.js"
 import { personaEngine } from "./persona.js"
 import { buildSystemPrompt } from "./system-prompt-builder.js"
@@ -371,7 +373,9 @@ export async function processMessage(
   assertNotAborted(signal)
 
   // Stage 1: Input safety
-  const inputSafety = await filterPromptWithAffordance(rawText, userId)
+  const inputSafety = await withSpan("pipeline.input_safety", { userId, channel }, async () => {
+    return filterPromptWithAffordance(rawText, userId)
+  })
   assertNotAborted(signal)
   if (!inputSafety.safe && inputSafety.affordance?.shouldBlock) {
     log.warn("message blocked by affordance checker", { userId, channel })
@@ -380,13 +384,20 @@ export async function processMessage(
   const safeText = inputSafety.sanitized
 
   // Stage 2: Persist user input and build retrieval context
-  const { messages, systemContext, retrievedMemoryIds } = await persistUserMessageAndBuildContext(
-    userId,
-    channel,
-    rawText,
-    safeText,
-    inputSafety,
+  const { messages, systemContext, retrievedMemoryIds } = await withSpan(
+    "pipeline.context_retrieval",
+    { userId, channel },
+    async () => {
+      return persistUserMessageAndBuildContext(
+        userId,
+        channel,
+        rawText,
+        safeText,
+        inputSafety,
+      )
+    },
   )
+  incrementMemoryRetrieval("pipeline_context")
   assertNotAborted(signal)
 
   // Stage 2.5: Opportunistic session compaction (best effort)
@@ -394,29 +405,37 @@ export async function processMessage(
   assertNotAborted(signal)
 
   // Stage 3 + 4: Persona detection and system prompt assembly
-  const dynamicContext = await buildPersonaDynamicContext(userId, safeText)
+  const dynamicContext = await withSpan("pipeline.persona_context", { userId, channel }, async () => {
+    return buildPersonaDynamicContext(userId, safeText)
+  })
   assertNotAborted(signal)
-  const systemPrompt = await buildSystemPrompt({
-    sessionMode,
-    includeSkills: true,
-    includeSafety: true,
-    extraContext: dynamicContext,
+  const systemPrompt = await withSpan("pipeline.system_prompt", { userId, channel, sessionMode }, async () => {
+    return buildSystemPrompt({
+      sessionMode,
+      includeSkills: true,
+      includeSafety: true,
+      extraContext: dynamicContext,
+    })
   })
   assertNotAborted(signal)
 
   // Stage 5: LLM generation (respects user model preferences from /model command)
   const taskType = classifyTaskType(safeText)
   const prompt = buildGenerationPrompt(systemContext, safeText)
-  const raw = await orchestrator.generateForUser(userId, taskType, {
-    prompt,
-    context: messages,
-    systemPrompt,
-    signal,
+  const raw = await withSpan("pipeline.engine_generate", { userId, channel, taskType }, async () => {
+    return orchestrator.generateForUser(userId, taskType, {
+      prompt,
+      context: messages,
+      systemPrompt,
+      signal,
+    })
   })
   assertNotAborted(signal)
 
   // Stage 6: Critique and refinement
-  const critiqued = await responseCritic.critiqueAndRefine(safeText, raw, CRITIC_MAX_ITERATIONS)
+  const critiqued = await withSpan("pipeline.critique", { userId, channel }, async () => {
+    return responseCritic.critiqueAndRefine(safeText, raw, CRITIC_MAX_ITERATIONS)
+  })
   assertNotAborted(signal)
   if (critiqued.refined) {
     log.debug("response refined by critic", {

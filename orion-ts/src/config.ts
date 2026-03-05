@@ -86,7 +86,7 @@ const ConfigSchema = z.object({
   MEMRL_GAMMA: floatFromEnv.default(0.9),
   MEMRL_SIMILARITY_THRESHOLD: floatFromEnv.default(0.3),
   PERMISSIONS_FILE: z.string().default("permissions/permissions.yaml"),
-  VOICE_ENABLED: boolFromEnv.default(false),
+  VOICE_ENABLED: boolFromEnv.default(true),  // Edge TTS needs zero setup
   VISION_ENABLED: boolFromEnv.default(false),
   PYTHON_PATH: z.string().default("python"),
   GATEWAY_PORT: intFromEnv.default(18789),
@@ -103,6 +103,13 @@ const ConfigSchema = z.object({
   VISION_ENGINE: z.string().default("gemini"),
   // Voice configuration (T-3)
   VOICE_WHISPER_MODEL: z.string().default("base"),
+  // Phase 11: TARS Voice — native TypeScript TTS
+  VOICE_TTS_BACKEND: z.string().default("edge"),           // "edge" | "python"
+  VOICE_EDGE_VOICE: z.string().default("en-US-GuyNeural"), // Edge TTS neural voice
+  VOICE_EDGE_RATE: z.string().default("-8%"),               // TARS measured cadence
+  VOICE_EDGE_PITCH: z.string().default("-5Hz"),             // Slightly deeper
+  VOICE_DSP_ENABLED: boolFromEnv.default(true),            // Apply TARS DSP
+  VOICE_DSP_PRESET: z.string().default("tars"),            // "tars" | "clean"
   // Phase I-0: Hybrid Search
   HYBRID_SEARCH_ENABLED: boolFromEnv.default(true),
   // Phase I-1: VoI Chat Gating
@@ -116,6 +123,19 @@ const ConfigSchema = z.object({
   SESSION_CONTEXT_WINDOW_TOKENS: intFromEnv.default(32_000),
   // Phase I-4: Engine Stats
   ENGINE_STATS_ENABLED: boolFromEnv.default(true),
+  // Admin & Gateway
+  ADMIN_TOKEN: z.string().default(""),
+  GATEWAY_CORS_ORIGINS: z.string().default(""),
+  // Observability
+  OTEL_ENABLED: boolFromEnv.default(false),
+  OTEL_SERVICE_NAME: z.string().default("orion-ts"),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://127.0.0.1:4318/v1/traces"),
+  METRICS_ENABLED: boolFromEnv.default(true),
+  METRICS_PREFIX: z.string().default("orion_"),
+  // Supervisor / Agent limits
+  AGENT_TIMEOUT_MS: intFromEnv.default(120_000),
+  AGENT_MAX_SUBTASKS: intFromEnv.default(8),
+  SHUTDOWN_TIMEOUT_MS: intFromEnv.default(10_000),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
@@ -133,6 +153,13 @@ export type Config = z.infer<typeof ConfigSchema>
 
 export const config: Config = parsed.data
 
+export class ConfigValidationError extends Error {
+  constructor(public readonly missingKeys: string[]) {
+    super(`[Orion Config] Missing required variables: ${missingKeys.join(", ")}`)
+    this.name = "ConfigValidationError"
+  }
+}
+
 export function validateRequired(keys: Array<keyof Config>): void {
   const missing = keys.filter((key) => {
     const value = config[key]
@@ -140,11 +167,9 @@ export function validateRequired(keys: Array<keyof Config>): void {
   })
 
   if (missing.length > 0) {
-    console.error(
-      `[Orion Config Error] Missing required environment variables: ${missing.join(", ")}`,
-    )
-    process.exit(1)
+    throw new ConfigValidationError(missing.map(String))
   }
 }
 
 export default config
+

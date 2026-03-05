@@ -17,6 +17,7 @@ import { agentRunner } from "../agents/runner.js"
 import { skillLoader } from "../skills/loader.js"
 import { causalGraph } from "../memory/causal-graph.js"
 import { pluginLoader } from "../plugin-sdk/loader.js"
+import { initializeTracing, shutdownTracing } from "../observability/tracing.js"
 import { eventBus } from "./event-bus.js"
 import { processMessage } from "./message-pipeline.js"
 import { mcpClient, type MCPServerConfig } from "../mcp/client.js"
@@ -58,11 +59,15 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   log.info("starting orion-ts")
 
   await ensureWorkspaceStructure(workspaceDir)
+  await initializeTracing()
 
-  await prisma
-    .$connect()
-    .then(() => log.info("database connected"))
-    .catch((error: unknown) => log.error("database connection failed", error))
+  try {
+    await prisma.$connect()
+    log.info("database connected")
+  } catch (error: unknown) {
+    log.error("database connection failed", error)
+    throw new Error("Cannot start without database connection")
+  }
 
   await memory.init()
   await orchestrator.init()
@@ -100,6 +105,7 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
     }
     // Shutdown MCP clients
     await mcpClient.shutdown().catch((err) => log.warn("MCP shutdown error", err))
+    await shutdownTracing().catch((err) => log.warn("tracing shutdown error", err))
     await prisma.$disconnect()
   }
 

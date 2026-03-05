@@ -26,6 +26,8 @@ import { openAIEngine } from "./openai.js"
 import { openRouterEngine } from "./openrouter.js"
 import { modelPreferences } from "./model-preferences.js"
 import type { Engine, GenerateOptions, TaskType } from "./types.js"
+import { observeEngineCall } from "../observability/metrics.js"
+import { withSpan } from "../observability/tracing.js"
 
 const log = createLogger("engines.orchestrator")
 const ENGINE_TIMEOUT_MS = 30_000
@@ -148,7 +150,11 @@ export class Orchestrator {
 
     const startedAt = Date.now()
     try {
-      const output = await this.generateWithRetry(engine, options)
+      const output = await withSpan("engine.call", {
+        engine: engine.name,
+        task,
+        path: "preferred",
+      }, async () => this.generateWithRetry(engine, options))
       const elapsedMs = Date.now() - startedAt
 
       if (output.trim().length === 0) {
@@ -157,6 +163,7 @@ export class Orchestrator {
 
       this.markEngineSuccess(engine.name)
       engineStats.record(engine.name, elapsedMs, true)
+      observeEngineCall(engine.name, task, true, elapsedMs)
       this.lastUsed = {
         provider: engine.provider,
         model: engine.defaultModel ?? options.model ?? "unknown",
@@ -173,6 +180,7 @@ export class Orchestrator {
       const elapsedMs = Date.now() - startedAt
       this.markEngineFailure(engine.name)
       engineStats.record(engine.name, elapsedMs, false)
+      observeEngineCall(engine.name, task, false, elapsedMs)
       throw error
     }
   }
@@ -187,7 +195,11 @@ export class Orchestrator {
       const attemptStartedAt = Date.now()
 
       try {
-        const output = await this.generateWithRetry(engine, options)
+        const output = await withSpan("engine.call", {
+          engine: engine.name,
+          task,
+          attempt: attemptIndex + 1,
+        }, async () => this.generateWithRetry(engine, options))
         const elapsedMs = Date.now() - attemptStartedAt
 
         if (output.trim().length === 0) {
@@ -197,6 +209,7 @@ export class Orchestrator {
 
         this.markEngineSuccess(engine.name)
         engineStats.record(engine.name, elapsedMs, true)
+        observeEngineCall(engine.name, task, true, elapsedMs)
         this.lastUsed = {
           provider: engine.provider,
           model: engine.defaultModel ?? options.model ?? "unknown",
@@ -218,6 +231,7 @@ export class Orchestrator {
         const elapsedMs = Date.now() - attemptStartedAt
         this.markEngineFailure(engine.name)
         engineStats.record(engine.name, elapsedMs, false)
+        observeEngineCall(engine.name, task, false, elapsedMs)
         failures.push({ engineName: engine.name, error })
 
         if (attemptIndex < attempts.length - 1) {

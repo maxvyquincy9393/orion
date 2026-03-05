@@ -34,6 +34,12 @@ import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
 import { memory } from "../memory/store.js"
 import { multiUser } from "../multiuser/manager.js"
+import {
+  metricsContentType,
+  observeHttpRequest,
+  renderPrometheusMetrics,
+} from "../observability/metrics.js"
+import { withSpan } from "../observability/tracing.js"
 import { usageTracker } from "../observability/usage-tracker.js"
 import { voice } from "../voice/bridge.js"
 import {
@@ -479,6 +485,10 @@ export class GatewayServer {
   private registerRoutes(): void {
     this.app.register(websocketPlugin)
 
+    this.app.addHook("onRequest", async (req) => {
+      ;(req as { __metricsStartTime?: number }).__metricsStartTime = Date.now()
+    })
+
     // ── Security Headers ───────────────────────────────────────────
     this.app.addHook("onRequest", async (_req, reply) => {
       reply.header("X-Content-Type-Options", "nosniff")
@@ -556,6 +566,14 @@ export class GatewayServer {
       })
     })
 
+    this.app.addHook("onResponse", async (req, reply) => {
+      const startedAt = (req as { __metricsStartTime?: number }).__metricsStartTime
+      if (typeof startedAt !== "number") {
+        return
+      }
+      observeHttpRequest(req.method, normalizeRequestPath(req.url), reply.statusCode, Date.now() - startedAt)
+    })
+
     this.app.register(async (app) => {
       app.get("/ws", { websocket: true }, async (socket, req) => {
         const token = extractWebSocketToken(
@@ -607,10 +625,20 @@ export class GatewayServer {
           }
 
           const userId = auth.userId
-          const response = await this.handleUserMessage(userId, message, "webchat")
+          const response = await withSpan("gateway.http_message", {
+            route: "/message",
+            userId,
+            channel: "webchat",
+          }, async () => this.handleUserMessage(userId, message, "webchat"))
           return { response }
         },
       )
+
+      app.get("/metrics", async (_req, reply) => {
+        const metrics = await renderPrometheusMetrics()
+        reply.header("Content-Type", metricsContentType())
+        return metrics
+      })
 
       app.get(
         "/api/csrf-token",
@@ -861,7 +889,10 @@ export class GatewayServer {
     switch (msg.type) {
       case "message": {
         const content = ensureMessageContent(msg.content, "message")
-        const response = await this.handleUserMessage(userId, content, "webchat", {
+        const response = await withSpan("gateway.ws_message", {
+          userId,
+          channel: "webchat",
+        }, async () => this.handleUserMessage(userId, content, "webchat", {
           onChunk: async (chunk, chunkIndex, totalChunks) => {
             if (!socket) {
               return
@@ -875,6 +906,7 @@ export class GatewayServer {
             })
           },
         })
+        )
         return { type: "final", content: response, requestId: msg.requestId }
       }
       case "status":
