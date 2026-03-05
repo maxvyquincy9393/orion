@@ -5,6 +5,7 @@ export interface GenerateOptions {
   maxTokens?: number
   temperature?: number
   model?: string
+  signal?: AbortSignal
 }
 
 export interface Engine {

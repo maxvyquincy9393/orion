@@ -23,10 +23,12 @@
 import config from "../config.js"
 import { saveMessage } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
+import type { TaskType } from "../engines/types.js"
 import { memory, type BuildContextResult } from "../memory/store.js"
 import { profiler } from "../memory/profiler.js"
 import { causalGraph } from "../memory/causal-graph.js"
 import { sessionSummarizer } from "../memory/session-summarizer.js"
+import { detectQueryComplexity } from "../memory/temporal-index.js"
 import { filterPromptWithAffordance, type PromptSafetyResult } from "../security/prompt-filter.js"
 import { outputScanner, type OutputScanResult } from "../security/output-scanner.js"
 import { sessionStore } from "../sessions/session-store.js"
@@ -37,7 +39,7 @@ import { buildSystemPrompt } from "./system-prompt-builder.js"
 
 const log = createLogger("core.pipeline")
 
-const BLOCKED_RESPONSE = "Gue tidak bisa bantu dengan itu."
+const BLOCKED_RESPONSE = "I can't help with that request."
 const PROVISIONAL_MEMORY_REWARD = 0.5
 const CRITIC_MAX_ITERATIONS = 2
 
@@ -46,6 +48,26 @@ const DEFAULT_CONTEXT_WINDOW_TOKENS = 32_000
 const SESSION_COMPACTION_TRIGGER_RATIO = 0.75
 const SESSION_COMPACTION_KEEP_LAST_TURNS = 6
 const APPROX_CHARS_PER_TOKEN = 3
+const STREAM_CHUNK_SIZE = 140
+
+const CODE_KEYWORDS = /\b(code|bug|debug|stack trace|typescript|javascript|python|refactor|compile|function|class)\b/i
+const MULTIMODAL_KEYWORDS = /\b(image|photo|video|audio|voice|screenshot|pdf|attachment)\b/i
+const LOCAL_KEYWORDS = /\b(local|offline|on-device|ollama|localhost)\b/i
+
+export class PipelineAbortError extends Error {
+  readonly code = "PIPELINE_ABORTED"
+
+  constructor(message = "Message pipeline aborted") {
+    super(message)
+    this.name = "PipelineAbortError"
+  }
+}
+
+export type PipelineChunkCallback = (
+  chunk: string,
+  chunkIndex: number,
+  totalChunks: number,
+) => void | Promise<void>
 
 /** Returned by the pipeline so callers can use the response and IDs for MemRL feedback. */
 export interface PipelineResult {
@@ -55,6 +77,8 @@ export interface PipelineResult {
   retrievedMemoryIds: string[]
   /** Estimated provisional reward before user follow-up is known. */
   provisionalReward: number
+  /** Task type selected by the router for this request. */
+  taskType: TaskType
 }
 
 export interface PipelineOptions {
@@ -62,6 +86,10 @@ export interface PipelineOptions {
   channel: string
   /** Session mode for system prompt assembly. */
   sessionMode?: "dm" | "group" | "subagent"
+  /** Optional cancellation signal. */
+  signal?: AbortSignal
+  /** Optional pseudo-stream callback emitted from final response chunks. */
+  onChunk?: PipelineChunkCallback
 }
 
 function blockedResult(): PipelineResult {
@@ -69,6 +97,59 @@ function blockedResult(): PipelineResult {
     response: BLOCKED_RESPONSE,
     retrievedMemoryIds: [],
     provisionalReward: 0,
+    taskType: "fast",
+  }
+}
+
+function resolveAbortMessage(signal: AbortSignal): string {
+  if (signal.reason instanceof Error && signal.reason.message) {
+    return signal.reason.message
+  }
+  if (typeof signal.reason === "string" && signal.reason.trim().length > 0) {
+    return signal.reason
+  }
+  return "Pipeline aborted by signal"
+}
+
+function assertNotAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return
+  }
+  throw new PipelineAbortError(resolveAbortMessage(signal))
+}
+
+function classifyTaskType(input: string): TaskType {
+  const normalized = input.trim()
+  if (!normalized) {
+    return "fast"
+  }
+  if (LOCAL_KEYWORDS.test(normalized)) {
+    return "local"
+  }
+  if (MULTIMODAL_KEYWORDS.test(normalized)) {
+    return "multimodal"
+  }
+  if (CODE_KEYWORDS.test(normalized)) {
+    return "code"
+  }
+  return detectQueryComplexity(normalized) === "complex" ? "reasoning" : "fast"
+}
+
+async function emitPseudoStream(
+  content: string,
+  onChunk: PipelineChunkCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  const safeContent = content.trim()
+  if (!safeContent) {
+    return
+  }
+
+  const totalChunks = Math.ceil(safeContent.length / STREAM_CHUNK_SIZE)
+  for (let offset = 0; offset < safeContent.length; offset += STREAM_CHUNK_SIZE) {
+    assertNotAborted(signal)
+    const chunkIndex = Math.floor(offset / STREAM_CHUNK_SIZE)
+    await onChunk(safeContent.slice(offset, offset + STREAM_CHUNK_SIZE), chunkIndex, totalChunks)
   }
 }
 
@@ -286,10 +367,12 @@ export async function processMessage(
   rawText: string,
   options: PipelineOptions,
 ): Promise<PipelineResult> {
-  const { channel, sessionMode = "dm" } = options
+  const { channel, sessionMode = "dm", signal, onChunk } = options
+  assertNotAborted(signal)
 
   // Stage 1: Input safety
   const inputSafety = await filterPromptWithAffordance(rawText, userId)
+  assertNotAborted(signal)
   if (!inputSafety.safe && inputSafety.affordance?.shouldBlock) {
     log.warn("message blocked by affordance checker", { userId, channel })
     return blockedResult()
@@ -304,25 +387,37 @@ export async function processMessage(
     safeText,
     inputSafety,
   )
+  assertNotAborted(signal)
 
   // Stage 2.5: Opportunistic session compaction (best effort)
   await maybeCompactSessionHistory(userId, channel)
+  assertNotAborted(signal)
 
   // Stage 3 + 4: Persona detection and system prompt assembly
   const dynamicContext = await buildPersonaDynamicContext(userId, safeText)
+  assertNotAborted(signal)
   const systemPrompt = await buildSystemPrompt({
     sessionMode,
     includeSkills: true,
     includeSafety: true,
     extraContext: dynamicContext,
   })
+  assertNotAborted(signal)
 
-  // Stage 5: LLM generation
+  // Stage 5: LLM generation (respects user model preferences from /model command)
+  const taskType = classifyTaskType(safeText)
   const prompt = buildGenerationPrompt(systemContext, safeText)
-  const raw = await orchestrator.generate("reasoning", { prompt, context: messages, systemPrompt })
+  const raw = await orchestrator.generateForUser(userId, taskType, {
+    prompt,
+    context: messages,
+    systemPrompt,
+    signal,
+  })
+  assertNotAborted(signal)
 
   // Stage 6: Critique and refinement
   const critiqued = await responseCritic.critiqueAndRefine(safeText, raw, CRITIC_MAX_ITERATIONS)
+  assertNotAborted(signal)
   if (critiqued.refined) {
     log.debug("response refined by critic", {
       score: critiqued.critique.score,
@@ -341,6 +436,11 @@ export async function processMessage(
     critiqued.finalResponse,
     scanResult,
   )
+  assertNotAborted(signal)
+
+  if (onChunk) {
+    await emitPseudoStream(response, onChunk, signal)
+  }
 
   // Stage 9: Async side effects (fire-and-forget)
   launchAsyncSideEffects(userId, safeText)
@@ -349,5 +449,11 @@ export async function processMessage(
     response,
     retrievedMemoryIds,
     provisionalReward: computeProvisionalReward(retrievedMemoryIds),
+    taskType,
   }
+}
+
+export const __pipelineTestUtils = {
+  classifyTaskType,
+  emitPseudoStream,
 }

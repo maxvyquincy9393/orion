@@ -25,7 +25,11 @@ import { daemon } from "../background/daemon.js"
 import { channelManager } from "../channels/manager.js"
 import { whatsAppChannel } from "../channels/whatsapp.js"
 import config from "../config.js"
-import { handleIncomingUserMessage, estimateTokensFromText } from "../core/incoming-message-service.js"
+import {
+  handleIncomingUserMessage,
+  estimateTokensFromText,
+  type IncomingMessageOptions,
+} from "../core/incoming-message-service.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
 import { memory } from "../memory/store.js"
@@ -138,6 +142,16 @@ function safeSend(socket: Pick<SocketLike, "send">, payload: unknown): boolean {
   } catch {
     return false
   }
+}
+
+function isCancellationError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+  if (error.name === "AbortError" || error.name === "PipelineAbortError") {
+    return true
+  }
+  return Boolean((error as Error & { code?: string }).code === "PIPELINE_ABORTED")
 }
 
 function parseDaysParam(raw: unknown, fallback = DEFAULT_USAGE_DAYS): number {
@@ -815,6 +829,10 @@ export class GatewayServer {
         const res = await this.handle(msg, auth, socket)
         safeSend(socket, res)
       } catch (err) {
+        if (isCancellationError(err)) {
+          safeSend(socket, { type: "cancelled", message: String(err) })
+          return
+        }
         safeSend(socket, { type: "error", message: String(err) })
       }
     })
@@ -843,8 +861,21 @@ export class GatewayServer {
     switch (msg.type) {
       case "message": {
         const content = ensureMessageContent(msg.content, "message")
-        const response = await this.handleUserMessage(userId, content, "webchat")
-        return { type: "response", content: response, requestId: msg.requestId }
+        const response = await this.handleUserMessage(userId, content, "webchat", {
+          onChunk: async (chunk, chunkIndex, totalChunks) => {
+            if (!socket) {
+              return
+            }
+            safeSend(socket, {
+              type: "chunk",
+              chunk,
+              chunkIndex,
+              totalChunks,
+              requestId: msg.requestId,
+            })
+          },
+        })
+        return { type: "final", content: response, requestId: msg.requestId }
       }
       case "status":
         return buildStatusPayload(msg.requestId)
@@ -869,8 +900,13 @@ export class GatewayServer {
     logger.info(`gateway running at ws://${config.GATEWAY_HOST}:${this.port}`)
   }
 
-  private async handleUserMessage(userId: string, rawMessage: string, channel: string): Promise<string> {
-    return handleIncomingUserMessage(userId, rawMessage, channel)
+  private async handleUserMessage(
+    userId: string,
+    rawMessage: string,
+    channel: string,
+    options?: IncomingMessageOptions,
+  ): Promise<string> {
+    return handleIncomingUserMessage(userId, rawMessage, channel, options)
   }
 
   private stopVoiceSession(userId: string, reason: string): boolean {
