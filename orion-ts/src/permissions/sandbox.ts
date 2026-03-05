@@ -3,6 +3,7 @@ import * as path from "path"
 import * as yaml from "js-yaml"
 
 import { isAuthorizedSender, type AccessMode } from "../gateway/auth-middleware.js"
+import { createLogger } from "../logger.js"
 
 export enum PermissionAction {
   SEND_MESSAGE = "messaging.send",
@@ -59,6 +60,8 @@ export interface AuthCheckContext {
   mode?: AccessMode
 }
 
+const logger = createLogger("permissions.sandbox")
+
 export class PermissionSandbox {
   private config: Record<string, PermissionSection> = {}
   private channelManager: ChannelManager | null = null
@@ -77,9 +80,9 @@ export class PermissionSandbox {
       const absolutePath = path.resolve(filePath)
       const content = await fs.promises.readFile(absolutePath, "utf-8")
       this.config = yaml.load(content) as Record<string, PermissionSection>
-      console.log("[PermissionSandbox] Permissions loaded from", absolutePath)
+      logger.info("permissions loaded", { path: absolutePath })
     } catch (err) {
-      console.error("[PermissionSandbox] Failed to load permissions:", err)
+      logger.error("failed to load permissions", err)
       this.config = {}
     }
   }
