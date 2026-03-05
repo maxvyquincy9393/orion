@@ -142,6 +142,8 @@ const ConfigSchema = z.object({
   // Supervisor / Agent limits
   AGENT_TIMEOUT_MS: intFromEnv.default(120_000),
   AGENT_MAX_SUBTASKS: intFromEnv.default(8),
+  AGENT_MAX_LLM_CALLS: intFromEnv.default(40),
+  LATS_EARLY_STOP_THRESHOLD: floatFromEnv.default(0.95),
   SHUTDOWN_TIMEOUT_MS: intFromEnv.default(10_000),
 })
 

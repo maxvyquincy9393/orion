@@ -1,7 +1,8 @@
 import crypto from "node:crypto"
 
-import { generateText } from "ai"
+import { generateText, type LanguageModel } from "ai"
 
+import config from "../config.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { orionTools } from "./tools.js"
 import { createLogger } from "../logger.js"
@@ -15,6 +16,12 @@ import { taskPlanner, type TaskDAG } from "./task-planner.js"
 import { executionMonitor, type TaskResult } from "./execution-monitor.js"
 import { buildSystemPrompt } from "../core/system-prompt-builder.js"
 import { LoopDetector } from "../core/loop-detector.js"
+
+// ── Research-Paper Modules (Reflexion, Self-Refine, CoALA Memory) ────────────
+import { reflexionLoop } from "../core/reflexion.js"
+import { selfRefine } from "../core/self-refine.js"
+import { WorkingMemory } from "../memory/working-memory.js"
+import { episodicMemory } from "../memory/episodic.js"
 
 const logger = createLogger("runner")
 
@@ -30,6 +37,20 @@ export interface AgentResult {
   result: string
   error?: string
   durationMs: number
+}
+
+function normalizeMaxLlmCalls(value: number | undefined): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(1, Math.floor(value))
+  }
+  return Math.max(1, Math.floor(config.AGENT_MAX_LLM_CALLS))
+}
+
+function wouldExceedLlmBudget(currentCalls: number, nextCalls: number, maxCalls: number): boolean {
+  if (!Number.isFinite(nextCalls) || nextCalls <= 0) {
+    return currentCalls > maxCalls
+  }
+  return currentCalls + Math.floor(nextCalls) > maxCalls
 }
 
 export class AgentRunner {
@@ -51,6 +72,22 @@ export class AgentRunner {
     const start = Date.now()
 
     try {
+      // ── 1. Working Memory (CoALA scratchpad for this task) ──
+      const wm = new WorkingMemory(`task_${task.id}`)
+
+      // ── 2. Episodic Memory — recall past lessons for this type of task ──
+      const userId = task.userId ?? "unknown"
+      const failureLessons = episodicMemory.getFailureLessons(userId, task.task)
+      const successPatterns = episodicMemory.getSuccessPatterns(userId, task.task)
+      const episodicContext = episodicMemory.toContext(userId, task.task)
+
+      if (failureLessons.length > 0) {
+        wm.observe(`Past failures to avoid: ${failureLessons.join("; ")}`)
+      }
+      if (successPatterns.length > 0) {
+        wm.observe(`Past successes to replicate: ${successPatterns.join("; ")}`)
+      }
+
       const engine = orchestrator.route("reasoning")
       const inferredTaskType = inferTaskType(task.task)
       const taskScope = getScopeForTask(inferredTaskType)
@@ -87,7 +124,8 @@ export class AgentRunner {
         ? `Context: ${task.context}\n\nTask: ${task.task}`
         : task.task
 
-      const systemPrompt = await buildSystemPrompt({
+      // ── 3. Build system prompt enriched with episodic memory ──
+      const baseSystemPrompt = await buildSystemPrompt({
         sessionMode: "subagent",
         includeSkills: true,
         includeSafety: true,
@@ -95,33 +133,105 @@ export class AgentRunner {
         availableTools: Object.keys(reviewedTools),
       })
 
+      const systemPrompt = episodicContext
+        ? `${baseSystemPrompt}\n\n--- Episodic Memory ---\n${episodicContext}`
+        : baseSystemPrompt
+
+      // ── 4. Generate initial response ──
       let output = ""
       try {
+        // Tools are Record<string, unknown> from security wrappers but AI SDK expects ToolSet.
+        // The underlying objects are structurally compatible; cast at the boundary.
         const result = await generateText({
-          model: engine as any,
+          model: engine as unknown as LanguageModel,
           system: systemPrompt,
-          ...(Object.keys(reviewedTools).length > 0 ? { tools: reviewedTools as any } : {}),
+          ...(Object.keys(reviewedTools).length > 0
+            ? { tools: reviewedTools as Parameters<typeof generateText>[0]["tools"] }
+            : {}),
           prompt,
         })
         output = result.text
-      } catch {
+      } catch (aiError) {
+        logger.warn("AI SDK generation failed, falling back to orchestrator", {
+          taskId: task.id,
+          error: String(aiError),
+        })
         output = await orchestrator.generate("reasoning", { prompt, systemPrompt })
       }
 
-      const critiqued = await responseCritic.critiqueAndRefine(task.task, output, 1)
-      output = critiqued.finalResponse
+      wm.storePartial(output.slice(0, 500))
 
-      if (critiqued.refined) {
-        logger.debug("response refined", {
-          taskId: task.id,
-          score: critiqued.critique.score,
-          iterations: critiqued.iterations,
+      // ── 5. Self-Refine: structured multi-dimension iterative refinement ──
+      //    (replaces simple responseCritic for deeper quality improvement)
+      try {
+        const refined = await selfRefine(output, {
+          task: task.task,
+          dimensions: ["accuracy", "completeness", "clarity", "relevance"],
+          maxIterations: 2,
         })
+
+        if (refined.output !== output) {
+          wm.think(`Self-refine improved output (${refined.iterations} iterations, satisfied=${refined.satisfiedEarly})`)
+          output = refined.output
+        }
+
+        // ── 6. Reflexion fallback: if self-refine couldn't satisfy, retry from scratch ──
+        if (!refined.satisfiedEarly && refined.finalScores.some((s) => s.score < 0.5)) {
+          logger.info("self-refine unsatisfied, engaging reflexion loop", { taskId: task.id })
+          wm.think("Output quality still low after self-refine, attempting reflexion retry")
+
+          const reflexionResult = await reflexionLoop(
+            task.task,
+            async (augmentedPrompt) => {
+              return orchestrator.generate("reasoning", {
+                prompt: augmentedPrompt,
+                systemPrompt,
+              })
+            },
+            { maxTrials: 2 },
+          )
+
+          if (reflexionResult.passed || reflexionResult.output.length > output.length * 0.5) {
+            output = reflexionResult.output
+            wm.think(`Reflexion ${reflexionResult.passed ? "accepted" : "best-effort"} after ${reflexionResult.attempts} trials`)
+          }
+        }
+      } catch (refineErr) {
+        // Self-refine/reflexion failed — fall back to legacy critic
+        logger.warn("self-refine pipeline failed, falling back to critic", {
+          taskId: task.id,
+          error: String(refineErr),
+        })
+        const critiqued = await responseCritic.critiqueAndRefine(task.task, output, 1)
+        output = critiqued.finalResponse
       }
 
-      logger.info(`task ${task.id} done in ${Date.now() - start}ms`)
-      return { id: task.id, result: output, durationMs: Date.now() - start }
+      // ── 7. Record episode for future recall ──
+      const durationMs = Date.now() - start
+      episodicMemory.record({
+        userId,
+        task: task.task,
+        approach: inferredTaskType,
+        outcome: "success",
+        result: output.slice(0, 500),
+        lesson: `Completed in ${durationMs}ms using ${inferredTaskType} approach`,
+        tags: [inferredTaskType],
+      })
+
+      logger.info(`task ${task.id} done in ${durationMs}ms`)
+      return { id: task.id, result: output, durationMs }
     } catch (err) {
+      // Record failure episode for learning
+      episodicMemory.record({
+        userId: task.userId ?? "unknown",
+        task: task.task,
+        approach: "unknown",
+        outcome: "failure",
+        result: String(err),
+        lesson: `Failed with error: ${String(err).slice(0, 200)}`,
+        tags: ["error"],
+      })
+
       return {
         id: task.id,
         result: "",
@@ -150,16 +260,36 @@ export class AgentRunner {
     return results
   }
 
-  async runWithSupervisor(goal: string, maxSubtasks = 8): Promise<string> {
-    logger.info("supervisor starting", { goal: goal.slice(0, 80), maxSubtasks })
+  async runWithSupervisor(
+    goal: string,
+    maxSubtasks = config.AGENT_MAX_SUBTASKS,
+    options: { maxLlmCalls?: number } = {},
+  ): Promise<string> {
+    const maxLlmCalls = normalizeMaxLlmCalls(options.maxLlmCalls)
+    logger.info("supervisor starting", { goal: goal.slice(0, 80), maxSubtasks, maxLlmCalls })
 
-    const timeoutMs = 120_000
+    const timeoutMs = config.AGENT_TIMEOUT_MS
     let timeoutHandle: NodeJS.Timeout | undefined
+    let llmCallsUsed = 0
+
+    const consumeLlmBudget = (count: number, stage: string): void => {
+      if (!Number.isFinite(count) || count <= 0) {
+        return
+      }
+
+      if (wouldExceedLlmBudget(llmCallsUsed, count, maxLlmCalls)) {
+        llmCallsUsed += Math.floor(count)
+        throw new Error(`LLM call budget exceeded at ${stage} (${llmCallsUsed}/${maxLlmCalls})`)
+      }
+
+      llmCallsUsed += Math.floor(count)
+    }
     
     // Phase I-2: Create LoopDetector instance per supervisor call
     const loopDetector = new LoopDetector()
 
     const supervisorRun = async (): Promise<string> => {
+      consumeLlmBudget(1, "task_planner")
       const dag = await taskPlanner.plan(goal)
       const boundedDag = this.limitDagSize(dag, maxSubtasks)
       const executionWaves = taskPlanner.getExecutionOrder(boundedDag)
@@ -167,14 +297,15 @@ export class AgentRunner {
 
       for (const wave of executionWaves) {
         logger.info("executing wave", { tasks: wave.map((node) => node.id) })
+        for (const node of wave) {
+          if (llmCallsUsed >= maxLlmCalls) {
+            throw new Error(`LLM call budget reached before node execution (${llmCallsUsed}/${maxLlmCalls})`)
+          }
 
-        // Phase I-2: Pass loopDetector to executeNode
-        const waveResults = await Promise.all(
-          wave.map((node) => executionMonitor.executeNode(node, completedResults, loopDetector)),
-        )
-
-        for (const result of waveResults) {
+          // Phase I-2: Pass loopDetector to executeNode
+          const result = await executionMonitor.executeNode(node, completedResults, loopDetector)
           completedResults.set(result.nodeId, result)
+          consumeLlmBudget(Math.max(1, result.attempts), `node:${result.nodeId}`)
           
           // Phase I-2: Check for loop break signal
           if (result.loopBreak) {
@@ -206,6 +337,7 @@ Results: ${successfulOutputs.slice(0, 4000)}
 
 Provide a clear, unified answer.`
 
+      consumeLlmBudget(1, "final_synthesis")
       return orchestrator.generate("reasoning", { prompt: synthesisPrompt })
     }
 
@@ -268,9 +400,12 @@ Provide a clear, unified answer.`
       const tasks = Array.isArray(payload.tasks) ? (payload.tasks as AgentTask[]) : []
       result = await this.runParallel(tasks)
     } else if (message.action === "runner.supervise") {
+      const maxLlmCallsRaw = Number(payload.maxLlmCalls)
+      const maxLlmCalls = Number.isFinite(maxLlmCallsRaw) ? maxLlmCallsRaw : undefined
       result = await this.runWithSupervisor(
         String(payload.goal ?? ""),
         Number(payload.maxSubtasks ?? 8),
+        { maxLlmCalls },
       )
     } else {
       result = { error: `unknown action: ${message.action}` }
@@ -296,3 +431,8 @@ Provide a clear, unified answer.`
 }
 
 export const agentRunner = new AgentRunner()
+
+export const __runnerTestUtils = {
+  normalizeMaxLlmCalls,
+  wouldExceedLlmBudget,
+}
