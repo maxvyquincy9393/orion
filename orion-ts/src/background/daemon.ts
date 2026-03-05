@@ -14,6 +14,7 @@ import { acpRouter } from "../acp/router.js"
 import { signMessage, type ACPMessage, type AgentCredential } from "../acp/protocol.js"
 import { eventBus } from "../core/event-bus.js"
 import { heartbeat } from "./heartbeat.js"
+import { isWithinHardQuietHours } from "./quiet-hours.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
@@ -132,9 +133,22 @@ export class OrionDaemon {
       await this.checkForActivity(userId)
       await this.maybeRunTemporalMaintenance(userId)
 
+      const now = new Date()
+      const blockedByQuietHours = isWithinHardQuietHours(now)
+
       for (const trigger of triggers) {
         let actedOn = false
         try {
+          if (blockedByQuietHours) {
+            logger.info("Trigger blocked by hard quiet-hours gate", {
+              trigger: trigger.name,
+              userId: trigger.userId,
+              hour: now.getHours(),
+            })
+            await logTrigger(trigger.userId, trigger.name, false)
+            continue
+          }
+
           const channel = "webchat"
           const context = await contextPredictor.predict(trigger.userId, channel)
           const voi = voiCalculator.calculate({
