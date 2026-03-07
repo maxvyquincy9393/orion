@@ -4,7 +4,7 @@ Even Dead, I'm The Hero.
 
 Persistent AI companion with long-term memory. Runs locally, supports 6 LLM providers, and delivers across 9 channels.
 
-Official product identity is `EDITH`. Legacy names such as `EDITH`, `EDITH`, `edith`, and `tars` may still appear in compatibility paths or internal implementation details while the repo converges.
+Official product identity is `EDITH` — Even Dead, I'm The Hero.
 
 ## Quick Start
 
@@ -91,7 +91,7 @@ WebChat, Discord, Telegram, WhatsApp (Baileys/Cloud), Slack, Signal, LINE, Matri
 
 ## Voice
 
-Built-in EDITH voice uses Edge TTS with a legacy `tars` DSP preset under the hood:
+Built-in EDITH voice uses Edge TTS with the `edith` DSP preset under the hood:
 
 ```env
 VOICE_ENABLED=true

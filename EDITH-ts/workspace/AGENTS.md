@@ -24,7 +24,7 @@ Skills:
 - `SOUL.md` and `AGENTS.md` are treated as security-sensitive runtime files
 - Identity files are read-only during normal runtime
 - Official product identity is `EDITH`
-- Legacy labels such as `EDITH`, `EDITH`, `edith`, and `tars` are compatibility or subsystem labels, not top-level product identity
+- All legacy labels (`Orion`, `Nova`, `jarvis`, `tars`, `OpenClaw`) have been replaced with `EDITH` as the sole product identity
 
 ## Anti-Sycophancy Policy
 

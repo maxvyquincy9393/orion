@@ -9,7 +9,7 @@ EDITH expands to: `Even Dead, I'm The Hero`.
 - Use `EDITH` for the product name in user-facing text, docs, UI labels, banners, and operator workflows.
 - Treat `EDITH` and `EDITH` as legacy names that may still exist in old filenames, config paths, tests, or internal symbols.
 - Treat `edith` as a legacy mode alias for the OS-agent experience, not as a competing product name.
-- Treat `tars` as an internal voice preset label, not as a separate voice product brand.
+- Voice DSP preset is now `edith` (formerly `tars`).
 - Treat `EDITH` only as an architectural reference or inspiration source.
 
 ## Practical Guidance

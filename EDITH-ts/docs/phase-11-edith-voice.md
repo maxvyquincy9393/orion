@@ -36,7 +36,7 @@ VOICE_EDGE_VOICE=en-US-GuyNeural # Any Edge neural voice
 VOICE_EDGE_RATE=-8%              # SSML rate adjustment
 VOICE_EDGE_PITCH=-5Hz            # SSML pitch adjustment
 VOICE_DSP_ENABLED=true           # Apply EDITH DSP effects
-VOICE_DSP_PRESET=tars            # "tars" or "clean"
+VOICE_DSP_PRESET=edith           # "edith" or "clean"
 ```
 
 ## Alternative Voices
