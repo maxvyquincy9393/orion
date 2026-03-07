@@ -82,7 +82,7 @@ function normalizeDiscordCommand(text: string): string | null {
   return command || null
 }
 
-function toDiscordOrionUserId(authorId: string): string {
+function toDiscordNovaUserId(authorId: string): string {
   return `discord:${authorId}`
 }
 
@@ -319,11 +319,11 @@ export class DiscordChannel implements BaseChannel {
       .then(async () => {
         await this.sendTypingIndicator(message)
 
-        const orionUserId = toDiscordOrionUserId(inbound.authorId)
-        await multiUser.getOrCreate(orionUserId, "discord")
+        const novaUserId = toDiscordNovaUserId(inbound.authorId)
+        await multiUser.getOrCreate(novaUserId, "discord")
 
         try {
-          const response = await handleIncomingUserMessage(orionUserId, inbound.text, "discord")
+          const response = await handleIncomingUserMessage(novaUserId, inbound.text, "discord")
           await this.send(toDiscordChannelTargetId(inbound.channelId), response)
         } catch (error) {
           log.error("Discord inbound processing failed", { channelId: inbound.channelId, error })
@@ -342,14 +342,14 @@ export class DiscordChannel implements BaseChannel {
   private async handleCommand(message: DiscordMessageLike, channelId: string, command: string): Promise<void> {
     if (command === "help" || command === "start") {
       await this.safeChannelSend(message, [
-        "Orion Discord test channel ready.",
+        "EDITH Discord test channel ready.",
         "",
         "Commands:",
         "!help or /help",
         "!id or /id",
         "!ping or /ping",
         "",
-        "Send any text message to chat with Orion.",
+        "Send any text message to chat with EDITH.",
       ].join("\n"))
       return
     }
@@ -447,7 +447,7 @@ export const discordChannel = new DiscordChannel()
 export const __discordTestUtils = {
   parseAllowedDiscordChannelIds,
   normalizeDiscordCommand,
-  toDiscordOrionUserId,
+  toDiscordNovaUserId,
   toDiscordChannelTargetId,
   parseDiscordChannelTargetId,
   extractDiscordInboundMessage,

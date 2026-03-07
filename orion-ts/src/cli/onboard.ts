@@ -6,6 +6,7 @@ import { stdin as input, stdout as output } from "node:process"
 import { pathToFileURL } from "node:url"
 
 import dotenv from "dotenv"
+import { writeNovaConfig } from "../config/nova-config.js"
 
 type ChannelChoice = "telegram" | "discord" | "whatsapp" | "webchat"
 type ProviderChoice = "groq" | "openrouter" | "anthropic" | "openai" | "gemini" | "ollama"
@@ -36,6 +37,8 @@ interface QuickstartPlan {
   channel: ChannelChoice
   provider: ProviderChoice
   updates: Record<string, string>
+  /** Structured nova.json config object to merge/write (not needed for buildNextSteps) */
+  jsonConfig?: Record<string, unknown>
 }
 
 interface NextStepCommands {
@@ -61,18 +64,18 @@ const PROVIDER_CHOICES: ReadonlyArray<{ key: ProviderChoice; label: string; desc
 ]
 
 const WHATSAPP_MODE_CHOICES: ReadonlyArray<{ key: WhatsAppSetupMode; label: string; description: string }> = [
-  { key: "scan", label: "Scan QR (recommended)", description: "Fastest OpenClaw-style test using Baileys (no Meta dashboard)" },
+  { key: "scan", label: "Scan QR (recommended)", description: "Fastest QR test using Baileys (no Meta dashboard)" },
   { key: "cloud", label: "Cloud API", description: "Official Meta API with webhook, token, and phone number ID" },
 ]
 
 function printHelp(): void {
-  console.log("Orion Onboarding (OpenClaw-inspired)")
+  console.log("EDITH Onboarding")
   console.log("====================================")
   console.log("")
   console.log("Usage:")
   console.log("  pnpm quickstart   # beginner-friendly quickstart wizard (recommended)")
   console.log("  pnpm onboard -- [--channel telegram|discord|whatsapp|webchat] [--provider groq|openrouter|anthropic|openai|gemini|ollama] [--whatsapp-mode scan|cloud]")
-  console.log("  pnpm wa:scan      # one-command WhatsApp QR setup (OpenClaw-style)")
+  console.log("  pnpm wa:scan      # one-command WhatsApp QR setup")
   console.log("  pnpm run setup    # compatibility alias (avoid bare `pnpm setup`, it conflicts with pnpm built-in)")
   console.log("")
   console.log("Options:")
@@ -82,7 +85,7 @@ function printHelp(): void {
   console.log("  --print-only        Do not write .env; print the planned changes")
   console.log("  --write             Force writing .env without print-only")
   console.log("  --yes               Non-interactive mode: use defaults, skip optional prompts, and skip final confirmation")
-  console.log("  --non-interactive   Alias for --yes (OpenClaw-style automation flag)")
+  console.log("  --non-interactive   Alias for --yes automation")
   console.log("  --wizard            Compatibility no-op (reserved for setup parity)")
   console.log("  --help, -h          Show this help")
 }
@@ -296,8 +299,8 @@ async function loadEnvTemplate(cwd: string): Promise<EnvTemplate> {
 }
 
 function resolveOnboardEnvPaths(cwd: string): OnboardEnvPaths {
-  const explicitEnvPath = typeof process.env.ORION_ENV_FILE === "string" && process.env.ORION_ENV_FILE.trim().length > 0
-    ? path.resolve(process.env.ORION_ENV_FILE.trim())
+  const explicitEnvPath = typeof process.env.NOVA_ENV_FILE === "string" && process.env.NOVA_ENV_FILE.trim().length > 0
+    ? path.resolve(process.env.NOVA_ENV_FILE.trim())
     : null
 
   return {
@@ -321,14 +324,14 @@ function redactSecretValue(key: string, value: string): string {
 }
 
 function defaultNextStepCommands(env: NodeJS.ProcessEnv = process.env): NextStepCommands {
-  const usingGlobalWrapper = [env.ORION_ENV_FILE, env.ORION_WORKSPACE, env.ORION_STATE_DIR]
+  const usingGlobalWrapper = [env.NOVA_ENV_FILE, env.NOVA_WORKSPACE, env.NOVA_STATE_DIR]
     .some((value) => typeof value === "string" && value.trim().length > 0)
 
   if (usingGlobalWrapper) {
     return {
-      doctor: "orion doctor",
-      all: "orion all",
-      onboard: "orion onboard",
+      doctor: "nova doctor",
+      all: "nova all",
+      onboard: "nova onboard",
     }
   }
 
@@ -344,7 +347,7 @@ function buildNextSteps(plan: QuickstartPlan, commands: NextStepCommands = defau
 
   lines.push("Next steps:")
   lines.push(`1. Run \`${commands.doctor}\` to validate config + ports.`)
-  lines.push(`2. Start Orion with channels: \`${commands.all}\``)
+  lines.push(`2. Start EDITH with channels: \`${commands.all}\``)
 
   if (plan.channel === "telegram") {
     lines.push("3. Open Telegram on your phone and DM your bot.")
@@ -475,14 +478,14 @@ async function askYesNo(
 }
 
 function buildQuickstartBanner(): void {
-  console.log("Orion Setup Wizard (OpenClaw-inspired)")
+  console.log("EDITH Setup Wizard")
   console.log("======================================")
   console.log("")
   console.log("This wizard helps you:")
   console.log("- choose a test channel (Telegram / Discord / WhatsApp / WebChat)")
   console.log("- for WhatsApp: choose Scan QR (quick test) or Cloud API (official)")
   console.log("- choose a model provider")
-  console.log("- write the minimum .env config for a phone-first quick test")
+  console.log("- write the config to edith.json (legacy nova.json is still supported)")
 }
 
 async function collectQuickstartPlan(
@@ -658,36 +661,141 @@ async function collectQuickstartPlan(
       updates.AUTO_START_GATEWAY = "true"
     }
 
-    return { channel, provider, updates }
+    // ── Build structured nova.json config (OpenClaw-style) ──────────
+    const jsonConfig: Record<string, unknown> = {}
+
+    // env section: provider API keys
+    const envSection: Record<string, string> = {}
+    const providerKeyName = providerEnvKey(provider)
+    if (provider === "ollama") {
+      if (updates.OLLAMA_BASE_URL) {
+        envSection.OLLAMA_BASE_URL = updates.OLLAMA_BASE_URL
+      }
+    } else if (updates[providerKeyName]) {
+      envSection[providerKeyName] = updates[providerKeyName]
+    }
+    if (setAutoStartGateway) {
+      envSection.AUTO_START_GATEWAY = "true"
+    }
+    if (Object.keys(envSection).length > 0) {
+      jsonConfig.env = envSection
+    }
+
+    // agents.defaults.model: set primary model based on provider
+    const providerModelMap: Record<ProviderChoice, string> = {
+      groq: "groq/llama-3.3-70b-versatile",
+      openrouter: "openrouter/auto",
+      anthropic: "anthropic/claude-sonnet-4-20250514",
+      openai: "openai/gpt-4o",
+      gemini: "gemini/gemini-2.0-flash",
+      ollama: "ollama/llama3.2",
+    }
+    jsonConfig.agents = {
+      defaults: {
+        model: {
+          primary: providerModelMap[provider] ?? providerModelMap.groq,
+          fallbacks: [],
+        },
+      },
+    }
+
+    // channels section: tokens directly in JSON
+    const channelsConfig: Record<string, Record<string, unknown>> = {}
+    if (channel === "telegram") {
+      const telegramCfg: Record<string, unknown> = {}
+      if (updates.TELEGRAM_BOT_TOKEN) telegramCfg.botToken = updates.TELEGRAM_BOT_TOKEN
+      if (updates.TELEGRAM_CHAT_ID) telegramCfg.chatId = updates.TELEGRAM_CHAT_ID
+      if (Object.keys(telegramCfg).length > 0) channelsConfig.telegram = telegramCfg
+    } else if (channel === "discord") {
+      const discordCfg: Record<string, unknown> = {}
+      if (updates.DISCORD_BOT_TOKEN) discordCfg.botToken = updates.DISCORD_BOT_TOKEN
+      if (updates.DISCORD_CHANNEL_ID) discordCfg.channelId = updates.DISCORD_CHANNEL_ID
+      if (Object.keys(discordCfg).length > 0) channelsConfig.discord = discordCfg
+    } else if (channel === "whatsapp") {
+      const waCfg: Record<string, unknown> = { enabled: true }
+      if (updates.WHATSAPP_MODE) waCfg.mode = updates.WHATSAPP_MODE
+      if (updates.WHATSAPP_CLOUD_ACCESS_TOKEN) waCfg.accessToken = updates.WHATSAPP_CLOUD_ACCESS_TOKEN
+      if (updates.WHATSAPP_CLOUD_PHONE_NUMBER_ID) waCfg.phoneNumberId = updates.WHATSAPP_CLOUD_PHONE_NUMBER_ID
+      if (updates.WHATSAPP_CLOUD_VERIFY_TOKEN) waCfg.verifyToken = updates.WHATSAPP_CLOUD_VERIFY_TOKEN
+      if (updates.WHATSAPP_CLOUD_ALLOWED_WA_IDS) waCfg.allowedWaIds = updates.WHATSAPP_CLOUD_ALLOWED_WA_IDS
+      if (updates.WHATSAPP_CLOUD_API_VERSION) waCfg.apiVersion = updates.WHATSAPP_CLOUD_API_VERSION
+      channelsConfig.whatsapp = waCfg
+    }
+    if (Object.keys(channelsConfig).length > 0) {
+      jsonConfig.channels = channelsConfig
+    }
+
+    return { channel, provider, updates, jsonConfig }
   } finally {
     rl?.close()
   }
 }
 
-function printPlannedChanges(plan: QuickstartPlan, envPath: string, templateSource: EnvTemplate["source"]): void {
+function printPlannedChanges(plan: QuickstartPlan, configPath: string): void {
   console.log("")
   console.log("Quickstart plan")
   console.log("===============")
   console.log(`Channel: ${plan.channel}`)
   console.log(`Provider: ${plan.provider}`)
-  console.log(`Target env file: ${envPath} (base: ${templateSource})`)
+  console.log(`Target config: ${configPath}`)
   console.log("")
-  if (Object.keys(plan.updates).length === 0) {
-    console.log("No env changes collected (you can still run the next steps and set values later).")
+  const cfg = plan.jsonConfig ?? {}
+  if (Object.keys(cfg).length === 0) {
+    console.log("No config changes collected (you can still run the next steps and set values later).")
     return
   }
-  console.log("Env updates:")
-  for (const [key, value] of Object.entries(plan.updates)) {
-    console.log(`- ${key}=${redactSecretValue(key, value)}`)
+  // Pretty-print structured config with redacted secrets
+  console.log("EDITH config updates:")
+  const displayConfig = structuredClone(cfg) as Record<string, unknown>
+  // Redact secrets in env section
+  if (displayConfig.env && typeof displayConfig.env === "object") {
+    const envObj = displayConfig.env as Record<string, string>
+    for (const [key, value] of Object.entries(envObj)) {
+      envObj[key] = redactSecretValue(key, value)
+    }
   }
+  // Redact secrets in channels section
+  if (displayConfig.channels && typeof displayConfig.channels === "object") {
+    for (const channelCfg of Object.values(displayConfig.channels as Record<string, Record<string, unknown>>)) {
+      for (const [key, value] of Object.entries(channelCfg)) {
+        if (typeof value === "string" && /token|key|password|secret/i.test(key)) {
+          channelCfg[key] = redactSecretValue(key, value)
+        }
+      }
+    }
+  }
+  console.log(JSON.stringify(displayConfig, null, 2))
 }
 
-async function writeEnvFile(cwd: string, template: EnvTemplate, updates: Record<string, string>): Promise<string> {
-  const { envPath } = resolveOnboardEnvPaths(cwd)
-  const merged = mergeEnvContent(template.content, updates)
-  await fs.mkdir(path.dirname(envPath), { recursive: true })
-  await fs.writeFile(envPath, merged, "utf-8")
-  return envPath
+/**
+ * Deep merge: second object's values win. Only merges plain objects.
+ */
+function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...target }
+  for (const [key, value] of Object.entries(source)) {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      result[key] !== null &&
+      typeof result[key] === "object" &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = deepMerge(result[key] as Record<string, unknown>, value as Record<string, unknown>)
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+async function loadExistingNovaJson(configPath: string): Promise<Record<string, unknown>> {
+  try {
+    const raw = await fs.readFile(configPath, "utf-8")
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return {}
+  }
 }
 
 async function runOnboarding(argv: string[]): Promise<void> {
@@ -697,34 +805,54 @@ async function runOnboarding(argv: string[]): Promise<void> {
   }
 
   const cwd = process.cwd()
-  const template = await loadEnvTemplate(cwd)
-  const { envPath } = resolveOnboardEnvPaths(cwd)
-  const currentEnv = readEnvValueMap(template.content)
-  const plan = await collectQuickstartPlan(args, currentEnv)
 
-  printPlannedChanges(plan, envPath, template.source)
+  // Load existing env values for the wizard prompts (from .env OR nova.json)
+  const template = await loadEnvTemplate(cwd)
+  const currentEnv = readEnvValueMap(template.content)
+
+  // Prefer the EDITH config path, but keep legacy nova.json compatible.
+  const edithConfigPath = path.resolve(cwd, "edith.json")
+  const legacyConfigPath = path.resolve(cwd, "nova.json")
+  const configPath = await fs.access(edithConfigPath).then(() => edithConfigPath).catch(async () => {
+    return await fs.access(legacyConfigPath).then(() => legacyConfigPath).catch(() => edithConfigPath)
+  })
+  const existingJson = await loadExistingNovaJson(configPath)
+  const existingEnv = (typeof existingJson.env === "object" && existingJson.env !== null)
+    ? existingJson.env as Record<string, string>
+    : {}
+  // Merge: nova.json env values override .env values for display purposes
+  const mergedCurrentEnv = { ...currentEnv, ...existingEnv }
+
+  const plan = await collectQuickstartPlan(args, mergedCurrentEnv)
+
+  printPlannedChanges(plan, configPath)
 
   if (args.writeMode === "print") {
     console.log("")
-    console.log("Print-only mode: .env was not modified.")
+    console.log("Print-only mode: EDITH config was not modified.")
   } else {
     let shouldWrite = args.yes
     if (!shouldWrite) {
       const rl = readline.createInterface({ input, output })
       try {
-        shouldWrite = await askYesNo(rl, "Write these changes to .env now?", true)
+        shouldWrite = await askYesNo(rl, "Write these changes to the EDITH config now?", true)
       } finally {
         rl.close()
       }
     }
 
     if (shouldWrite) {
-      await writeEnvFile(cwd, template, plan.updates)
+      // Deep-merge new config into existing nova.json
+      const merged = deepMerge(existingJson, plan.jsonConfig ?? {})
+      await writeNovaConfig(merged, configPath)
       console.log("")
-      console.log(`Wrote ${envPath}`)
+      console.log(`Wrote ${configPath}`)
+      console.log("")
+      console.log("Your config is stored in edith.json when present, or nova.json for legacy compatibility.")
+      console.log("No need to edit .env manually - EDITH reads config values directly.")
     } else {
       console.log("")
-      console.log("Skipped writing .env")
+      console.log("Skipped writing EDITH config")
     }
   }
 

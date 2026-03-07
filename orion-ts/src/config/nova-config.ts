@@ -11,6 +11,7 @@ const log = createLogger("config.nova-config")
 const ChannelPolicySchema = z.enum(["pairing", "allowlist", "open"])
 
 /**
+ * Channel config — OpenClaw-style.
  * Tokens/keys live directly in the JSON config alongside policy fields.
  */
 const ChannelConfigSchema = z
@@ -19,7 +20,7 @@ const ChannelConfigSchema = z
     allowFrom: z.array(z.string()).default([]),
     groupPolicy: ChannelPolicySchema.default("allowlist"),
     ackReaction: z.string().default("👀"),
-    // Channel-specific tokens 
+    // Channel-specific tokens (OpenClaw-style: tokens IN config, not .env)
     botToken: z.string().optional(),
     chatId: z.string().optional(),
     channelId: z.string().optional(),
@@ -67,154 +68,22 @@ const SkillConfigSchema = z
   })
   .partial()
 
-
+/**
+ * OpenClaw-style env section: API keys and arbitrary env vars live in the JSON
+ * config, not in .env.  On load the values are injected into process.env so all
+ * existing config.ts code picks them up transparently.
+ *
+ * Example in nova.json:
+ * ```json
+ * {
+ *   "env": {
+ *     "GROQ_API_KEY": "gsk_...",
+ *     "OPENROUTER_API_KEY": "sk-or-..."
+ *   }
+ * }
+ * ```
+ */
 const EnvSectionSchema = z.record(z.string(), z.string()).default({})
-
-// ── OS-Agent Configuration Schemas (Phase H) ──
-
-const GUIConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    backend: z.enum(["native", "nutjs", "robotjs"]).default("native"),
-    screenshotMethod: z.enum(["native", "puppeteer"]).default("native"),
-    requireConfirmation: z.boolean().default(true),
-    maxActionsPerMinute: z.number().default(30),
-  })
-  .default({
-    enabled: false,
-    backend: "native",
-    screenshotMethod: "native",
-    requireConfirmation: true,
-    maxActionsPerMinute: 30,
-  })
-
-const VisionConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    ocrEngine: z.enum(["tesseract", "cloud"]).default("tesseract"),
-    elementDetection: z.enum(["accessibility", "yolo", "omniparser"]).default("accessibility"),
-    multimodalEngine: z.enum(["gemini", "openai", "anthropic", "ollama"]).default("gemini"),
-    monitorIntervalMs: z.number().default(5000),
-  })
-  .default({
-    enabled: false,
-    ocrEngine: "tesseract",
-    elementDetection: "accessibility",
-    multimodalEngine: "gemini",
-    monitorIntervalMs: 5000,
-  })
-
-const VoiceIOConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    wakeWord: z.string().default("hey-nova"),
-    wakeWordEngine: z.enum(["porcupine", "openwakeword"]).default("openwakeword"),
-    sttEngine: z.enum(["whisper-local", "deepgram", "google", "azure"]).default("whisper-local"),
-    vadEngine: z.enum(["silero", "webrtc"]).default("silero"),
-    whisperModel: z.enum(["tiny", "base", "small", "medium", "large"]).default("base"),
-    fullDuplex: z.boolean().default(true),
-    language: z.string().default("en"),
-  })
-  .default({
-    enabled: false,
-    wakeWord: "hey-nova",
-    wakeWordEngine: "openwakeword",
-    sttEngine: "whisper-local",
-    vadEngine: "silero",
-    whisperModel: "base",
-    fullDuplex: true,
-    language: "en",
-  })
-
-const SystemConfigSchema = z
-  .object({
-    enabled: z.boolean().default(true),
-    watchPaths: z.array(z.string()).default([]),
-    watchClipboard: z.boolean().default(false),
-    watchActiveWindow: z.boolean().default(true),
-    resourceCheckIntervalMs: z.number().default(10_000),
-    cpuWarningThreshold: z.number().default(90),
-    ramWarningThreshold: z.number().default(85),
-    diskWarningThreshold: z.number().default(90),
-  })
-  .default({
-    enabled: true,
-    watchPaths: [],
-    watchClipboard: false,
-    watchActiveWindow: true,
-    resourceCheckIntervalMs: 10_000,
-    cpuWarningThreshold: 90,
-    ramWarningThreshold: 85,
-    diskWarningThreshold: 90,
-  })
-
-const IoTConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    homeAssistantUrl: z.string().optional(),
-    homeAssistantToken: z.string().optional(),
-    mqttBrokerUrl: z.string().optional(),
-    mqttUsername: z.string().optional(),
-    mqttPassword: z.string().optional(),
-    autoDiscover: z.boolean().default(true),
-  })
-  .default({
-    enabled: false,
-    autoDiscover: true,
-  })
-
-const OSAgentConfigSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    gui: GUIConfigSchema,
-    vision: VisionConfigSchema,
-    voice: VoiceIOConfigSchema,
-    system: SystemConfigSchema,
-    iot: IoTConfigSchema,
-    perceptionIntervalMs: z.number().default(2000),
-  })
-  .default({
-    enabled: false,
-    gui: {
-      enabled: false,
-      backend: "native",
-      screenshotMethod: "native",
-      requireConfirmation: true,
-      maxActionsPerMinute: 30,
-    },
-    vision: {
-      enabled: false,
-      ocrEngine: "tesseract",
-      elementDetection: "accessibility",
-      multimodalEngine: "gemini",
-      monitorIntervalMs: 5000,
-    },
-    voice: {
-      enabled: false,
-      wakeWord: "hey-nova",
-      wakeWordEngine: "openwakeword",
-      sttEngine: "whisper-local",
-      vadEngine: "silero",
-      whisperModel: "base",
-      fullDuplex: true,
-      language: "en",
-    },
-    system: {
-      enabled: true,
-      watchPaths: [],
-      watchClipboard: false,
-      watchActiveWindow: true,
-      resourceCheckIntervalMs: 10_000,
-      cpuWarningThreshold: 90,
-      ramWarningThreshold: 85,
-      diskWarningThreshold: 90,
-    },
-    iot: {
-      enabled: false,
-      autoDiscover: true,
-    },
-    perceptionIntervalMs: 2000,
-  })
 
 const NovaConfigSchema = z.object({
   /** Env-var overrides — injected into process.env before dotenv runs */
@@ -318,9 +187,6 @@ const NovaConfigSchema = z.object({
       servers: z.array(z.record(z.string(), z.unknown())).default([]),
     })
     .default({ servers: [] }),
-
-  /** OS-Agent layer configuration (Phase H — JARVIS) */
-  osAgent: OSAgentConfigSchema,
 })
 
 export type NovaConfig = z.infer<typeof NovaConfigSchema>

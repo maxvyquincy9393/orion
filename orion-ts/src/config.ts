@@ -1,8 +1,10 @@
-﻿import dotenv from "dotenv"
+import dotenv from "dotenv"
 import { z } from "zod"
 
-const envFilePath = typeof process.env.ORION_ENV_FILE === "string" && process.env.ORION_ENV_FILE.trim().length > 0
-  ? process.env.ORION_ENV_FILE.trim()
+const envFilePath = typeof process.env.EDITH_ENV_FILE === "string" && process.env.EDITH_ENV_FILE.trim().length > 0
+  ? process.env.EDITH_ENV_FILE.trim()
+  : typeof process.env.NOVA_ENV_FILE === "string" && process.env.NOVA_ENV_FILE.trim().length > 0
+  ? process.env.NOVA_ENV_FILE.trim()
   : ".env"
 
 dotenv.config({ path: envFilePath })
@@ -77,7 +79,7 @@ const ConfigSchema = z.object({
   BLUEBUBBLES_URL: z.string().default(""),
   BLUEBUBBLES_PASSWORD: z.string().default(""),
   WEBCHAT_PORT: intFromEnv.default(8080),
-  DATABASE_URL: z.string().default("file:./orion.db"),
+  DATABASE_URL: z.string().default("file:./nova.db"),
   DEFAULT_USER_ID: z.string().default("owner"),
   LOG_LEVEL: logLevelSchema.default("info"),
   LOG_FORMAT: logFormatSchema.default("text"),
@@ -139,29 +141,36 @@ const ConfigSchema = z.object({
   ENGINE_STATS_ENABLED: boolFromEnv.default(true),
   ORCHESTRATOR_COST_ROUTING_ENABLED: boolFromEnv.default(false),
   CAUSAL_BAYESIAN_UPDATE_ENABLED: boolFromEnv.default(false),
+  CAUSAL_EDGE_DECAY_ENABLED: boolFromEnv.default(true),
   HIMES_FORGETTING_CURVE_ENABLED: boolFromEnv.default(false),
   HIMES_CONSOLIDATION_ENABLED: boolFromEnv.default(false),
+  HIMES_TOKEN_BUDGET_ENABLED: boolFromEnv.default(true),
   // Admin & Gateway
   ADMIN_TOKEN: z.string().default(""),
   GATEWAY_CORS_ORIGINS: z.string().default(""),
   // Observability
   OTEL_ENABLED: boolFromEnv.default(false),
-  OTEL_SERVICE_NAME: z.string().default("orion-ts"),
+  OTEL_SERVICE_NAME: z.string().default("nova-ts"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default("http://127.0.0.1:4318/v1/traces"),
   METRICS_ENABLED: boolFromEnv.default(true),
-  METRICS_PREFIX: z.string().default("orion_"),
+  METRICS_PREFIX: z.string().default("nova_"),
   // Supervisor / Agent limits
   AGENT_TIMEOUT_MS: intFromEnv.default(120_000),
   AGENT_MAX_SUBTASKS: intFromEnv.default(8),
   AGENT_MAX_LLM_CALLS: intFromEnv.default(40),
   LATS_EARLY_STOP_THRESHOLD: floatFromEnv.default(0.95),
   SHUTDOWN_TIMEOUT_MS: intFromEnv.default(10_000),
+  // Phase H: OS-Agent / JARVIS mode
+  OS_AGENT_ENABLED: boolFromEnv.default(false),
+  JARVIS_MODE: boolFromEnv.default(false),
+  HOME_ASSISTANT_URL: z.string().default(""),
+  HOME_ASSISTANT_TOKEN: z.string().default(""),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
 
 if (!parsed.success) {
-  console.error("[Orion Config Error] Invalid environment configuration.")
+  console.error("[EDITH Config Error] Invalid environment configuration.")
   for (const issue of parsed.error.issues) {
     const key = issue.path.join(".")
     console.error(`  - ${key}: ${issue.message}`)
@@ -175,7 +184,7 @@ export const config: Config = parsed.data
 
 export class ConfigValidationError extends Error {
   constructor(public readonly missingKeys: string[]) {
-    super(`[Orion Config] Missing required variables: ${missingKeys.join(", ")}`)
+    super(`[EDITH Config] Missing required variables: ${missingKeys.join(", ")}`)
     this.name = "ConfigValidationError"
   }
 }

@@ -139,7 +139,7 @@ Use for: reading/writing clipboard, checking running processes, system health, d
       }
 
       if (action === "notify") {
-        await sendNotification(title ?? "Orion", text ?? "")
+        await sendNotification(title ?? "EDITH", text ?? "")
         return "Notification sent"
       }
 

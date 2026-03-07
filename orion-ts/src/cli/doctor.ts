@@ -1,4 +1,4 @@
-﻿import fs from "node:fs/promises"
+import fs from "node:fs/promises"
 import net from "node:net"
 
 import { execa } from "execa"
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
   const errors = results.filter((item) => item.level === "error").length
   const warnings = results.filter((item) => item.level === "warn").length
 
-  console.log("Orion Doctor")
+  console.log("EDITH Doctor")
   console.log("============")
 
   for (const result of results) {

@@ -1,179 +1,146 @@
-﻿# Orion
+# EDITH
 
-Personal AI companion. Runs locally, builds long-term memory, and can act proactively across channels.
+Even Dead, I'm The Hero.
+
+Persistent AI companion with long-term memory. Runs locally, supports 6 LLM providers, and delivers across 9 channels.
+
+Official product identity is `EDITH`. Legacy names such as `Nova`, `Orion`, `jarvis`, and `tars` may still appear in compatibility paths or internal implementation details while the repo converges.
 
 ## Quick Start
 
 ```bash
+# 1. Install dependencies
 pnpm install
+
+# 2. Configure (at least 1 API key required)
+cp .env.example .env
+# Edit .env - set GEMINI_API_KEY (free via https://aistudio.google.com)
+
+# 3. Setup database
 pnpm prisma migrate dev
-pnpm doctor
-pnpm dev -- --mode all
+
+# 4. Run
+pnpm dev
 ```
 
-## Configuration (.env reference)
+## Chat Commands
 
-Core:
+Once running, these commands work in CLI and WebChat:
 
-```env
-DATABASE_URL="file:./orion.db"
-DEFAULT_USER_ID="owner"
-LOG_LEVEL="info"
-
-ANTHROPIC_API_KEY=""
-OPENAI_API_KEY=""
-GEMINI_API_KEY=""
-GROQ_API_KEY=""
-OPENROUTER_API_KEY=""
-```
-
-Channels:
-
-```env
-WEBCHAT_PORT=8080
-WHATSAPP_ENABLED=false
-
-SIGNAL_PHONE_NUMBER=""
-SIGNAL_CLI_PATH=""
-
-LINE_CHANNEL_TOKEN=""
-LINE_CHANNEL_SECRET=""
-
-MATRIX_HOMESERVER=""
-MATRIX_ACCESS_TOKEN=""
-MATRIX_ROOM_ID=""
-
-TEAMS_APP_ID=""
-TEAMS_APP_PASSWORD=""
-TEAMS_SERVICE_URL=""
-
-BLUEBUBBLES_URL=""
-BLUEBUBBLES_PASSWORD=""
-```
-
-Voice:
-
-```env
-VOICE_ENABLED=false
-PYTHON_PATH="python"
-QWEN3_MODE="latency" # latency | quality
-```
+| Command | Description |
+|---|---|
+| `/model <engine>` | Switch engine (e.g. `/model gemini`) |
+| `/model <engine>/<model>` | Specific model (e.g. `/model openai/gpt-4o-mini`) |
+| `/model auto` | Reset to automatic selection |
+| `/models` | List available engines and models |
+| `/status` | Show current engine, preferences |
+| `/help` | Show all commands |
 
 ## Modes
 
-- `text`: CLI loop.
-- `gateway`: WebSocket + webchat + daemon.
-- `all`: gateway + CLI together.
-
-Run with:
-
 ```bash
-pnpm dev -- --mode text
-pnpm dev -- --mode gateway
-pnpm dev -- --mode all
+pnpm dev                        # CLI chat (default)
+pnpm dev -- --mode gateway      # WebSocket + API server
+pnpm dev -- --mode all          # CLI + gateway
+pnpm jarvis                     # EDITH OS mode (legacy alias)
 ```
 
-## Architecture (diagram)
+## Supported Engines
+
+| Engine | Provider | Default Model | Free? |
+|---|---|---|---|
+| `gemini` | Google | gemini-2.0-flash | yes |
+| `groq` | Groq | llama-3.3-70b-versatile | yes |
+| `openai` | OpenAI | gpt-4o | paid |
+| `anthropic` | Anthropic | claude-sonnet-4-20250514 | paid |
+| `openrouter` | OpenRouter | anthropic/claude-sonnet-4 | mixed |
+| `ollama` | Local | Auto-detect | yes |
+
+Switch anytime with `/model <engine>` in chat or via REST API.
+
+## REST API
+
+When running in `gateway` mode:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `POST` | `/api/message` | Send a message |
+| `GET` | `/api/models` | List available engines + models |
+| `POST` | `/api/models/select` | Set model preference |
+| `DELETE` | `/api/models/select` | Reset to auto |
+| `GET` | `/api/usage/summary` | Usage stats |
+
+## Architecture
 
 ```text
-Input Channels -> Security Layer -> Hook Pipeline -> Gateway
-               -> Memory System (Temporal/HiMeS/Profiler/Causal/ProMem)
-               -> Engine Orchestrator -> Agent Runner/Tools
-               -> Background Daemon (Triggers + VoI + ContextPredictor)
-               -> Channel Delivery
+User Input
+  CLI / WebSocket / Channel
+    -> Security Layer
+    -> Hook Pipeline
+    -> Engine Orchestrator
+    -> Memory System
+    -> Response Critic
+    -> Output Scanner
+    -> Channel Delivery
 ```
 
-## Features
+## Channels
 
-- Multi-engine orchestration: Anthropic/OpenAI/Gemini/Groq/Ollama/OpenRouter.
-- Security stack: prompt filtering, memory validation, tool guard, ACP signing.
-- Memory stack: temporal index, profiler facts/opinions, session compression, ProMem, causal graph.
-- Content intelligence: URL extraction + summarization, image/audio understanding, markdown adaptation per channel.
-- Developer platform: hooks, plugin loader, ACP router/protocol, doctor CLI.
-- Multi-channel support: WebChat, WhatsApp, Signal, LINE, Matrix, Teams, iMessage.
-- Voice: Qwen3-TTS upgrade path with XTTS fallback and streaming bridge.
+WebChat, Discord, Telegram, WhatsApp (Baileys/Cloud), Slack, Signal, LINE, Matrix (Element), Microsoft Teams, iMessage (via BlueBubbles).
 
-## Memory Architecture
+## Voice
 
-Layers:
+Built-in EDITH voice uses Edge TTS with a legacy `tars` DSP preset under the hood:
 
-- `session-summarizer.ts`: in-session compression (Memoria-style).
-- `profiler.ts`: objective facts + subjective opinions with confidence updates.
-- `causal-graph.ts`: causal edges + hyper-edges + hybrid retrieval.
-- `temporal-index.ts`: raw -> summary -> abstracted with validity periods.
-- `promem.ts`: post-session iterative extraction/verification.
-- `himes.ts`: short-term + long-term fused context assembly.
-
-## Security Model
-
-Message path:
-
-1. Pairing/rate policy checks.
-2. Prompt filter sanitization (direct + indirect injection patterns).
-3. Hook pipeline (`pre_message`, `post_message`, `pre_send`).
-4. Affordance check (`filterPromptWithAffordance`) for implied-harm risk scoring.
-5. Memory validation before context injection.
-6. Tool guard for file/terminal/url restrictions.
-7. Output scanner redaction before delivery (`output-scanner` in gateway + channel manager).
-8. ACP security for agent-to-agent messages:
-   - HMAC-SHA256 signing
-   - capability check
-   - payload filtering
-   - state transition validation
-   - provenance audit logging
-
-## Voice Setup (Qwen3-TTS vs XTTS-v2)
-
-Python pipeline (`delivery/voice.py`):
-
-- Uses `Qwen3-TTS` when available.
-- Falls back automatically to XTTS-v2 when Qwen3 is unavailable.
-- Supports:
-  - `speak(text, voice_profile)` (backward compatible)
-  - `speak_streaming(text, voice_profile, callback)` (chunk streaming)
-
-Install Qwen3-TTS:
-
-```bash
-python -m pip install git+https://github.com/QwenLM/Qwen3-TTS
+```env
+VOICE_ENABLED=true
+VOICE_TTS_BACKEND=edge
+VOICE_EDGE_VOICE=en-US-GuyNeural
 ```
 
-## Phase Status
+## Project Structure
 
-- [x] Phase 1-4: Core infrastructure
-- [x] Phase 5: Security hardening
-- [x] Phase 6: Memory upgrade
-- [x] Phase 7: Content intelligence
-- [x] Phase 8: Developer platform
-- [x] Phase 9: Additional channels
-- [x] Phase 10: Voice upgrade
+```text
+src/
+├── core/           # Pipeline, startup, chat commands, event bus
+├── engines/        # LLM providers + orchestrator + model preferences
+├── memory/         # Temporal, causal, profiler, MemRL, HiMeS
+├── channels/       # 9 channel adapters
+├── gateway/        # Fastify WebSocket + REST server
+├── security/       # Prompt filter, affordance, tool guard, output scan
+├── voice/          # Voice pipeline + DSP presets
+├── agents/         # Agent runner + tools
+├── background/     # Daemon, triggers, VoI, context predictor
+├── sessions/       # Session store + compaction
+├── hooks/          # Pre/post message hooks
+├── skills/         # Skill loader + bundled skills
+├── plugin-sdk/     # Plugin system
+├── acp/            # Agent Communication Protocol
+└── observability/  # Usage tracking + engine stats
+```
 
 ## Research Basis
 
-| Paper | arXiv ID | Area | Integrated In |
-|---|---|---|---|
-| HiMeS | 2601.06152 | Memory | `src/memory/himes.ts` |
-| O-Mem | 2511.13593 | Memory | `src/memory/profiler.ts` |
-| ProMem | 2601.04463 | Memory | `src/memory/promem.ts` |
-| REMI | 2509.06269 | Memory | `src/memory/causal-graph.ts` |
-| TiMem | 2601.02845 | Memory | `src/memory/temporal-index.ts` |
-| Memoria | 2512.12686 | Memory | `src/memory/session-summarizer.ts` |
-| Hindsight | 2512.12818 | Memory | `src/memory/profiler.ts` |
-| PersonalAI | 2506.17001 | Memory | `src/memory/causal-graph.ts` |
-| Zep/Graphiti | 2501.13956 | Memory | `src/memory/temporal-index.ts` |
-| UserCentrix | 2505.00472 | Proactive | `src/core/voi.ts` |
-| ContextAgent | 2505.14668 | Proactive | `src/core/context-predictor.ts` |
-| PASB | 2602.08412 | Security | `src/security/prompt-filter.ts` |
-| AURA | 2508.06124 | Security | `src/security/affordance-checker.ts`, `src/security/output-scanner.ts` |
-| SoK Injection | 2601.17548 | Security | `src/acp/protocol.ts`, `src/acp/router.ts` |
-| Agentic AI Security | 2510.23883 | Security | security review layer |
-| Systems Security | 2512.01295 | Security | permission/task scoping |
-| Multi-Agent Orchestration | 2601.13671 | Multi-agent | `src/acp/router.ts` |
-| Qwen3-TTS | 2601.15621 | Voice | `delivery/voice.py`, `src/voice/bridge.ts` |
+| Paper | Area | Module |
+|---|---|---|
+| HiMeS (2601.06152) | Memory | `memory/himes.ts` |
+| O-Mem (2511.13593) | Memory | `memory/profiler.ts` |
+| ProMem (2601.04463) | Memory | `memory/promem.ts` |
+| REMI (2509.06269) | Memory | `memory/causal-graph.ts` |
+| TiMem (2601.02845) | Memory | `memory/temporal-index.ts` |
+| Memoria (2512.12686) | Memory | `memory/session-summarizer.ts` |
+| PASB (2602.08412) | Security | `security/prompt-filter.ts` |
+| AURA (2508.06124) | Security | `security/affordance-checker.ts` |
+
+## Branding
+
+See `docs/branding.md` for the naming contract and how legacy labels should be interpreted.
 
 ## Contributing
 
-1. Run `pnpm typecheck` before commit.
-2. For schema edits, run `pnpm prisma migrate dev`.
-3. Use `pnpm doctor` when environment issues appear.
-4. Keep security checks active when adding new tools/channels.
+```bash
+pnpm typecheck
+pnpm prisma migrate dev
+pnpm doctor
+```

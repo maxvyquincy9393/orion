@@ -1,4 +1,4 @@
-# Orion Memory Vault
+# EDITH Memory Vault
 
 This file stores pinned long-term facts only.
 

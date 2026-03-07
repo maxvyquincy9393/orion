@@ -370,14 +370,14 @@ export class TelegramChannel implements BaseChannel {
       await this.apiCall("sendMessage", {
         chat_id: chatId,
         text: [
-          "Orion Telegram test channel ready.",
+          "EDITH Telegram test channel ready.",
           "",
           "Commands:",
           "/help - show this help",
           "/id - show Telegram chat id (for TELEGRAM_CHAT_ID allowlist)",
           "/ping - health check",
           "",
-          "Send any text message to chat with Orion.",
+          "Send any text message to chat with EDITH.",
         ].join("\n"),
       }).catch((error) => log.warn("Telegram help command failed", { chatId, error }))
       return

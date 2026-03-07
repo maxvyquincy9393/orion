@@ -119,7 +119,7 @@ function normalizeWhatsAppWaId(value: string): string {
   return bare.replace(/[^\d]/g, "")
 }
 
-function toWhatsAppOrionUserId(waId: string): string {
+function toWhatsAppNovaUserId(waId: string): string {
   return `whatsapp:${normalizeWhatsAppWaId(waId)}`
 }
 
@@ -154,9 +154,9 @@ function normalizeWhatsAppCommand(text: string): string | null {
 }
 
 function resolveWhatsAppAuthStateDir(): string {
-  const stateDir = typeof process.env.ORION_STATE_DIR === "string" && process.env.ORION_STATE_DIR.trim().length > 0
-    ? process.env.ORION_STATE_DIR.trim()
-    : ".orion"
+  const stateDir = typeof process.env.NOVA_STATE_DIR === "string" && process.env.NOVA_STATE_DIR.trim().length > 0
+    ? process.env.NOVA_STATE_DIR.trim()
+    : ".nova"
   return path.join(stateDir, "whatsapp-auth")
 }
 
@@ -605,11 +605,11 @@ export class WhatsAppChannel implements BaseChannel {
     }
 
     this.enqueueSerializedTask(sourceId, async () => {
-      const orionUserId = toWhatsAppOrionUserId(waId)
-      await multiUser.getOrCreate(orionUserId, "whatsapp")
+      const novaUserId = toWhatsAppNovaUserId(waId)
+      await multiUser.getOrCreate(novaUserId, "whatsapp")
 
       try {
-        const response = await handleIncomingUserMessage(orionUserId, text, "whatsapp")
+        const response = await handleIncomingUserMessage(novaUserId, text, "whatsapp")
         const sent = await this.send(sourceId, response)
         if (!sent) {
           log.warn("WhatsApp response send returned false", { sourceId, mode: this.getMode() })
@@ -639,14 +639,14 @@ export class WhatsAppChannel implements BaseChannel {
   private async handleCommand(sourceId: string, waId: string, command: string): Promise<void> {
     if (command === "help" || command === "start") {
       await this.send(sourceId, [
-        "Orion WhatsApp test channel ready.",
+        "EDITH WhatsApp test channel ready.",
         "",
         "Commands:",
         "/help or !help",
         "/id or !id",
         "/ping or !ping",
         "",
-        "Send any text message to chat with Orion.",
+        "Send any text message to chat with EDITH.",
       ].join("\n"))
       return
     }
@@ -865,7 +865,7 @@ export const whatsAppChannel = new WhatsAppChannel()
 export const __whatsAppTestUtils = {
   parseAllowedWhatsAppIds,
   normalizeWhatsAppWaId,
-  toWhatsAppOrionUserId,
+  toWhatsAppNovaUserId,
   toWhatsAppCloudRecipient,
   toBaileysJid,
   normalizeWhatsAppCommand,
