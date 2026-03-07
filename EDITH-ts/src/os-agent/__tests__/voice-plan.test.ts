@@ -34,6 +34,7 @@ function buildWakeConfig(overrides: Partial<ResolvedWakeWordConfig> = {}): Resol
 function buildDependencies(overrides: Partial<PythonVoiceDependencies> = {}): PythonVoiceDependencies {
   return {
     pythonAvailable: true,
+    dotenv: true,
     sounddevice: true,
     soundfile: true,
     whisper: true,
@@ -65,6 +66,7 @@ describe("resolveVoiceRuntimePlan", () => {
       buildDependencies({
         pvporcupine: true,
       }),
+      () => true,
     )
 
     expect(plan.captureImplementation).toBe("python-streaming-vad")
@@ -83,6 +85,7 @@ describe("resolveVoiceRuntimePlan", () => {
         sounddevice: false,
         openwakeword: false,
       }),
+      () => true,
     )
 
     expect(plan.captureImplementation).toBe("unavailable")
@@ -103,10 +106,65 @@ describe("resolveVoiceRuntimePlan", () => {
         soundfile: false,
         whisper: false,
       }),
+      () => true,
     )
 
     expect(plan.sttImplementation).toBe("unavailable")
     expect(plan.fallbackReasons).toContain("python package 'whisper' missing")
     expect(plan.fallbackReasons).toContain("python package 'soundfile' missing")
+  })
+
+  it("marks capture unavailable when python-dotenv is missing for the streaming bridge", () => {
+    const plan = resolveVoiceRuntimePlan(
+      buildVoiceConfig(),
+      buildWakeConfig({
+        keywordAssetPath: "models/hey_edith.onnx",
+        keywordAssetKind: "openwakeword",
+      }),
+      buildDependencies({
+        dotenv: false,
+        openwakeword: true,
+      }),
+      () => true,
+    )
+
+    expect(plan.captureImplementation).toBe("unavailable")
+    expect(plan.wakeWordImplementation).toBe("transcript-keyword")
+    expect(plan.fallbackReasons).toContain("python package 'python-dotenv' missing")
+  })
+
+  it("keeps native wake-word disabled when the configured asset path does not exist", () => {
+    const plan = resolveVoiceRuntimePlan(
+      buildVoiceConfig(),
+      buildWakeConfig({
+        keywordAssetPath: "models/hey_edith.onnx",
+        keywordAssetKind: "openwakeword",
+      }),
+      buildDependencies({
+        openwakeword: true,
+      }),
+      () => false,
+    )
+
+    expect(plan.wakeWordImplementation).toBe("transcript-keyword")
+    expect(plan.fallbackReasons).toContain("wake model file not found: models/hey_edith.onnx")
+  })
+
+  it("keeps native openwakeword disabled when support models are missing next to the wake model", () => {
+    const plan = resolveVoiceRuntimePlan(
+      buildVoiceConfig(),
+      buildWakeConfig({
+        keywordAssetPath: "models/hey_edith.onnx",
+        keywordAssetKind: "openwakeword",
+      }),
+      buildDependencies({
+        openwakeword: true,
+      }),
+      (assetPath) => assetPath === "models/hey_edith.onnx",
+    )
+
+    expect(plan.wakeWordImplementation).toBe("transcript-keyword")
+    expect(plan.fallbackReasons.some((reason) => reason.includes("melspectrogram.onnx"))).toBe(true)
+    expect(plan.fallbackReasons.some((reason) => reason.includes("embedding_model.onnx"))).toBe(true)
   })
 })
