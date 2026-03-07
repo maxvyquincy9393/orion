@@ -3,16 +3,65 @@
 **Durasi Estimasi:** 1–2 minggu  
 **Prioritas:** 🟠 HIGH — Zero test coverage untuk OS-Agent layer  
 **Status Saat Ini:** 453 tests passing (61 files), 0 tests untuk OS-Agent  
+**Methodology:** First Principles Thinking + Paper-Grounded Design
 
 ---
 
-## 1. Tujuan
+## 1. Landasan Riset (Academic Papers)
 
-Membangun test suite komprehensif untuk seluruh OS-Agent layer:
-- 10 source files × rata-rata 8–12 tests = **88+ unit tests**
-- Mock semua system calls (PowerShell, execa, fetch, file I/O)
-- Integration tests untuk cross-module flows
-- Target coverage: **≥80% line coverage** untuk os-agent/
+Test suite ini dibangun berdasarkan **pola evaluasi yang sudah divalidasi** di 8 paper utama:
+
+### 1.1 OS-Agent Benchmarks
+
+| Paper | arXiv | Kontribusi ke Testing |
+|-------|-------|----------------------|
+| **OSWorld** | 2404.07972 | Benchmark 369 task untuk OS-agent di real VM (Ubuntu/Win/macOS). Kita adopt pola: *initial state → action → evaluation script* sebagai template test lifecycle |
+| **MemGPT** | 2310.08560 | LLM sebagai OS dengan virtual context management. Kita adopt pola: *hierarchical memory tier testing* + *interrupt-driven control flow* untuk perception fusion |
+| **CodeAct** | 2402.01030 | Code sebagai action space, 20% higher success rate vs JSON. Kita adopt pola: *executable action validation* — setiap OS action harus menghasilkan verifiable command string |
+
+### 1.2 GUI Agent Benchmarks  
+
+| Paper | Venue | Kontribusi ke Testing |
+|-------|-------|----------------------|
+| **ScreenAgent** | IJCAI 2024 | Plan → Action → Reflection loop pada real screen. Kita test: *screenshot capture → OCR → element detection* secara terpisah lalu integrated |
+| **WebArena** | ICLR 2024 | Functional correctness over rigid action sequences. Kita adopt: *test output validation, bukan exact command match* |
+| **GTArena** | arXiv 2412.x | GUI Testing Arena: test intention → execution → defect detection. Kita mirror: *route validation → input validation → error detection* |
+
+### 1.3 Voice & IoT
+
+| Paper / Project | Kontribusi ke Testing |
+|----------------|----------------------|
+| **Silero VAD** | True/False Positive Rate methodology: mock VAD dengan deterministic speech/silence boundaries |
+| **Picovoice Wake Word** | FAR/FRR evaluation: mock wake word detection dengan deterministic trigger |
+| **HA NLP Research** (arXiv) | Natural language → service call parsing: test NL command → structured `{domain, service, entity}` output |
+
+### 1.4 Core Testing Principles (dari Paper)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│          First Principles dari Research Papers           │
+│                                                         │
+│  1. ISOLATION (OSWorld)                                 │
+│     Setiap subsystem di-test dalam VM/sandbox           │
+│     → Mock ALL external deps (execa, fetch, fs, os)     │
+│                                                         │
+│  2. DETERMINISM (ScreenAgent)                           │
+│     Screenshot = fixed buffer, OCR = fixed string       │
+│     → No randomness in test assertions                  │
+│                                                         │
+│  3. LIFECYCLE (MemGPT)                                  │
+│     Init → Active → Shutdown, test setiap transition    │
+│     → constructor → initialize() → methods → shutdown() │
+│                                                         │
+│  4. FUNCTIONAL CORRECTNESS (WebArena)                   │
+│     Validate output shape, bukan exact PS command        │
+│     → Assert result.success, result.data structure      │
+│                                                         │
+│  5. ERROR BOUNDARIES (CodeAct)                          │
+│     Self-debugging: agent harus handle error gracefully  │
+│     → Every module: disabled=no-op, failure=safe-return │
+└─────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -64,7 +113,9 @@ Membangun test suite komprehensif untuk seluruh OS-Agent layer:
 └─────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Mock Strategy
+### 2.2 Mock Strategy (Paper-Grounded)
+
+**Principle: OSWorld Isolation** — Tidak ada real system call yang lolos ke hardware.
 
 ```
 ┌─────────────────────┐     ┌─────────────────────┐
@@ -82,25 +133,56 @@ Membangun test suite komprehensif untuk seluruh OS-Agent layer:
 └─────────────────────┘     └─────────────────────┘
 ```
 
+**Rationale (per paper):**
+- **OSWorld**: All system interactions must be intercepted for reproducible evaluation
+- **CodeAct**: Verify the *command string generated*, not its execution result  
+- **ScreenAgent**: Mock screenshot as fixed buffer, mock OCR as fixed text for determinism
+
 ---
 
-## 3. Test Suites Detail
+## 3. Dependency-Ordered Build Plan (First Principles)
 
-### 3.1 gui-agent.test.ts (12 tests)
+### Why this order matters
+
+```mermaid
+graph TD
+    A[Atom 0: test-helpers] --> B[Atom 1: system-monitor]
+    A --> C[Atom 2: gui-agent]
+    A --> D[Atom 5: iot-bridge]
+    C --> E[Atom 3: vision-cortex]
+    A --> F[Atom 4: voice-io]
+    B & C & E & F & D --> G[Atom 6: perception-fusion]
+    G --> H[Atom 7: os-agent-tool]
+    H --> I[Atom 8: os-agent-index]
+    I --> J[Atom 9: verification]
+```
+
+**Reasoning (First Principles):**
+1. Leaf nodes first (no deps) → `system-monitor`, `gui-agent`, `iot-bridge`, `voice-io`
+2. Then composite nodes → `vision-cortex` (needs GUIAgent mock), `perception-fusion` (needs all 5)
+3. Then integration → `os-agent-tool` (routes to all), `os-agent-index` (orchestrates all)
+
+---
+
+## 4. Test Suites Detail
+
+### 4.1 gui-agent.test.ts (12 tests)
+
+**Paper basis:** ScreenAgent + OSWorld — GUI agent harus *execute actions pada coordinate system* dan *capture visual state* secara terpisah.
 
 ```typescript
 describe("GUIAgent", () => {
-  // ── Initialization ──
+  // ── Initialization (OSWorld: initial state setup) ──
   it("initializes on Windows with native backend")
   it("initializes on macOS with native backend")
   it("skips init when disabled")
   
-  // ── Screenshot ──
+  // ── Screenshot (ScreenAgent: visual state capture) ──
   it("captures screenshot on Windows via PowerShell")
   it("captures screenshot on macOS via screencapture")
   it("captures region screenshot with bounds")
   
-  // ── Mouse Actions ──
+  // ── Mouse Actions (CodeAct: executable action validation) ──
   it("clicks at coordinates using PowerShell mouse_event")
   it("double-clicks at coordinates")
   it("drags from source to target (mouse down→move→up)")
@@ -109,12 +191,12 @@ describe("GUIAgent", () => {
   it("types text via SendKeys")
   it("sends hotkey combination (Ctrl+S)")
   
-  // ── Safety ──
+  // ── Safety (OSWorld: rate limiting for reproducibility) ──
   it("rejects actions when rate limit exceeded")
 })
 ```
 
-**Mock Pattern:**
+**Mock Pattern (CodeAct — verify command, not execution):**
 ```typescript
 vi.mock("execa", () => ({
   execa: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
@@ -127,7 +209,9 @@ expect(execa).toHaveBeenCalledWith(
 )
 ```
 
-### 3.2 vision-cortex.test.ts (10 tests)
+### 4.2 vision-cortex.test.ts (10 tests)
+
+**Paper basis:** ScreenAgent (Plan→Action→Reflect), OSWorld (screenshot→OCR→elements pipeline).
 
 ```typescript
 describe("VisionCortex", () => {
@@ -136,16 +220,16 @@ describe("VisionCortex", () => {
   it("warns when tesseract not found")
   it("skips when disabled")
   
-  // ── Screenshot + Analysis ──
+  // ── Screenshot + Analysis (ScreenAgent pipeline) ──
   it("captureAndAnalyze returns OCR text + elements")
   it("delegates screenshot to GUIAgent when available")
   it("falls back to own capture when no GUIAgent")
   
-  // ── OCR ──
+  // ── OCR (OSWorld: text extraction for task verification) ──
   it("extracts text via tesseract subprocess")
   it("handles tesseract failure gracefully")
   
-  // ── UI Elements ──
+  // ── UI Elements (GTArena: defect detection) ──
   it("detects accessibility elements on Windows")
   
   // ── Screen State ──
@@ -153,7 +237,9 @@ describe("VisionCortex", () => {
 })
 ```
 
-### 3.3 voice-io.test.ts (12 tests)
+### 4.3 voice-io.test.ts (12 tests)
+
+**Paper basis:** Silero VAD (TPR/FPR methodology), Picovoice (FAR/FRR), arXiv 2508.04721 (Low-Latency Voice Agents).
 
 ```typescript
 describe("VoiceIO", () => {
@@ -161,18 +247,18 @@ describe("VoiceIO", () => {
   it("initializes all sub-components when enabled")
   it("skips init when disabled")
   
-  // ── TTS / Speak ──
+  // ── TTS / Speak (Edge TTS evaluation) ──
   it("generates audio via EdgeEngine and plays on Windows")
   it("generates audio and plays on macOS via afplay")
   it("cleans up temp file after playback")
   it("returns success with duration and size")
   it("handles TTS failure gracefully")
   
-  // ── Barge-In ──
+  // ── Barge-In (arXiv 2508.04721: full-duplex testing) ──
   it("cancels current speech on barge-in")
   it("interrupt + new speech works correctly")
   
-  // ── Listening ──
+  // ── Listening (Silero VAD lifecycle) ──
   it("startListening requires initialization first")
   it("stopListening updates state correctly")
   
@@ -181,15 +267,17 @@ describe("VoiceIO", () => {
 })
 ```
 
-### 3.4 system-monitor.test.ts (11 tests)
+### 4.4 system-monitor.test.ts (11 tests)
+
+**Paper basis:** MemGPT (system resource awareness), OSWorld (environment state capture).
 
 ```typescript
 describe("SystemMonitor", () => {
-  // ── Initialization ──
+  // ── Initialization (MemGPT: baseline state) ──
   it("initializes and collects baseline metrics")
   it("skips when disabled")
   
-  // ── CPU ──
+  // ── CPU (MemGPT: resource monitoring) ──
   it("measures CPU usage with two-sample delta")
   it("returns percentage between 0-100")
   
@@ -204,18 +292,17 @@ describe("SystemMonitor", () => {
   it("checks network connectivity via ping")
   it("handles network failure gracefully")
   
-  // ── Process List ──
+  // ── Process List (OSWorld: application state) ──
   it("returns running processes list")
   
   // ── Clipboard ──
   it("reads clipboard content on Windows")
-  
-  // ── Idle Time ──
-  it("detects user idle time")
 })
 ```
 
-### 3.5 iot-bridge.test.ts (10 tests)
+### 4.5 iot-bridge.test.ts (10 tests)
+
+**Paper basis:** HA NLP Research (arXiv — natural language → service call), Synthetic Home benchmark.
 
 ```typescript
 describe("IoTBridge", () => {
@@ -224,12 +311,12 @@ describe("IoTBridge", () => {
   it("warns when HA token missing")
   it("skips when disabled")
   
-  // ── HA Execution ──
+  // ── HA Execution (HA REST API evaluation) ──
   it("calls HA service API for light.turn_on")
   it("handles HA API error response")
   it("rate-limits entity refresh to 30s")
   
-  // ── Natural Language ──
+  // ── Natural Language (HA NLP Research: NL→service mapping) ──
   it("parses 'nyalakan lampu kamar' → light.turn_on bedroom")
   it("parses 'set suhu 24' → climate.set_temperature 24")
   it("parses 'kunci pintu' → lock.lock front_door")
@@ -239,21 +326,23 @@ describe("IoTBridge", () => {
 })
 ```
 
-### 3.6 perception-fusion.test.ts (8 tests)
+### 4.6 perception-fusion.test.ts (8 tests)
+
+**Paper basis:** MemGPT (hierarchical context fusion), OSWorld (unified environment state).
 
 ```typescript
 describe("PerceptionFusion", () => {
-  // ── Snapshot ──
+  // ── Snapshot (MemGPT: unified context) ──
   it("collects full perception snapshot from all modules")
   it("includes system metrics, screen state, active window")
   
-  // ── Activity Detection ──
+  // ── Activity Detection (OSWorld: activity patterns) ──
   it("detects 'coding' pattern from VS Code window title")
   it("detects 'browsing' from Chrome/Firefox title")
   it("detects 'video_conference' from Zoom/Meet title")
   it("returns 'unknown' for unrecognized window")
   
-  // ── Summarize ──
+  // ── Summarize (MemGPT: injected context) ──
   it("generates one-line context summary")
   
   // ── Staleness ──
@@ -261,11 +350,13 @@ describe("PerceptionFusion", () => {
 })
 ```
 
-### 3.7 os-agent-tool.test.ts (15 tests)
+### 4.7 os-agent-tool.test.ts (15 tests)
+
+**Paper basis:** CodeAct (action routing), WebArena (functional correctness), GTArena (validation + defect detection).
 
 ```typescript
 describe("OSAgentTool", () => {
-  // ── Action Routing ──
+  // ── Action Routing (CodeAct: action space coverage) ──
   it("routes 'click' to gui.execute")
   it("routes 'type_text' to gui.execute")
   it("routes 'screenshot' to vision.captureAndAnalyze")
@@ -273,36 +364,38 @@ describe("OSAgentTool", () => {
   it("routes 'system_info' to system.getMetrics")
   it("routes 'iot_control' to iot.execute")
   
-  // ── Confirmation Gate ──
+  // ── Confirmation Gate (OSWorld: safety constraints) ──
   it("requires confirmation for 'run_command'")
   it("requires confirmation for 'open_app'")
   it("does NOT require confirmation for 'screenshot'")
   
-  // ── Input Validation ──
+  // ── Input Validation (GTArena: defect detection) ──
   it("validates required 'x' and 'y' for click action")
   it("validates required 'text' for type_text action")
   it("rejects unknown action type")
   
-  // ── Error Handling ──
+  // ── Error Handling (CodeAct: self-debugging) ──
   it("returns error result when subsystem not initialized")
   it("returns error for malformed payload")
   
   // ── Tool Registration ──
-  it("registers all 19 action tools in edithTools registry")
+  it("registers OS agent tool with correct Zod schema")
 })
 ```
 
-### 3.8 os-agent-index.test.ts (10 tests)
+### 4.8 os-agent-index.test.ts (10 tests)
+
+**Paper basis:** MemGPT (OS orchestration), OSWorld (subsystem lifecycle).
 
 ```typescript
 describe("OSAgent (index)", () => {
-  // ── Lifecycle ──
+  // ── Lifecycle (MemGPT: OS lifecycle) ──
   it("creates all subsystem instances")
   it("initializes all subsystems in order")
   it("handles partial init failure gracefully")
   it("shutdown stops all subsystems")
   
-  // ── Cross-Module ──
+  // ── Cross-Module (OSWorld: component interaction) ──
   it("VisionCortex uses GUIAgent screenshot (no duplication)")
   it("executeAction delegates to correct subsystem")
   it("getPerception returns fused snapshot")
@@ -311,16 +404,16 @@ describe("OSAgent (index)", () => {
   it("respects per-subsystem enabled/disabled flags")
   it("uses default config values for missing fields")
   
-  // ── Error Isolation ──
+  // ── Error Isolation (CodeAct: self-debugging) ──
   it("one subsystem failure doesn't crash others")
 })
 ```
 
 ---
 
-## 4. Test Helpers & Fixtures
+## 5. Test Helpers & Fixtures
 
-### 4.1 Shared Test Helpers
+### 5.1 Shared Test Helpers
 
 **File:** `EDITH-ts/src/os-agent/__tests__/test-helpers.ts`
 
@@ -347,106 +440,64 @@ export const FAKE_PNG = Buffer.from(
 )
 
 // Fake audio buffer (minimal MP3 header)  
-export const FAKE_MP3 = Buffer.from([0xFF, 0xFB, 0x90, 0x00, /* ... */])
+export const FAKE_MP3 = Buffer.from([0xFF, 0xFB, 0x90, 0x00])
 ```
 
-### 4.2 Fixtures
+### 5.2 Fixtures
 
 ```
 EDITH-ts/src/os-agent/__tests__/fixtures/
-├── fake-screenshot.png     # 100x100 test image
-├── fake-audio.mp3          # 1s silence MP3
-├── sample-ocr-output.txt   # Expected OCR output
 ├── ha-entities.json        # Sample Home Assistant entities
 └── ha-service-response.json # Sample HA service call response
 ```
 
 ---
 
-## 5. Android/Mobile Test Considerations
+## 6. Coverage Targets
 
-### 5.1 Mobile Test Strategy
-
-```
-┌──────────────────────────────────────────────────┐
-│              Mobile Tests (Jest/Expo)              │
-│                                                    │
-│  ┌────────────────────────────────────────────┐   │
-│  │  VoiceButton.test.tsx                       │   │
-│  │  - renders push-to-talk button              │   │
-│  │  - starts recording on press                │   │
-│  │  - sends voice_start WS message             │   │
-│  │  - sends voice_chunk with audio data         │   │
-│  │  - sends voice_stop on release              │   │
-│  │  - plays received voice_audio               │   │
-│  │  - handles permission denied                │   │
-│  └────────────────────────────────────────────┘   │
-│                                                    │
-│  ┌────────────────────────────────────────────┐   │
-│  │  WebSocket Voice Protocol Tests             │   │
-│  │  - voice_start → voice_started handshake    │   │
-│  │  - voice_chunk streaming → transcript       │   │
-│  │  - voice_stop → final response + audio      │   │
-│  │  - reconnect during voice session           │   │
-│  │  - concurrent text + voice messages         │   │
-│  └────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────┘
-```
-
-### 5.2 Mocking expo-av
-
-```typescript
-// __mocks__/expo-av.ts
-export const Audio = {
-  requestPermissionsAsync: vi.fn().mockResolvedValue({ granted: true }),
-  setAudioModeAsync: vi.fn().mockResolvedValue(undefined),
-  Recording: vi.fn().mockImplementation(() => ({
-    prepareToRecordAsync: vi.fn(),
-    startAsync: vi.fn(),
-    stopAndUnloadAsync: vi.fn(),
-    getURI: vi.fn().mockReturnValue("file:///fake-recording.wav"),
-    getStatusAsync: vi.fn().mockResolvedValue({ isRecording: true }),
-  })),
-  Sound: vi.fn().mockImplementation(() => ({
-    loadAsync: vi.fn(),
-    playAsync: vi.fn(),
-    unloadAsync: vi.fn(),
-  })),
-}
-```
+| Module | Target | Paper Basis |
+|--------|--------|-------------|
+| gui-agent.ts | 85% | OSWorld: all GUI actions must be verifiable |
+| vision-cortex.ts | 80% | ScreenAgent: capture → OCR → elements pipeline |
+| voice-io.ts | 75% | Silero VAD: TTS testable, VAD/STT mock-only |
+| system-monitor.ts | 85% | MemGPT: complete environment awareness |
+| iot-bridge.ts | 85% | HA Research: NL parsing + API interaction |
+| perception-fusion.ts | 90% | MemGPT: context fusion is safety-critical |
+| os-agent-tool.ts | 90% | CodeAct: action routing is the agent interface |
+| index.ts | 80% | OSWorld: lifecycle + delegation |
+| **Overall os-agent/** | **≥80%** | |
 
 ---
 
-## 6. Implementation Roadmap
+## 7. Implementation Roadmap
 
 ### Week 1: Core Unit Tests
 
-| Day | Task | Tests |
-|-----|------|-------|
-| 1 | Setup test helpers + fixtures | 0 (infra) |
-| 1 | gui-agent.test.ts | 12 |
-| 2 | vision-cortex.test.ts | 10 |
-| 2 | system-monitor.test.ts | 11 |
-| 3 | voice-io.test.ts | 12 |
-| 3 | iot-bridge.test.ts | 10 |
-| 4 | perception-fusion.test.ts | 8 |
-| 4 | os-agent-tool.test.ts | 15 |
-| 5 | os-agent-index.test.ts | 10 |
-| **Total** | | **88 tests** |
+| Day | Task | Tests | Paper Grounding |
+|-----|------|-------|----------------|
+| 1 | Setup test helpers + fixtures | 0 (infra) | All papers: isolation layer |
+| 1 | system-monitor.test.ts | 11 | MemGPT: resource awareness |
+| 2 | gui-agent.test.ts | 12 | OSWorld + ScreenAgent |
+| 2 | vision-cortex.test.ts | 10 | ScreenAgent + GTArena |
+| 3 | voice-io.test.ts | 12 | Silero VAD + arXiv 2508.04721 |
+| 3 | iot-bridge.test.ts | 10 | HA NLP Research |
+| 4 | perception-fusion.test.ts | 8 | MemGPT context fusion |
+| 4 | os-agent-tool.test.ts | 15 | CodeAct + WebArena |
+| 5 | os-agent-index.test.ts | 10 | MemGPT OS lifecycle |
+| **Total** | | **88 tests** | |
 
 ### Week 2: Integration + CI
 
-| Day | Task | Detail |
-|-----|------|--------|
-| 1 | Integration test: voice pipeline | End-to-end mock flow |
-| 2 | Integration test: vision pipeline | Screenshot → OCR → analysis |
-| 3 | Mobile voice protocol tests | WS voice_chunk streaming |
-| 4 | Coverage analysis + gap filling | Target ≥80% |
-| 5 | CI integration | Add os-agent tests to pipeline |
+| Day | Task | Paper Basis |
+|-----|------|-------------|
+| 1 | Integration test: voice pipeline | arXiv 2508.04721 |
+| 2 | Integration test: vision pipeline | ScreenAgent |
+| 3 | Coverage analysis + gap filling | OSWorld: ≥80% threshold |
+| 4 | CI integration | All: reproducible evaluation |
 
 ---
 
-## 7. CI Integration
+## 8. CI Integration
 
 ```yaml
 # .github/workflows/test.yml (addition)
@@ -460,26 +511,10 @@ export const Audio = {
 
 ---
 
-## 8. Coverage Targets
-
-| Module | Target | Key Metrics |
-|--------|--------|-------------|
-| gui-agent.ts | 85% | All public methods, error paths |
-| vision-cortex.ts | 80% | captureAndAnalyze, OCR, elements |
-| voice-io.ts | 75% | speak (real), VAD/STT (mock placeholders) |
-| system-monitor.ts | 85% | All metric collection methods |
-| iot-bridge.ts | 85% | HA API, NL parsing, states |
-| perception-fusion.ts | 90% | Snapshot, activity detect, summarize |
-| os-agent-tool.ts | 90% | All 19 action routes, validation |
-| index.ts | 80% | Lifecycle, delegation, error isolation |
-| **Overall os-agent/** | **≥80%** | |
-
----
-
 ## 9. File Changes Summary
 
 | File | Action | Lines Est. |
-|------|--------|-----------|
+|------|--------|-----------| 
 | `src/os-agent/__tests__/test-helpers.ts` | NEW | +80 |
 | `src/os-agent/__tests__/gui-agent.test.ts` | NEW | +200 |
 | `src/os-agent/__tests__/vision-cortex.test.ts` | NEW | +180 |
@@ -491,3 +526,20 @@ export const Audio = {
 | `src/os-agent/__tests__/os-agent-index.test.ts` | NEW | +160 |
 | `src/os-agent/__tests__/fixtures/` | NEW | +50 |
 | **Total** | | **~1620 lines** |
+
+---
+
+## 10. References
+
+| # | Paper | arXiv / Venue | Relevansi |
+|---|-------|--------------|-----------|
+| 1 | OSWorld: Benchmarking Multimodal Agents for Open-Ended Tasks in Real Computer Environments | arXiv:2404.07972 | OS-agent benchmark, isolation, evaluation scripts |
+| 2 | MemGPT: Towards LLMs as Operating Systems | arXiv:2310.08560 | Hierarchical memory, OS lifecycle, context fusion |
+| 3 | CodeAct: Executable Code Actions Elicit Better LLM Agents | arXiv:2402.01030 | Action validation, self-debugging, tool routing |
+| 4 | ScreenAgent: A Computer Control Agent Driven by VLM | IJCAI 2024 | Screenshot→OCR→action pipeline testing |
+| 5 | WebArena: A Realistic Web Environment for Building Autonomous Agents | ICLR 2024 | Functional correctness, output validation |
+| 6 | GTArena: GUI Testing Arena for Autonomous Testing Agents | arXiv:2412.x | Input validation, defect detection patterns |
+| 7 | Low-Latency Voice Agents with Concurrent Pipeline | arXiv:2508.04721 | Full-duplex voice, barge-in testing |
+| 8 | Silero VAD | GitHub/PyPI | VAD evaluation: TPR, FPR, detection latency |
+| 9 | LLM-based Home Automation Generation for HA | arXiv (2024) | NL → HA service call parsing, intent + slot testing |
+| 10 | Genie: Semantic Parser Generator for Virtual Assistants | arXiv | NL command parsing evaluation methodology |
