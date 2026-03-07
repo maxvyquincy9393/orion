@@ -392,6 +392,536 @@ After Phase 12 (stable, distributable):
   Phase 18 (Social Memory)   ← nice to have, builds on top of everything
 ```
 
+---
+
+## Phase 20 — HUD Overlay & Ambient Display
+
+**Prioritas:** 🟡 MEDIUM-HIGH — Tony punya holographic display. EDITH butuh "wajah" yang always-visible.
+**Tagline:** *"EDITH, show me the status."*
+
+### Apa Ini
+Desktop overlay transparan yang always-on-top — menampilkan info kontekstual tanpa harus
+buka app. Kayak HUD di dalam helm Iron Man: minimal, informatif, selalu terlihat kalau
+dibutuhkan, hilang kalau tidak.
+
+### Kenapa Ini Beda dari Desktop App
+Desktop app (Electron) sekarang = full window chat. HUD = overlay transparan yang:
+- Floating di corner layar, selalu di atas
+- Menampilkan contextual cards (cuaca, next meeting, task, notif)
+- Bisa dismiss dengan gesture atau voice
+- Expand jadi full mode kalau ditap
+
+### Core Tech
+| Teknologi | Fungsi |
+|-----------|--------|
+| **Electron BrowserWindow** `transparent: true, alwaysOnTop: true` | Overlay window |
+| **Framer Motion / CSS animations** | Smooth reveal/hide |
+| **Web Audio API** | Visual audio feedback saat voice active |
+| **Canvas / WebGL** | Arc reactor-style animated indicators |
+
+### Sub-phases
+```
+20A  Transparent Overlay Engine
+     - Electron window: transparent, click-through, non-focusable
+     - Position: corner selection (top-right, bottom-right, etc.)
+     - Show/hide: keyboard shortcut (Ctrl+Shift+E), voice ("EDITH, show HUD")
+     - Click-through mode: mouse passes through ke app di bawahnya
+
+20B  Contextual Cards
+     - Next event card (dari Phase 14 Calendar)
+     - Weather + commute card
+     - Active task / timer card
+     - Unread message count (dari Phase 8 Channels)
+     - Quick reply: ketik langsung di overlay
+
+20C  Status Indicators
+     - Arc reactor-style animated circle: listening, thinking, idle
+     - Color coding: green (ready), blue (processing), amber (warning)
+     - Typing indicator saat EDITH generating response
+     - Health bar: CPU/RAM usage saat EDITH heavy processing
+
+20D  Ambient Notification Mode
+     - Notification muncul di overlay, bukan system tray
+     - Priority-based: urgent = center screen, info = corner fade
+     - Stack management: max 3 visible, queue sisanya
+     - "Film mode": suppress semua visual saat fullscreen app
+```
+
+### edith.json Config
+```json
+"hud": {
+  "enabled": true,
+  "position": "top-right",
+  "opacity": 0.85,
+  "cards": ["calendar", "weather", "tasks", "messages"],
+  "hotkey": "Ctrl+Shift+E",
+  "filmModeAutoDetect": true,
+  "theme": "arc-reactor"
+}
+```
+
+---
+
+## Phase 21 — Emotional Intelligence & Adaptive Tone
+
+**Prioritas:** 🟡 MEDIUM — JARVIS tahu kapan Tony serius dan kapan bercanda. EDITH juga harus.
+**Tagline:** *"Lu kedengeran capek, bos. Mau gue reschedule meeting sore lu?"*
+
+### Apa Ini
+EDITH mendeteksi emosi/mood user dari teks, suara, atau pola interaksi — lalu
+menyesuaikan cara bicara, prioritas saran, dan intensitas proaktif. Bukan sekedar
+sentiment analysis — ini **behavioral adaptation**.
+
+### Core Papers
+| Paper | Kontribusi |
+|-------|-----------|
+| **EmoBench** (arXiv:2402.12071) | Benchmark: LLM emotional understanding |
+| **SER-Whisper** (arXiv:2309.07937) | Speech Emotion Recognition dari audio features |
+| **PICA** (arXiv:2407.00154) | Proactive conversational agents — emosi-aware timing |
+| **AffectGPT** (arXiv:2403.02378) | Multimodal affect: teks + suara + ekspresi |
+
+### Sub-phases
+```
+21A  Text Sentiment Engine
+     - Detect dari chat: frustasi, senang, buru-buru, bosan, stres
+     - Context window: bukan per-message, tapi sliding window 10 pesan
+     - "Lu udah 3x bilang 'ugh' dalam 5 menit" → detected frustration
+     - Update session mood: mempengaruhi response style
+
+21B  Voice Emotion Detection
+     - Dari Phase 1 audio stream: pitch, tempo, energy, pause pattern
+     - Whisper + paralinguistic features → mood classifier
+     - Real-time: update mood saat user sedang bicara
+     - Privacy-first: processed locally, no raw audio stored
+
+21C  Adaptive Response Style
+     - Mood → response adjustment matrix:
+       stressed  → shorter, more actionable, less small talk
+       happy     → warmer, can include humor/banter
+       focused   → minimal interruption, only critical proactive
+       tired     → suggest breaks, simplify options, defer non-urgent
+     - Override: user bisa bilang "EDITH, formal mode" kapan saja
+
+21D  Burnout & Wellness Patterns
+     - Track working hours dari keyboard/mouse activity (opt-in)
+     - "Lu udah coding 6 jam non-stop. Istirahat 15 menit?"
+     - Weekly mood summary: "Minggu ini lu dominan fokus. Kecuali Rabu sore."
+     - TIDAK menyimpan data mood tanpa consent — toggle per-fitur
+```
+
+### edith.json Config
+```json
+"emotionalIntelligence": {
+  "enabled": true,
+  "textSentiment": true,
+  "voiceEmotion": true,
+  "adaptiveResponse": true,
+  "wellnessTracking": false,
+  "privacyMode": "local-only",
+  "moodHistoryRetentionDays": 30
+}
+```
+
+---
+
+## Phase 22 — Autonomous Mission Mode
+
+**Prioritas:** 🟡 MEDIUM — "EDITH, handle it" dan pergi tidur.
+**Tagline:** *"EDITH, gue tidur. Besok pagi gue mau laporan lengkap apa yang lu kerjain."*
+
+### Apa Ini
+User bisa assign EDITH sebuah **mission** — goal besar multi-step yang EDITH kerjakan
+secara autonomous selama berjam-jam tanpa intervensi. Hasilnya dikirim sebagai laporan.
+Ini Mark 42-level automation: "autopilot, JARVIS."
+
+### Bedanya dengan Phase 11 (Multi-Agent)
+Phase 11 = orchestrasi sub-agents untuk task panjang yang user monitor.
+Phase 22 = **fully autonomous operation** di mana user pergi dan EDITH jalan sendiri
+dengan checkpoint, decision logging, dan self-recovery.
+
+### Core Papers
+| Paper | Kontribusi |
+|-------|-----------|
+| **AutoGen** (Microsoft, 2023) | Multi-agent autonomous conversation loops |
+| **ADAS** (arXiv:2408.13231) | Automated Design of Agentic Systems — self-improving |
+| **Voyager** (arXiv:2305.16291) | Lifelong learning agent — explore, learn, skill library |
+| **SWE-agent** (arXiv:2405.15793) | Autonomous software engineering without human |
+
+### Sub-phases
+```
+22A  Mission Planner
+     - User defines goal in natural language:
+       "Research 10 kompetitor EDITH, buat comparison table, simpan di Notion"
+     - EDITH decomposes → DAG of sub-tasks
+     - Estimated duration + resource requirements
+     - User approves plan → mission starts
+
+22B  Autonomous Execution Engine
+     - Runs tasks sequentially/parallel sesuai DAG
+     - Checkpoint per sub-task: progress saved ke file
+     - Self-correction: kalau task gagal → retry with different approach
+     - Decision logging: setiap keputusan yang EDITH ambil → logged with reasoning
+
+22C  Guardrails & Safety Boundaries
+     - Budget limits: max API calls, max tokens, max waktu
+     - Scope lock: EDITH ga boleh expand scope tanpa izin
+     - Sensitive action gate: anything destructive → queue for user approval
+     - "Abort mission" command: immediate stop + progress report
+     - Dead man's switch: auto-stop kalau no progress 30 menit
+
+22D  Mission Report
+     - Selesai → detailed report:
+       - Apa yang diminta
+       - Apa yang dikerjakan (step-by-step with timestamps)
+       - Keputusan yang diambil dan alasannya
+       - Hasil akhir (files, data, summaries)
+       - Failures dan bagaimana recovery-nya
+     - Dikirim via channel preference (email, telegram, push notif)
+```
+
+### edith.json Config
+```json
+"mission": {
+  "enabled": true,
+  "maxDurationHours": 8,
+  "maxApiCalls": 500,
+  "autoStopAfterNoProgressMinutes": 30,
+  "requireApprovalForDestructiveActions": true,
+  "reportChannel": "telegram",
+  "checkpointIntervalMinutes": 15
+}
+```
+
+---
+
+## Phase 23 — Hardware & Physical World Bridge
+
+**Prioritas:** 🟢 MEDIUM — Tony's suit is physical. EDITH butuh jembatan ke dunia fisik.
+**Tagline:** *"EDITH, nyalain lampu meja, set monitor kedua ke mode presentasi, charge laptop."*
+
+### Apa Ini
+Ekspansi Phase 4 (IoT) ke hardware enthusiast territory: Arduino, Raspberry Pi,
+ESP32, USB relay, LED strip, servo motor. Plus: smart desk setup — monitor control
+(DDC/CI), USB device management, printer, scanner.
+
+### Bedanya dengan Phase 4 (IoT)
+Phase 4 = smart home (Philips Hue, Tuya, etc.) via API.
+Phase 23 = **direct hardware communication** + desk peripheral control + maker projects.
+
+### Sub-phases
+```
+23A  Serial & GPIO Communication
+     - Arduino/ESP32 via serial (node-serialport)
+     - Raspberry Pi GPIO via pigpio
+     - Protocol handlers: MQTT, serial, I2C, BLE
+     - Device discovery: scan USB devices, auto-detect Arduino
+
+23B  Desk Environment Control
+     - Monitor brightness/input source via DDC/CI (WinAPI / ddcutil)
+     - USB hub power control: turn devices on/off
+     - Webcam/mic hardware mute (beyond OS mute)
+     - Desk LED strip: color = EDITH status (arc reactor vibes)
+
+23C  Maker Project Integration
+     - "EDITH, putar servo ke 90 derajat"
+     - Sensor dashboard: read temperature, humidity, motion dari connected sensors
+     - Automation: "kalau suhu kamar > 30°C, nyalain kipas via relay"
+     - Code generator: EDITH bikin Arduino sketch dari deskripsi NL
+
+23D  3D Print & Fabrication Queue
+     - Monitor OctoPrint / Bambu Lab status
+     - "EDITH, print ini pakai PLA hitam, infill 20%"
+     - Queue management: multiple prints, estimated time
+     - Alert: "Print selesai" atau "Print gagal di layer 47"
+```
+
+### edith.json Config
+```json
+"hardware": {
+  "enabled": false,
+  "serial": {
+    "autoDetect": true,
+    "allowedPorts": ["COM3", "/dev/ttyUSB0"]
+  },
+  "desk": {
+    "ddcciMonitorControl": true,
+    "ledStrip": { "type": "ws2812b", "pin": 18 }
+  },
+  "octoprint": {
+    "url": "http://192.168.1.50",
+    "apiKey": "$vault:OCTOPRINT_KEY"
+  }
+}
+```
+
+---
+
+## Phase 24 — Self-Improvement & Meta-Learning
+
+**Prioritas:** 🟢 MEDIUM — Mark I sampai Mark L: setiap iterasi lebih baik. EDITH harus sama.
+**Tagline:** *"EDITH belajar dari setiap interaksi dan jadi lebih baik tanpa lu sadari."*
+
+### Apa Ini
+EDITH secara otomatis improve performanya sendiri: prompt optimization dari feedback,
+skill creation dari pola berulang, dan knowledge gap detection. Ini bukan fine-tuning
+model — ini **system-level self-improvement**.
+
+### Core Papers
+| Paper | Kontribusi |
+|-------|-----------|
+| **ADAS** (arXiv:2408.13231) | Automated Design of Agentic Systems |
+| **Voyager** (arXiv:2305.16291) | Lifelong learning: discover skills, build library |
+| **DSPy** (arXiv:2310.03714) | Programmatic prompt optimization without manual tuning |
+| **Self-Refine** (arXiv:2303.17651) | Iterative self-refinement tanpa external feedback |
+
+### Sub-phases
+```
+24A  Response Quality Tracking
+     - Track implicit feedback: user rephrase = bad response
+     - Track explicit feedback: thumbs up/down, "that's wrong"
+     - Per-skill success rate: mana yang sering gagal?
+     - Weekly report: "Top 5 pertanyaan yang gue ga bisa jawab bagus"
+
+24B  Prompt Auto-Optimization (DSPy-style)
+     - System prompt segments yang underperform → auto-revise
+     - A/B testing: 2 prompt variants, track mana yang user lebih suka
+     - Guardrail: identity/safety sections NEVER auto-modified
+     - Version control: semua prompt changes logged + rollback-able
+
+24C  Skill Auto-Creation
+     - Detect pola: user minta hal yang sama > 3x
+     - "Kayaknya lu sering minta format commit message. Mau gue bikin skill?"
+     - Auto-draft SKILL.md → user review → approved → active
+     - Skill sunset: kalau skill ga dipake 60 hari → suggest archive
+
+24D  Knowledge Gap Detection
+     - Track "I don't know" responses → topics EDITH struggles with
+     - Suggest knowledge base additions (Phase 13): "Lu banyak tanya soal K8s,
+       mau gue index dokumentasi Kubernetes ke knowledge base lu?"
+     - Cross-reference with user's bookmarks/notes (if Phase 13 active)
+     - Weekly learning report: "3 hal baru yang gue pelajari minggu ini"
+```
+
+### edith.json Config
+```json
+"selfImprovement": {
+  "enabled": true,
+  "feedbackTracking": true,
+  "promptOptimization": false,
+  "autoSkillCreation": true,
+  "knowledgeGapDetection": true,
+  "promptAutoModifyExclusions": ["identity", "safety", "permissions"],
+  "reportFrequency": "weekly"
+}
+```
+
+---
+
+## Phase 25 — Digital Twin & Simulation Mode
+
+**Prioritas:** 🟢 LOW-MEDIUM — Tony simulasi suit di hologram sebelum build. EDITH simulasi aksi sebelum execute.
+**Tagline:** *"EDITH, simulasi dulu — kalau hasilnya bagus baru jalanin beneran."*
+
+### Apa Ini
+Sebelum menjalankan aksi yang berisiko (deploy code, kirim email massal, edit file penting),
+EDITH bisa **simulate** hasilnya di sandbox mode. User lihat preview → approve → execute.
+
+### Sub-phases
+```
+25A  Action Preview Engine
+     - Setiap tool call punya "preview mode": generate output tanpa execute
+     - File edit: show diff sebelum write
+     - Email/message: show draft sebelum send
+     - Code: run tests di sandbox sebelum commit ke repo asli
+
+25B  Sandbox Execution
+     - Docker container untuk code execution: isolated, disposable
+     - Virtual filesystem: simulate file changes tanpa write ke disk
+     - Mock API mode: simulate external API calls dengan cached/fake responses
+     - Time limit + resource limit per sandbox session
+
+25C  "What If" Analysis
+     - "EDITH, kalau gue merge PR ini, ada breaking changes ga?"
+     - "Kalau gue reschedule meeting ini, siapa yang kena dampak?"
+     - "Simulasi kalau gue pake provider Groq instead of OpenAI — berapa cost difference?"
+     - Decision tree visualization
+
+25D  Rollback & Undo Engine
+     - Setiap aksi EDITH → create restore point
+     - "EDITH, undo yang barusan" → rollback ke state sebelum aksi
+     - File versioning: shadow copies sebelum setiap edit
+     - Cascading undo: kalau aksi punya child actions, undo semuanya
+```
+
+### edith.json Config
+```json
+"simulation": {
+  "enabled": true,
+  "previewBeforeExecute": ["file-write", "email-send", "git-push"],
+  "sandboxDocker": true,
+  "sandboxTimeoutSeconds": 120,
+  "maxRollbackHistory": 50,
+  "whatIfEnabled": true
+}
+```
+
+---
+
+## Phase 26 — Collaborative EDITH (Iron Legion)
+
+**Prioritas:** 🟢 LOW — Tony punya Iron Legion. Bagaimana kalau beberapa EDITH kolaborasi?
+**Tagline:** *"EDITH-Alpha, handle research. EDITH-Beta, handle coding. Report ke gue dua-duanya."*
+
+### Apa Ini
+Multiple EDITH instances bisa berkolaborasi — setiap instance punya specialization
+(research, coding, communication), dan user jadi "Tony" yang orchestrate semuanya.
+Juga: shared EDITH instances untuk team (family, small team).
+
+### Bedanya dengan Phase 11 (Multi-Agent)
+Phase 11 = **internal** sub-agents di dalam satu EDITH instance.
+Phase 26 = **external** multiple EDITH instances yang masing-masing berjalan terpisah,
+berkomunikasi via API, dan bisa di-manage dari satu dashboard.
+
+### Sub-phases
+```
+26A  Instance Communication Protocol
+     - EDITH-to-EDITH API: authenticated, encrypted
+     - Shared context: instance bisa share memory segment (with permission)
+     - Task delegation: satu EDITH bisa assign task ke EDITH lain
+     - Status sync: semua instance report status ke primary
+
+26B  Specialized Instances
+     - EDITH-Research: optimized untuk web search, knowledge base, summarization
+     - EDITH-Code: optimized untuk coding, debugging, git operations
+     - EDITH-Comm: optimized untuk email, calendar, social communication
+     - User bisa spin up/down instances sesuai kebutuhan
+
+26C  Team / Family Shared EDITH
+     - Multi-user support (existing Phase 10 multi-user model)
+     - Shared knowledge base: team wiki yang semua EDITH bisa akses
+     - Per-user privacy: personal memory tetap private
+     - "EDITH, share info meeting kemarin ke Sarah"
+
+26D  Central Dashboard
+     - Web UI: lihat semua EDITH instances, status, active tasks
+     - Resource allocation: GPU/memory per instance
+     - Cost tracking: token usage per instance per hari
+     - Kill switch: matikan instance yang misbehave
+```
+
+### edith.json Config
+```json
+"legion": {
+  "enabled": false,
+  "role": "primary",
+  "instances": [
+    { "name": "EDITH-Research", "url": "http://localhost:8081", "role": "research" },
+    { "name": "EDITH-Code", "url": "http://localhost:8082", "role": "coding" }
+  ],
+  "sharedMemoryEnabled": true,
+  "teamMode": false,
+  "dashboardPort": 9090
+}
+```
+
+---
+
+## Updated Gap Analysis — Full Iron Man Feature Matrix
+
+```
+Current + Suggested Coverage:
+  ✅ Voice I/O (1)                 ✅ Vision / Screen (3)
+  ✅ IoT / Smart Home (4)          ✅ Computer Use (7)
+  ✅ Multi-channel (8)             ✅ Offline Mode (9)
+  ✅ Personalization (10)          ✅ Multi-agent (11)
+  ✅ Distribution (12)             ✅ Knowledge Base (13)
+  ✅ Calendar Intelligence (14)    ✅ Browser Agent (15)
+  ✅ Mobile Deep (16)              ✅ Privacy Vault (17)
+  ✅ Social Memory (18)            ✅ Dev Mode (19)
+
+NEW — Phase 20-26:
+  ✅ HUD Overlay (20)              ✅ Emotional Intelligence (21)
+  ✅ Autonomous Mission (22)       ✅ Hardware Bridge (23)
+  ✅ Self-Improvement (24)         ✅ Digital Twin / Simulation (25)
+  ✅ Collaborative EDITH (26)
+
+Iron Man Feature Mapping:
+  JARVIS Voice           → Phase 1 + 21 (emotion-aware)
+  Holographic HUD        → Phase 20
+  Suit Diagnostics       → Phase 23 (hardware) + 20 (HUD status)
+  Iron Legion            → Phase 26
+  Autonomous Flight      → Phase 22 (autonomous mission)
+  Self-Repairing Suit    → Phase 24 (self-improvement)
+  Simulation Chamber     → Phase 25
+  Friday / Karen         → Phase 26 (specialized instances)
+  Arc Reactor Monitor    → Phase 20C (status indicators)
+  Threat Detection       → Phase 17 (security) + 21 (context awareness)
+```
+
+---
+
+## Updated Prioritization Matrix
+
+```
+                    ┌─────────────┬─────────────┐
+                    │  HIGH Value │  LOW Value   │
+         ┌──────────┼─────────────┼──────────────┤
+  LOW    │          │  Phase 13   │  Phase 24    │
+ Effort  │          │  Knowledge  │  Self-Improve│
+         │          │  Base       │              │
+         ├──────────┼─────────────┼──────────────┤
+ MEDIUM  │          │  Phase 14   │  Phase 18    │
+ Effort  │          │  Calendar   │  Social Mem  │
+         │          │  Phase 20   │  Phase 21    │
+         │          │  HUD        │  Emotional   │
+         │          │  Phase 22   │  Phase 25    │
+         │          │  Mission    │  Simulation  │
+         ├──────────┼─────────────┼──────────────┤
+  HIGH   │          │  Phase 15   │  Phase 26    │
+ Effort  │          │  Browser    │  Legion      │
+         │          │  Phase 16   │  Phase 23    │
+         │          │  Mobile     │  Hardware    │
+         │          │  Phase 19   │              │
+         │          │  Dev Mode   │              │
+         │          │  Phase 17   │              │
+         │          │  Privacy    │              │
+         └──────────┴─────────────┴──────────────┘
+```
+
+## Updated Recommended Build Order
+
+```
+After Phase 12 (stable, distributable):
+
+  Phase 13 (Knowledge Base)  ← biggest daily value, uses existing LanceDB
+       ↓
+  Phase 14 (Calendar)        ← makes EDITH genuinely useful every morning
+       ↓
+  Phase 20 (HUD Overlay)     ← EDITH gets a face — always-visible companion
+       ↓
+  Phase 15 (Browser Agent)   ← "JARVIS, book that"
+       ↓
+  Phase 17 (Privacy Vault)   ← trust layer before wider distribution
+       ↓
+  Phase 22 (Autonomous Mode) ← "handle it while I sleep" — major wow factor
+       ↓
+  Phase 21 (Emotional Intel) ← EDITH adapts to you, not just responds
+       ↓
+  Phase 16 (Mobile Deep)     ← always-with-you companion
+       ↓
+  Phase 19 (Dev Mode)        ← for the dev user base specifically
+       ↓
+  Phase 24 (Self-Improvement)← EDITH gets smarter on its own
+       ↓
+  Phase 25 (Simulation)      ← preview before execute — safety net
+       ↓
+  Phase 18 (Social Memory)   ← relationship awareness
+       ↓
+  Phase 23 (Hardware Bridge) ← maker community + desk setup
+       ↓
+  Phase 26 (Iron Legion)     ← endgame: multiple EDITH collab
+```
+
 ## Total Gap Summary
 
 | Phase | Name | Effort | Value | Dependency |
@@ -403,3 +933,10 @@ After Phase 12 (stable, distributable):
 | **17** | Privacy Vault | Medium | ⭐⭐⭐ | Phase 6 (CaMeL) |
 | **18** | Social Memory | Medium | ⭐⭐⭐ | Phase 10 (personalization) |
 | **19** | Dev Assistant Mode | High | ⭐⭐⭐⭐ | Phase 11 (multi-agent) |
+| **20** | HUD Overlay | Medium | ⭐⭐⭐⭐ | Phase 12 (desktop app) |
+| **21** | Emotional Intelligence | Medium | ⭐⭐⭐ | Phase 1 (voice) + Phase 10 |
+| **22** | Autonomous Mission | Medium | ⭐⭐⭐⭐⭐ | Phase 11 (multi-agent) |
+| **23** | Hardware Bridge | High | ⭐⭐⭐ | Phase 4 (IoT) |
+| **24** | Self-Improvement | Low | ⭐⭐⭐⭐ | Phase 10 + Phase 13 |
+| **25** | Digital Twin / Simulation | Medium | ⭐⭐⭐ | Phase 7 + Phase 17 |
+| **26** | Collaborative EDITH | High | ⭐⭐⭐ | Phase 11 + Phase 17 |
