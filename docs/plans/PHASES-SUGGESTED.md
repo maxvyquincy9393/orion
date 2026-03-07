@@ -88,6 +88,8 @@ dan bisa jawab pertanyaan berdasarkan konten dokumen tersebut.
 }
 ```
 
+> 📄 **Detailed plan:** [PHASE-13-KNOWLEDGE-BASE.md](./PHASE-13-KNOWLEDGE-BASE.md) (~2750 lines, 6 sub-phases)
+
 ---
 
 ## Phase 14 — Calendar & Schedule Intelligence
@@ -145,6 +147,8 @@ dan bisa **proaktif** mengingatkan, menjadwalkan, dan melindungi waktu fokus.
 }
 ```
 
+> 📄 **Detailed plan:** [PHASE-14-CALENDAR.md](./PHASE-14-CALENDAR.md) (~2650 lines, 6 sub-phases)
+
 ---
 
 ## Phase 15 — Browser Agent (Deep Web Automation)
@@ -190,6 +194,8 @@ DOM awareness, form filling cerdas, session management, dan web scraping terstru
      - Error recovery: kalau gagal → retry dengan different approach
 ```
 
+> 📄 **Detailed plan:** [PHASE-15-BROWSER-AGENT.md](./PHASE-15-BROWSER-AGENT.md) (~1840 lines, 6 sub-phases)
+
 ---
 
 ## Phase 16 — Mobile Deep Integration
@@ -226,6 +232,8 @@ dengan asisten bawaan HP (Siri Shortcuts, Android App Intents).
      - Android App Intents / Google Assistant actions
      - Wear OS basic support (cek notif, reply singkat)
 ```
+
+> 📄 **Detailed plan:** [PHASE-16-MOBILE-DEEP.md](./PHASE-16-MOBILE-DEEP.md) (~1590 lines, 6 sub-phases)
 
 ---
 
@@ -274,6 +282,8 @@ Saat ini API keys disimpan plaintext di `edith.json`. Phase ini:
      - Backup to encrypted cloud (optional, user-controlled)
 ```
 
+> 📄 **Detailed plan:** [PHASE-17-PRIVACY-VAULT.md](./PHASE-17-PRIVACY-VAULT.md) (~1640 lines, 5 sub-phases)
+
 ---
 
 ## Phase 18 — Social & Relationship Memory
@@ -306,6 +316,8 @@ diketahui tentang mereka, history interaksi, dan context penting.
      - "Lu belum kabar ke mentor lu 3 bulan" (kalau user setting ini)
      - Follow-up tracker: "Masih nunggu reply dari vendor X sejak 2 minggu lalu"
 ```
+
+> 📄 **Detailed plan:** [PHASE-18-SOCIAL-MEMORY.md](./PHASE-18-SOCIAL-MEMORY.md) (~1610 lines, 6 sub-phases)
 
 ---
 
@@ -348,6 +360,8 @@ ini **semantic code understanding**, bukan sekedar klik-klik di editor.
      - "Buat README untuk repo ini"
      - Diagram: generate Mermaid dari arsitektur kode (RepoAgent)
 ```
+
+> 📄 **Detailed plan:** [PHASE-19-DEV-ASSISTANT.md](./PHASE-19-DEV-ASSISTANT.md) (~2110 lines, 6 sub-phases)
 
 ---
 
@@ -839,11 +853,11 @@ Current + Suggested Coverage:
   ✅ Mobile Deep (16)              ✅ Privacy Vault (17)
   ✅ Social Memory (18)            ✅ Dev Mode (19)
 
-NEW — Phase 20-26:
+NEW — Phase 20-27:
   ✅ HUD Overlay (20)              ✅ Emotional Intelligence (21)
   ✅ Autonomous Mission (22)       ✅ Hardware Bridge (23)
   ✅ Self-Improvement (24)         ✅ Digital Twin / Simulation (25)
-  ✅ Collaborative EDITH (26)
+  ✅ Collaborative EDITH (26)      ✅ Cross-Device Mesh (27)
 
 Iron Man Feature Mapping:
   JARVIS Voice           → Phase 1 + 21 (emotion-aware)
@@ -855,6 +869,7 @@ Iron Man Feature Mapping:
   Simulation Chamber     → Phase 25
   Friday / Karen         → Phase 26 (specialized instances)
   Arc Reactor Monitor    → Phase 20C (status indicators)
+  Multi-Device Suit      → Phase 27 (cross-device mesh)
   Threat Detection       → Phase 17 (security) + 21 (context awareness)
 ```
 
@@ -919,6 +934,10 @@ After Phase 12 (stable, distributable):
        ↓
   Phase 23 (Hardware Bridge) ← maker community + desk setup
        ↓
+  Phase 23 (Hardware Bridge) ← maker community + desk setup
+       ↓
+  Phase 27 (Cross-Device)    ← THE glue: HP + laptop, beda gateway, satu EDITH
+       ↓
   Phase 26 (Iron Legion)     ← endgame: multiple EDITH collab
 ```
 
@@ -940,3 +959,144 @@ After Phase 12 (stable, distributable):
 | **24** | Self-Improvement | Low | ⭐⭐⭐⭐ | Phase 10 + Phase 13 |
 | **25** | Digital Twin / Simulation | Medium | ⭐⭐⭐ | Phase 7 + Phase 17 |
 | **26** | Collaborative EDITH | High | ⭐⭐⭐ | Phase 11 + Phase 17 |
+| **27** | Cross-Device Mesh | High | ⭐⭐⭐⭐⭐ | Phase 8 + Phase 12 |
+
+---
+
+## Phase 27 — Cross-Device Mesh & Unified Gateway
+
+**Prioritas:** 🔴 HIGH — Ini lem yang menyatukan HP dan laptop. Different gateway, same EDITH.
+**Tagline:** *"Mulai ngobrol di laptop, lanjut di HP sambil jalan — EDITH selalu connected."*
+
+### Apa Ini
+EDITH harus jalan **seamless** di HP dan laptop — bahkan ketika keduanya di **network berbeda
+dan gateway berbeda**. User mulai ngobrol di laptop, lanjut di HP — tanpa kehilangan konteks.
+
+### Kenapa Ini Beda dari Phase 8 (Channels) dan Phase 16 (Mobile Deep)
+Phase 8 = multi-channel delivery (WhatsApp, Telegram, Discord).
+Phase 16 = mobile app features (push, widget, share sheet).
+Phase 27 = **multi-gateway state synchronization** — satu user, banyak device, beda gateway,
+            satu experience EDITH yang konsisten.
+
+### Core Papers/Tech
+| Paper / Tech | Kontribusi |
+|-------------|-----------|
+| **CRDTs** (arXiv:1805.06358) | Eventually consistent sync tanpa central authority |
+| **Yjs** (github.com/yjs/yjs) | Production CRDT for real-time shared state |
+| **Matrix Protocol** (spec.matrix.org) | Decentralized message sync across servers |
+| **WebRTC** (webrtc.org) | P2P direct connection on same network |
+| **Apple Continuity / Handoff** | UX pattern: start here, continue there |
+| **WireGuard** (wireguard.com) | Lightweight VPN tunnel — cross-network gateway sync |
+| **MQTT QoS** (mqtt.org) | Reliable IoT messaging with delivery guarantees |
+| **Raft Consensus** (raft.github.io) | Leader election for multi-gateway coordination |
+
+### Sub-phases
+```
+27A  Device Pairing & Identity
+     - QR code pairing: scan from phone to connect to EDITH
+     - One user_id, many device_ids — each with own auth token
+     - Device registry: name, OS, capabilities, gateway association
+
+27B  Conversation Sync (CRDT-based)
+     - Yjs-backed shared conversation state
+     - Append-only message log with vector clocks
+     - Type on laptop → phone shows message within 2 seconds
+     - Automatic conflict resolution (no merge conflicts)
+
+27C  Memory Sync (Tiered)
+     - Hot (24h, active session) → real-time via WebSocket
+     - Warm (30 days) → periodic batch sync every 5 minutes
+     - Cold (older) → on-demand pull
+     - Vectors NOT synced — only metadata + text (re-embed locally)
+
+27D  Presence & Active Device Detection
+     - Heartbeat every 10s: which device is active?
+     - States: active, idle, background, offline, dnd
+     - Notifications route to active device only
+     - All offline → push to all devices
+
+27E  Gateway-to-Gateway Sync Protocol
+     - Two gateways hold full state — either works offline
+     - CRDT deltas over WebSocket (persistent connection)
+     - HTTP batch fallback if WebSocket breaks
+     - Reconnect → bidirectional sync of missed deltas
+
+27F  Session Handoff
+     - Lock laptop → phone gets session_handoff event
+     - Conversation continues at same scroll position
+     - Voice handoff: "EDITH, switch to laptop" → voice moves
+     - Context (last 10 messages + mood) transferred instantly
+
+27G  Network Discovery (P2P + Cloud Fallback)
+     - mDNS/Bonjour: discover gateways on same network → direct P2P
+     - Different network → cloud relay (Cloudflare Tunnel or VPS)
+     - WireGuard VPN option for advanced users
+     - Hybrid auto-detect: P2P when possible, cloud fallback otherwise
+
+27H  Mobile Companion Deep Integration
+     - Full chat (synced), voice, camera, notifications
+     - Share sheet: share anything → EDITH processes it
+     - Clipboard sync: copy on phone → paste on laptop
+     - Location context: proactive suggestions based on where you are
+     - Offline mode: cached responses when disconnected
+```
+
+### edith.json Config
+```json
+"crossDevice": {
+  "enabled": true,
+  "mode": "hybrid",
+  "gateways": [
+    {
+      "id": "local",
+      "url": "ws://localhost:3000",
+      "role": "primary",
+      "network": "home"
+    },
+    {
+      "id": "cloud",
+      "url": "wss://edith.myserver.com",
+      "role": "replica",
+      "network": "public"
+    }
+  ],
+  "syncIntervalMs": 5000,
+  "encryption": "aes-256-gcm",
+  "discovery": "mdns+cloud",
+  "clipboard": true,
+  "locationContext": false
+}
+```
+
+> 📄 **Detailed plan:** [PHASE-27-CROSS-DEVICE.md](./PHASE-27-CROSS-DEVICE.md) (~2430 lines, 8 sub-phases)
+
+---
+
+## Detailed Phase Plans (Full Engineering Docs)
+
+Each phase below has a standalone engineering document with:
+- Research references (arXiv IDs, real papers)
+- Architecture diagrams (Mermaid)
+- TypeScript code examples
+- JSON config examples
+- Acceptance gates
+- Cross-phase connection tables
+- File change summaries
+
+| Phase | Detailed Doc |
+|-------|-------------|
+| 13 | [PHASE-13-KNOWLEDGE-BASE.md](./PHASE-13-KNOWLEDGE-BASE.md) |
+| 14 | [PHASE-14-CALENDAR.md](./PHASE-14-CALENDAR.md) |
+| 15 | [PHASE-15-BROWSER-AGENT.md](./PHASE-15-BROWSER-AGENT.md) |
+| 16 | [PHASE-16-MOBILE-DEEP.md](./PHASE-16-MOBILE-DEEP.md) |
+| 17 | [PHASE-17-PRIVACY-VAULT.md](./PHASE-17-PRIVACY-VAULT.md) |
+| 18 | [PHASE-18-SOCIAL-MEMORY.md](./PHASE-18-SOCIAL-MEMORY.md) |
+| 19 | [PHASE-19-DEV-ASSISTANT.md](./PHASE-19-DEV-ASSISTANT.md) |
+| 20 | [PHASE-20-HUD-OVERLAY.md](./PHASE-20-HUD-OVERLAY.md) |
+| 21 | [PHASE-21-EMOTIONAL-INTELLIGENCE.md](./PHASE-21-EMOTIONAL-INTELLIGENCE.md) |
+| 22 | [PHASE-22-AUTONOMOUS-MISSION.md](./PHASE-22-AUTONOMOUS-MISSION.md) |
+| 23 | [PHASE-23-HARDWARE-BRIDGE.md](./PHASE-23-HARDWARE-BRIDGE.md) |
+| 24 | [PHASE-24-SELF-IMPROVEMENT.md](./PHASE-24-SELF-IMPROVEMENT.md) |
+| 25 | [PHASE-25-DIGITAL-TWIN.md](./PHASE-25-DIGITAL-TWIN.md) |
+| 26 | [PHASE-26-IRON-LEGION.md](./PHASE-26-IRON-LEGION.md) |
+| 27 | [PHASE-27-CROSS-DEVICE.md](./PHASE-27-CROSS-DEVICE.md) |
