@@ -3,13 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orion Setup</title>
+  <title>EDITH Setup</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -20,117 +16,88 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 40px;
+      padding: 32px 40px;
+      overflow-y: auto;
     }
 
     .container {
-      max-width: 480px;
+      max-width: 520px;
       width: 100%;
       text-align: center;
     }
 
-    .logo {
-      font-size: 48px;
-      font-weight: 700;
-      color: #fff;
-      margin-bottom: 8px;
-    }
+    .logo { font-size: 48px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+    .subtitle { font-size: 16px; color: #666; margin-bottom: 32px; }
 
-    .subtitle {
-      font-size: 16px;
-      color: #666;
-      margin-bottom: 40px;
-    }
+    .step { display: none; }
+    .step.active { display: block; }
 
-    .step {
-      display: none;
-    }
+    .step-title { font-size: 22px; font-weight: 600; margin-bottom: 10px; }
+    .step-desc { font-size: 14px; color: #888; margin-bottom: 24px; line-height: 1.6; }
 
-    .step.active {
-      display: block;
-    }
-
-    .step-title {
-      font-size: 24px;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-
-    .step-desc {
-      font-size: 14px;
-      color: #888;
-      margin-bottom: 32px;
-      line-height: 1.6;
-    }
-
-    .provider-options {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-bottom: 32px;
+    /* ── Provider grid ── */
+    .provider-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 24px;
       text-align: left;
     }
 
-    .provider-option {
-      padding: 16px;
+    .provider-card {
+      padding: 14px;
       background: #141414;
       border: 2px solid #222;
       border-radius: 12px;
       cursor: pointer;
       transition: border-color 0.15s, background 0.15s;
+      position: relative;
     }
+    .provider-card:hover { border-color: #333; background: #1a1a1a; }
+    .provider-card.selected { border-color: #1d4ed8; background: #1a1a2e; }
+    .provider-card input[type="radio"] { display: none; }
 
-    .provider-option:hover {
-      border-color: #333;
-      background: #1a1a1a;
+    .provider-card-icon {
+      font-size: 22px;
+      margin-bottom: 6px;
     }
-
-    .provider-option.selected {
-      border-color: #1d4ed8;
-      background: #1a1a2e;
-    }
-
-    .provider-option input {
-      display: none;
-    }
-
-    .provider-name {
+    .provider-card-name {
       font-weight: 600;
-      font-size: 15px;
-      margin-bottom: 4px;
+      font-size: 14px;
+      margin-bottom: 3px;
     }
+    .provider-card-desc { font-size: 11px; color: #666; line-height: 1.4; }
 
-    .provider-desc {
-      font-size: 12px;
-      color: #666;
-    }
-
-    .provider-badge {
+    .badge {
       display: inline-block;
-      background: #22c55e;
-      color: #000;
-      font-size: 10px;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 8px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .badge-green { background: #22c55e; color: #000; }
+    .badge-blue  { background: #3b82f6; color: #fff; }
+    .badge-yellow{ background: #eab308; color: #000; }
+
+    /* Section label inside grid */
+    .provider-section-label {
+      grid-column: 1 / -1;
+      font-size: 11px;
       font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      margin-left: 8px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 0 2px;
     }
 
-    .input-group {
-      margin-bottom: 20px;
-      text-align: left;
-    }
-
-    .input-label {
-      display: block;
-      font-size: 13px;
-      color: #888;
-      margin-bottom: 8px;
-    }
-
+    /* ── Form fields ── */
+    .input-group { margin-bottom: 18px; text-align: left; }
+    .input-label { display: block; font-size: 12px; color: #888; margin-bottom: 6px; }
     .input-field {
       width: 100%;
-      padding: 12px 16px;
+      padding: 11px 14px;
       background: #141414;
       border: 2px solid #222;
       border-radius: 8px;
@@ -139,37 +106,21 @@
       outline: none;
       transition: border-color 0.15s;
     }
+    .input-field:focus { border-color: #1d4ed8; }
+    select.input-field { appearance: none; }
+    .input-link { display: block; font-size: 11px; color: #3b82f6; margin-top: 6px; }
+    .input-hint { display: block; font-size: 11px; color: #555; margin-top: 6px; }
 
-    .input-field:focus {
-      border-color: #1d4ed8;
-    }
+    .divider { height: 1px; background: #1e1e1e; margin: 24px 0; }
+    .section-title { font-size: 13px; font-weight: 600; color: #aaa; margin-bottom: 16px; text-align: left; }
 
-    .input-link {
-      display: block;
-      font-size: 12px;
-      color: #1d4ed8;
-      margin-top: 8px;
-    }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .checkbox-row input { width: 17px; height: 17px; accent-color: #1d4ed8; }
+    .checkbox-row label { font-size: 14px; }
 
-    .checkbox-group {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-
-    .checkbox-group input {
-      width: 18px;
-      height: 18px;
-      accent-color: #1d4ed8;
-    }
-
-    .checkbox-label {
-      font-size: 14px;
-    }
-
+    /* ── Buttons ── */
     .btn {
-      padding: 12px 32px;
+      padding: 11px 28px;
       border: none;
       border-radius: 8px;
       font-size: 14px;
@@ -177,336 +128,737 @@
       cursor: pointer;
       transition: background 0.15s, opacity 0.15s;
     }
+    .btn-primary { background: #1d4ed8; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-secondary { background: #1e1e1e; color: #888; }
+    .btn-secondary:hover { background: #2a2a2a; color: #ccc; }
+    .btn-group { display: flex; gap: 10px; justify-content: center; margin-top: 8px; }
 
-    .btn-primary {
-      background: #1d4ed8;
-      color: #fff;
+    .link-btn {
+      background: #1a1a1a;
+      color: #3b82f6;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
     }
+    .link-btn:hover { background: #222; }
 
-    .btn-primary:hover {
-      background: #2563eb;
-    }
-
-    .btn-primary:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .btn-secondary {
-      background: #222;
-      color: #888;
-    }
-
-    .btn-secondary:hover {
-      background: #333;
-      color: #e5e5e5;
-    }
-
-    .btn-group {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-    }
-
-    .test-status {
-      margin-top: 16px;
-      padding: 12px;
+    /* ── Status ── */
+    .status-box {
+      margin-top: 14px;
+      padding: 11px 14px;
       border-radius: 8px;
       font-size: 13px;
+      display: none;
     }
+    .status-box.success { background: #0a2e0a; color: #22c55e; }
+    .status-box.error   { background: #2e0a0a; color: #ef4444; }
+    .status-box.info    { background: #0a1a2e; color: #60a5fa; }
 
-    .test-status.success {
-      background: #0a2e0a;
-      color: #22c55e;
-    }
+    /* ── Progress ── */
+    .progress-dots { display: flex; justify-content: center; gap: 8px; margin-bottom: 28px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #2a2a2a; }
+    .dot.active   { background: #1d4ed8; }
+    .dot.complete { background: #22c55e; }
 
-    .test-status.error {
-      background: #2e0a0a;
-      color: #ef4444;
-    }
-
-    .progress-dots {
-      display: flex;
-      justify-content: center;
-      gap: 8px;
-      margin-bottom: 32px;
-    }
-
-    .progress-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #333;
-    }
-
-    .progress-dot.active {
-      background: #1d4ed8;
-    }
-
-    .progress-dot.complete {
-      background: #22c55e;
-    }
-
-    .install-btn {
-      display: inline-block;
-      background: #222;
-      color: #1d4ed8;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-size: 13px;
+    /* ── Extra providers collapsible ── */
+    .extra-toggle {
+      background: none;
+      border: none;
+      color: #555;
+      font-size: 12px;
       cursor: pointer;
-      margin-top: 12px;
+      padding: 4px 0;
+      margin-bottom: 10px;
+      display: block;
+      width: 100%;
+      text-align: center;
     }
+    .extra-toggle:hover { color: #888; }
+    .extra-providers { display: none; }
+    .extra-providers.open { display: contents; }
 
-    .install-btn:hover {
-      background: #333;
-    }
+    /* scrollable credentials panel */
+    #step-3 { max-height: 70vh; overflow-y: auto; padding-right: 4px; }
+    #step-3::-webkit-scrollbar { width: 4px; }
+    #step-3::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="logo">Orion</div>
-    <div class="subtitle">Your persistent AI companion</div>
+<div class="container">
+  <div class="logo">EDITH</div>
+  <div class="subtitle">Your persistent AI companion</div>
 
-    <div class="progress-dots">
-      <div class="progress-dot" id="dot-1"></div>
-      <div class="progress-dot" id="dot-2"></div>
-      <div class="progress-dot" id="dot-3"></div>
-      <div class="progress-dot" id="dot-4"></div>
+  <div class="progress-dots">
+    <div class="dot" id="dot-1"></div>
+    <div class="dot" id="dot-2"></div>
+    <div class="dot" id="dot-3"></div>
+    <div class="dot" id="dot-4"></div>
+  </div>
+
+  <!-- ── STEP 1: Welcome ───────────────────────────────────── -->
+  <div class="step active" id="step-1">
+    <div class="step-title">Welcome to EDITH</div>
+    <div class="step-desc">
+      Your persistent AI companion — learns from your conversations,
+      proactively reaches out, and helps you stay on top of your tasks.
+      Let's get you set up in 2 minutes.
     </div>
+    <button class="btn btn-primary" id="step1-next">Get Started</button>
+  </div>
 
-    <div class="step active" id="step-1">
-      <div class="step-title">Welcome to Orion</div>
-      <div class="step-desc">
-        Orion is a persistent AI companion that learns from your conversations,
-        proactively reaches out, and helps you stay on top of your tasks.
-        Let's get you set up.
+  <!-- ── STEP 2: Choose provider ───────────────────────────── -->
+  <div class="step" id="step-2">
+    <div class="step-title">Choose AI Provider</div>
+    <div class="step-desc">Pick where EDITH's brain runs. You can add more providers later in Settings.</div>
+
+    <div class="provider-grid" id="provider-grid">
+
+      <div class="provider-section-label">🚀 Recommended — Fast &amp; Free</div>
+
+      <label class="provider-card" data-provider="groq">
+        <input type="radio" name="provider" value="groq" />
+        <div class="provider-card-icon">⚡</div>
+        <div class="provider-card-name">Groq <span class="badge badge-green">FREE</span></div>
+        <div class="provider-card-desc">Llama 3.3 70B — fastest inference, free tier available</div>
+      </label>
+
+      <label class="provider-card" data-provider="deepseek">
+        <input type="radio" name="provider" value="deepseek" />
+        <div class="provider-card-icon">🔮</div>
+        <div class="provider-card-name">DeepSeek <span class="badge badge-yellow">CHEAP</span></div>
+        <div class="provider-card-desc">V3 + R1 reasoning — $0.27/1M tokens, best value</div>
+      </label>
+
+      <div class="provider-section-label">☁️ Cloud APIs</div>
+
+      <label class="provider-card" data-provider="gemini">
+        <input type="radio" name="provider" value="gemini" />
+        <div class="provider-card-icon">✨</div>
+        <div class="provider-card-name">Gemini</div>
+        <div class="provider-card-desc">Google — best vision, free Flash model</div>
+      </label>
+
+      <label class="provider-card" data-provider="anthropic">
+        <input type="radio" name="provider" value="anthropic" />
+        <div class="provider-card-icon">🧠</div>
+        <div class="provider-card-name">Anthropic</div>
+        <div class="provider-card-desc">Claude — best reasoning &amp; long context</div>
+      </label>
+
+      <label class="provider-card" data-provider="openai">
+        <input type="radio" name="provider" value="openai" />
+        <div class="provider-card-icon">🤖</div>
+        <div class="provider-card-name">OpenAI</div>
+        <div class="provider-card-desc">GPT-4o — great for code &amp; vision tasks</div>
+      </label>
+
+      <label class="provider-card" data-provider="openrouter">
+        <input type="radio" name="provider" value="openrouter" />
+        <div class="provider-card-icon">🔀</div>
+        <div class="provider-card-name">OpenRouter</div>
+        <div class="provider-card-desc">1 key → 300+ models from every provider</div>
+      </label>
+
+      <label class="provider-card" data-provider="xai">
+        <input type="radio" name="provider" value="xai" />
+        <div class="provider-card-icon">𝕏</div>
+        <div class="provider-card-name">xAI Grok</div>
+        <div class="provider-card-desc">Grok 3 — 2M context window, $0.20/1M</div>
+      </label>
+
+      <label class="provider-card" data-provider="mistral">
+        <input type="radio" name="provider" value="mistral" />
+        <div class="provider-card-icon">🌪️</div>
+        <div class="provider-card-name">Mistral</div>
+        <div class="provider-card-desc">Open-weight — Codestral best for coding</div>
+      </label>
+
+      <!-- More providers toggle -->
+      <div style="grid-column: 1/-1">
+        <button class="extra-toggle" id="extra-toggle">▼ More providers (Together, Fireworks, Perplexity)</button>
       </div>
-      <button class="btn btn-primary" id="step1-next">Get Started</button>
-    </div>
 
-    <div class="step" id="step-2">
-      <div class="step-title">Choose AI Provider</div>
-      <div class="step-desc">Select the AI engine you want to use.</div>
-      <div class="provider-options">
-        <label class="provider-option" data-provider="groq">
-          <input type="radio" name="provider" value="groq" />
-          <div class="provider-name">Groq <span class="provider-badge">Recommended</span></div>
-          <div class="provider-desc">Free, fast inference with Llama models</div>
+      <div class="extra-providers" id="extra-providers">
+        <div class="provider-section-label">⚡ Speed &amp; Speciality</div>
+
+        <label class="provider-card" data-provider="together">
+          <input type="radio" name="provider" value="together" />
+          <div class="provider-card-icon">🤝</div>
+          <div class="provider-card-name">Together AI</div>
+          <div class="provider-card-desc">200+ open models — Llama, Qwen, Mixtral</div>
         </label>
-        <label class="provider-option" data-provider="ollama">
+
+        <label class="provider-card" data-provider="fireworks">
+          <input type="radio" name="provider" value="fireworks" />
+          <div class="provider-card-icon">🎆</div>
+          <div class="provider-card-name">Fireworks AI</div>
+          <div class="provider-card-desc">Fastest inference — H100 FP8 optimized</div>
+        </label>
+
+        <label class="provider-card" data-provider="perplexity">
+          <input type="radio" name="provider" value="perplexity" />
+          <div class="provider-card-icon">🔍</div>
+          <div class="provider-card-name">Perplexity</div>
+          <div class="provider-card-desc">Web search built-in — live internet data</div>
+        </label>
+
+        <div class="provider-section-label">🖥️ Local / Self-hosted</div>
+
+        <label class="provider-card" data-provider="ollama">
           <input type="radio" name="provider" value="ollama" />
-          <div class="provider-name">Ollama</div>
-          <div class="provider-desc">Local, private, free - runs on your machine</div>
+          <div class="provider-card-icon">🦙</div>
+          <div class="provider-card-name">Ollama <span class="badge badge-green">FREE</span></div>
+          <div class="provider-card-desc">Local, private — runs on your machine</div>
         </label>
-        <label class="provider-option" data-provider="anthropic">
-          <input type="radio" name="provider" value="anthropic" />
-          <div class="provider-name">Anthropic</div>
-          <div class="provider-desc">Claude - best quality reasoning</div>
-        </label>
-        <label class="provider-option" data-provider="openai">
-          <input type="radio" name="provider" value="openai" />
-          <div class="provider-name">OpenAI</div>
-          <div class="provider-desc">GPT-4 - excellent for code and tasks</div>
-        </label>
-      </div>
-      <div class="btn-group">
-        <button class="btn btn-secondary" id="step2-back">Back</button>
-        <button class="btn btn-primary" id="step2-next" disabled>Continue</button>
-      </div>
-    </div>
 
-    <div class="step" id="step-3">
-      <div class="step-title" id="credentials-title">Enter Credentials</div>
-      <div class="step-desc" id="credentials-desc">Configure your AI provider.</div>
-      <div id="credentials-form"></div>
-      <div class="btn-group">
-        <button class="btn btn-secondary" id="step3-back">Back</button>
-        <button class="btn btn-primary" id="step3-test">Test Connection</button>
+        <label class="provider-card" data-provider="lmstudio">
+          <input type="radio" name="provider" value="lmstudio" />
+          <div class="provider-card-icon">🎛️</div>
+          <div class="provider-card-name">LM Studio <span class="badge badge-green">FREE</span></div>
+          <div class="provider-card-desc">GUI-based local models — easy model manager</div>
+        </label>
       </div>
-      <div class="test-status" id="test-status" style="display: none;"></div>
-    </div>
 
-    <div class="step" id="step-4">
-      <div class="step-title">All Set!</div>
-      <div class="step-desc">
-        Orion is ready to go. You can start chatting now.
-        The app will run in the system tray.
-      </div>
-      <button class="btn btn-primary" id="step4-done">Start Chatting</button>
+    </div><!-- /provider-grid -->
+
+    <div class="btn-group">
+      <button class="btn btn-secondary" id="step2-back">Back</button>
+      <button class="btn btn-primary" id="step2-next" disabled>Continue →</button>
     </div>
   </div>
 
-  <script>
-    let currentStep = 1
-    let selectedProvider = null
-    let credentials = {}
+  <!-- ── STEP 3: Credentials ───────────────────────────────── -->
+  <div class="step" id="step-3">
+    <div class="step-title" id="cred-title">Configure Provider</div>
+    <div class="step-desc" id="cred-desc">Enter your credentials below.</div>
+    <div id="cred-form"></div>
+    <div class="btn-group">
+      <button class="btn btn-secondary" id="step3-back">Back</button>
+      <button class="btn btn-primary" id="step3-test">Test &amp; Continue</button>
+    </div>
+    <div class="status-box" id="test-status"></div>
+  </div>
 
-    const dots = [
-      document.getElementById("dot-1"),
-      document.getElementById("dot-2"),
-      document.getElementById("dot-3"),
-      document.getElementById("dot-4")
-    ]
+  <!-- ── STEP 4: Done ───────────────────────────────────────── -->
+  <div class="step" id="step-4">
+    <div class="step-title">All Set! 🎉</div>
+    <div class="step-desc">
+      EDITH is configured and ready.<br>
+      Your API key is saved in <code style="color:#3b82f6">edith.json</code> — no env file needed.
+    </div>
+    <div id="configured-summary" style="
+      background:#141414; border:1px solid #222; border-radius:10px;
+      padding:14px 18px; margin-bottom:24px; text-align:left; font-size:13px; color:#aaa;
+    "></div>
+    <button class="btn btn-primary" id="step4-done">Start Chatting →</button>
+  </div>
+</div><!-- /container -->
 
-    function updateDots() {
-      dots.forEach((dot, i) => {
-        dot.className = "progress-dot"
-        if (i + 1 < currentStep) dot.classList.add("complete")
-        else if (i + 1 === currentStep) dot.classList.add("active")
-      })
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// Provider definitions — single source of truth
+// ─────────────────────────────────────────────────────────────────────────────
+const PROVIDERS = {
+  groq: {
+    label: "Groq",
+    envKey: "GROQ_API_KEY",
+    placeholder: "gsk_...",
+    docsUrl: "https://console.groq.com",
+    docsLabel: "Get free API key → console.groq.com",
+    defaultModel: "groq/llama-3.3-70b-versatile",
+    testUrl: (creds) => ({
+      url: "https://api.groq.com/openai/v1/models",
+      headers: { Authorization: `Bearer ${creds.GROQ_API_KEY}` },
+    }),
+  },
+  deepseek: {
+    label: "DeepSeek",
+    envKey: "DEEPSEEK_API_KEY",
+    placeholder: "sk-...",
+    docsUrl: "https://platform.deepseek.com/api_keys",
+    docsLabel: "Get API key → platform.deepseek.com",
+    defaultModel: "deepseek/deepseek-chat",
+    hint: "deepseek-chat = V3 (general) · deepseek-reasoner = R1 (reasoning)",
+  },
+  gemini: {
+    label: "Google Gemini",
+    envKey: "GEMINI_API_KEY",
+    placeholder: "AIza...",
+    docsUrl: "https://aistudio.google.com/apikey",
+    docsLabel: "Get free API key → aistudio.google.com",
+    defaultModel: "gemini/gemini-2.0-flash",
+  },
+  anthropic: {
+    label: "Anthropic Claude",
+    envKey: "ANTHROPIC_API_KEY",
+    placeholder: "sk-ant-...",
+    docsUrl: "https://console.anthropic.com",
+    docsLabel: "Get API key → console.anthropic.com",
+    defaultModel: "anthropic/claude-sonnet-4-20250514",
+  },
+  openai: {
+    label: "OpenAI",
+    envKey: "OPENAI_API_KEY",
+    placeholder: "sk-...",
+    docsUrl: "https://platform.openai.com/api-keys",
+    docsLabel: "Get API key → platform.openai.com",
+    defaultModel: "openai/gpt-4o",
+  },
+  openrouter: {
+    label: "OpenRouter",
+    envKey: "OPENROUTER_API_KEY",
+    placeholder: "sk-or-...",
+    docsUrl: "https://openrouter.ai/keys",
+    docsLabel: "Get API key → openrouter.ai/keys",
+    defaultModel: "openrouter/anthropic/claude-sonnet-4",
+    hint: "One key gives access to 300+ models from every provider.",
+  },
+  xai: {
+    label: "xAI Grok",
+    envKey: "XAI_API_KEY",
+    placeholder: "xai-...",
+    docsUrl: "https://console.x.ai",
+    docsLabel: "Get API key → console.x.ai",
+    defaultModel: "xai/grok-3-mini",
+  },
+  mistral: {
+    label: "Mistral AI",
+    envKey: "MISTRAL_API_KEY",
+    placeholder: "...",
+    docsUrl: "https://console.mistral.ai/api-keys",
+    docsLabel: "Get API key → console.mistral.ai",
+    defaultModel: "mistral/mistral-small-latest",
+    hint: "Use codestral-latest for coding tasks — best-in-class.",
+  },
+  together: {
+    label: "Together AI",
+    envKey: "TOGETHER_API_KEY",
+    placeholder: "...",
+    docsUrl: "https://api.together.xyz/settings/api-keys",
+    docsLabel: "Get API key → api.together.xyz",
+    defaultModel: "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+  },
+  fireworks: {
+    label: "Fireworks AI",
+    envKey: "FIREWORKS_API_KEY",
+    placeholder: "fw-...",
+    docsUrl: "https://fireworks.ai/account/api-keys",
+    docsLabel: "Get API key → fireworks.ai",
+    defaultModel: "fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct",
+  },
+  perplexity: {
+    label: "Perplexity",
+    envKey: "PERPLEXITY_API_KEY",
+    placeholder: "pplx-...",
+    docsUrl: "https://www.perplexity.ai/settings/api",
+    docsLabel: "Get API key → perplexity.ai/settings/api",
+    defaultModel: "perplexity/sonar",
+    hint: "sonar = web search built-in · sonar-pro = with citations.",
+  },
+  ollama: {
+    label: "Ollama",
+    envKey: "OLLAMA_BASE_URL",
+    isLocal: true,
+    defaultValue: "http://localhost:11434",
+    docsUrl: "https://ollama.ai",
+    docsLabel: "Download Ollama → ollama.ai",
+    defaultModel: "ollama/llama3.2",
+    hint: "Ollama must be running before EDITH starts. Pull models with: ollama pull llama3.2",
+  },
+  lmstudio: {
+    label: "LM Studio",
+    envKey: "LM_STUDIO_BASE_URL",
+    isLocal: true,
+    defaultValue: "http://localhost:1234",
+    docsUrl: "https://lmstudio.ai",
+    docsLabel: "Download LM Studio → lmstudio.ai",
+    defaultModel: "lmstudio/auto",
+    hint: "Start LM Studio, load a model, and enable the local server before starting EDITH.",
+  },
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+let currentStep = 1
+let selectedProvider = null
+let savedCredentials = {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Progress dots
+// ─────────────────────────────────────────────────────────────────────────────
+function updateDots() {
+  for (let i = 1; i <= 4; i++) {
+    const d = document.getElementById(`dot-${i}`)
+    d.className = "dot"
+    if (i < currentStep) d.classList.add("complete")
+    else if (i === currentStep) d.classList.add("active")
+  }
+}
+
+function showStep(n) {
+  document.querySelectorAll(".step").forEach(s => s.classList.remove("active"))
+  document.getElementById(`step-${n}`).classList.add("active")
+  currentStep = n
+  updateDots()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Provider selection
+// ─────────────────────────────────────────────────────────────────────────────
+document.querySelectorAll(".provider-card").forEach(card => {
+  card.addEventListener("click", () => {
+    document.querySelectorAll(".provider-card").forEach(c => c.classList.remove("selected"))
+    card.classList.add("selected")
+    card.querySelector("input[type=radio]").checked = true
+    selectedProvider = card.dataset.provider
+    document.getElementById("step2-next").disabled = false
+  })
+})
+
+document.getElementById("extra-toggle").addEventListener("click", () => {
+  const panel = document.getElementById("extra-providers")
+  const btn = document.getElementById("extra-toggle")
+  panel.classList.toggle("open")
+  btn.textContent = panel.classList.contains("open")
+    ? "▲ Hide extra providers"
+    : "▼ More providers (Together, Fireworks, Perplexity)"
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Credentials form renderer
+// ─────────────────────────────────────────────────────────────────────────────
+function renderCredentialsForm() {
+  const p = PROVIDERS[selectedProvider]
+  if (!p) return
+
+  document.getElementById("cred-title").textContent = `Connect ${p.label}`
+  document.getElementById("cred-desc").textContent = p.isLocal
+    ? `Configure your local ${p.label} instance.`
+    : `Your API key is saved directly to edith.json — no .env file needed.`
+
+  const form = document.getElementById("cred-form")
+
+  if (p.isLocal) {
+    form.innerHTML = `
+      <div class="input-group">
+        <label class="input-label">Server URL</label>
+        <input type="text" class="input-field" id="local-url" value="${p.defaultValue}" />
+        <span class="input-hint">${p.hint || ""}</span>
+        <a href="${p.docsUrl}" target="_blank" class="input-link">${p.docsLabel}</a>
+      </div>
+      ${voiceSection()}
+    `
+  } else {
+    form.innerHTML = `
+      <div class="input-group">
+        <label class="input-label">${p.envKey}</label>
+        <input type="password" class="input-field" id="api-key-input" placeholder="${p.placeholder}" autocomplete="off" />
+        <a href="${p.docsUrl}" target="_blank" class="input-link">${p.docsLabel}</a>
+        ${p.hint ? `<span class="input-hint">${p.hint}</span>` : ""}
+      </div>
+      ${voiceSection()}
+    `
+    // Auto-fill if we already have it
+    const existing = savedCredentials[p.envKey]
+    if (existing) {
+      setTimeout(() => {
+        const el = document.getElementById("api-key-input")
+        if (el) el.value = existing
+      }, 0)
     }
+  }
 
-    function showStep(step) {
-      document.querySelectorAll(".step").forEach(s => s.classList.remove("active"))
-      document.getElementById(`step-${step}`).classList.add("active")
-      currentStep = step
-      updateDots()
-    }
+  bindVoiceControls()
+}
 
-    document.querySelectorAll(".provider-option").forEach(opt => {
-      opt.addEventListener("click", () => {
-        document.querySelectorAll(".provider-option").forEach(o => o.classList.remove("selected"))
-        opt.classList.add("selected")
-        opt.querySelector("input").checked = true
-        selectedProvider = opt.dataset.provider
-        document.getElementById("step2-next").disabled = false
-      })
-    })
+function voiceSection() {
+  return `
+    <div class="divider"></div>
+    <div class="section-title">🎙️ Voice (optional)</div>
 
-    document.getElementById("step1-next").addEventListener("click", () => {
-      showStep(2)
-    })
+    <div class="checkbox-row">
+      <input type="checkbox" id="voice-enabled" checked />
+      <label for="voice-enabled">Enable voice features</label>
+    </div>
 
-    document.getElementById("step2-back").addEventListener("click", () => {
-      showStep(1)
-    })
+    <div class="input-group">
+      <label class="input-label">Voice Mode</label>
+      <select class="input-field" id="voice-mode">
+        <option value="push-to-talk">Push-to-talk</option>
+        <option value="always-on">Always-on</option>
+      </select>
+    </div>
 
-    document.getElementById("step2-next").addEventListener("click", () => {
-      renderCredentialsForm()
-      showStep(3)
-    })
+    <div class="input-group">
+      <label class="input-label">Speech-to-Text Engine</label>
+      <select class="input-field" id="voice-stt">
+        <option value="auto">Auto (recommended)</option>
+        <option value="python-whisper">Python Whisper (local)</option>
+        <option value="deepgram">Deepgram (cloud)</option>
+      </select>
+    </div>
 
-    document.getElementById("step3-back").addEventListener("click", () => {
-      showStep(2)
-    })
+    <div class="input-group">
+      <label class="input-label">Language</label>
+      <select class="input-field" id="voice-lang">
+        <option value="auto">Auto-detect</option>
+        <option value="id">Indonesian (Bahasa)</option>
+        <option value="en">English</option>
+        <option value="multi">Mixed / multilingual</option>
+      </select>
+    </div>
 
-    document.getElementById("step3-test").addEventListener("click", async () => {
-      const status = document.getElementById("test-status")
-      const btn = document.getElementById("step3-test")
-      btn.disabled = true
-      btn.textContent = "Testing..."
+    <div class="input-group">
+      <label class="input-label">Whisper Model Size</label>
+      <select class="input-field" id="voice-whisper">
+        <option value="tiny">tiny (~75MB)</option>
+        <option value="base" selected>base (~150MB) — recommended</option>
+        <option value="small">small (~500MB)</option>
+        <option value="medium">medium (~1.5GB)</option>
+        <option value="large">large (~3GB)</option>
+      </select>
+    </div>
 
-      credentials = collectCredentials()
+    <div class="input-group">
+      <label class="input-label">TTS Voice (Edge TTS)</label>
+      <input type="text" class="input-field" id="voice-tts-voice" value="en-US-GuyNeural" />
+      <span class="input-hint">e.g. en-US-GuyNeural · id-ID-ArdiNeural · en-GB-RyanNeural</span>
+    </div>
 
-      const success = await testConnection()
+    <div class="input-group">
+      <label class="input-label">Wake Word Engine</label>
+      <select class="input-field" id="voice-wake-engine">
+        <option value="openwakeword">OpenWakeWord (free)</option>
+        <option value="porcupine">Porcupine (needs key)</option>
+      </select>
+    </div>
 
-      status.style.display = "block"
-      if (success) {
-        status.className = "test-status success"
-        status.textContent = "Connection successful!"
-        setTimeout(() => showStep(4), 1000)
-      } else {
-        status.className = "test-status error"
-        status.textContent = "Connection failed. Please check your credentials."
-        btn.disabled = false
-        btn.textContent = "Test Connection"
+    <div class="input-group">
+      <label class="input-label">Wake Word</label>
+      <input type="text" class="input-field" id="voice-wake-word" value="hey-edith" />
+    </div>
+
+    <div class="input-group">
+      <label class="input-label">Wake Model Path <span style="color:#555">(optional)</span></label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="text" class="input-field" id="voice-wake-model-path" placeholder="C:\\models\\hey-edith.onnx" style="flex:1" />
+        <button type="button" class="link-btn" id="voice-model-browse">Browse</button>
+      </div>
+      <div class="status-box" id="voice-model-status"></div>
+    </div>
+
+    <div class="input-group">
+      <label class="input-label">Deepgram API Key <span style="color:#555">(optional — for cloud STT)</span></label>
+      <input type="password" class="input-field" id="voice-deepgram-key" placeholder="dg_..." />
+      <a href="https://console.deepgram.com" target="_blank" class="input-link">Get free key → console.deepgram.com</a>
+    </div>
+  `
+}
+
+function bindVoiceControls() {
+  const browseBtn = document.getElementById("voice-model-browse")
+  if (browseBtn && window.edith?.pickWakeModel) {
+    browseBtn.addEventListener("click", async () => {
+      const result = await window.edith.pickWakeModel()
+      if (result?.ok && result.path) {
+        document.getElementById("voice-wake-model-path").value = result.path
       }
     })
+  }
+}
 
-    document.getElementById("step4-done").addEventListener("click", () => {
-      saveCredentials()
-      window.location.href = "index.html"
-    })
+// ─────────────────────────────────────────────────────────────────────────────
+// Collect form data
+// ─────────────────────────────────────────────────────────────────────────────
+function collectEnvKeys() {
+  const p = PROVIDERS[selectedProvider]
+  const env = {}
 
-    function renderCredentialsForm() {
-      const form = document.getElementById("credentials-form")
-      const title = document.getElementById("credentials-title")
-      const desc = document.getElementById("credentials-desc")
+  if (p.isLocal) {
+    const val = document.getElementById("local-url")?.value?.trim()
+    env[p.envKey] = val || p.defaultValue
+  } else {
+    const key = document.getElementById("api-key-input")?.value?.trim()
+    if (key) env[p.envKey] = key
+  }
 
-      switch (selectedProvider) {
-        case "groq":
-          title.textContent = "Groq API Key"
-          desc.textContent = "Get your free API key from console.groq.com"
-          form.innerHTML = `
-            <div class="input-group">
-              <label class="input-label">GROQ_API_KEY</label>
-              <input type="password" class="input-field" id="groq-key" placeholder="gsk_..." />
-              <a href="https://console.groq.com" target="_blank" class="input-link">Get API key from console.groq.com</a>
-            </div>
-          `
-          break
-        case "ollama":
-          title.textContent = "Ollama Setup"
-          desc.textContent = "Make sure Ollama is installed and running."
-          form.innerHTML = `
-            <div class="checkbox-group">
-              <input type="checkbox" id="ollama-installed" />
-              <label class="checkbox-label" for="ollama-installed">I have Ollama installed and running</label>
-            </div>
-            <a href="https://ollama.ai" target="_blank" class="install-btn">Download Ollama</a>
-          `
-          break
-        case "anthropic":
-          title.textContent = "Anthropic API Key"
-          desc.textContent = "Get your API key from console.anthropic.com"
-          form.innerHTML = `
-            <div class="input-group">
-              <label class="input-label">ANTHROPIC_API_KEY</label>
-              <input type="password" class="input-field" id="anthropic-key" placeholder="sk-ant-..." />
-              <a href="https://console.anthropic.com" target="_blank" class="input-link">Get API key from console.anthropic.com</a>
-            </div>
-          `
-          break
-        case "openai":
-          title.textContent = "OpenAI API Key"
-          desc.textContent = "Get your API key from platform.openai.com"
-          form.innerHTML = `
-            <div class="input-group">
-              <label class="input-label">OPENAI_API_KEY</label>
-              <input type="password" class="input-field" id="openai-key" placeholder="sk-..." />
-              <a href="https://platform.openai.com/api-keys" target="_blank" class="input-link">Get API key from platform.openai.com</a>
-            </div>
-          `
-          break
+  // Deepgram (optional voice)
+  const dgKey = document.getElementById("voice-deepgram-key")?.value?.trim()
+  if (dgKey) env["DEEPGRAM_API_KEY"] = dgKey
+
+  return env
+}
+
+function collectVoiceConfig() {
+  return {
+    enabled: document.getElementById("voice-enabled")?.checked ?? true,
+    mode: document.getElementById("voice-mode")?.value || "push-to-talk",
+    sttEngine: document.getElementById("voice-stt")?.value || "auto",
+    language: document.getElementById("voice-lang")?.value || "auto",
+    whisperModel: document.getElementById("voice-whisper")?.value || "base",
+    ttsVoice: document.getElementById("voice-tts-voice")?.value?.trim() || "en-US-GuyNeural",
+    wakeEngine: document.getElementById("voice-wake-engine")?.value || "openwakeword",
+    wakeWord: document.getElementById("voice-wake-word")?.value?.trim() || "hey-edith",
+    wakeModelPath: document.getElementById("voice-wake-model-path")?.value?.trim() || "",
+    deepgramApiKey: document.getElementById("voice-deepgram-key")?.value?.trim() || "",
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test connection
+// ─────────────────────────────────────────────────────────────────────────────
+function setStatus(type, msg) {
+  const el = document.getElementById("test-status")
+  el.className = `status-box ${type}`
+  el.style.display = "block"
+  el.textContent = msg
+}
+
+async function testConnection() {
+  const btn = document.getElementById("step3-test")
+  btn.disabled = true
+  btn.textContent = "Testing..."
+  document.getElementById("test-status").style.display = "none"
+
+  const env = collectEnvKeys()
+
+  try {
+    const result = await window.edith.testProvider(selectedProvider, env)
+    if (!result.ok) {
+      setStatus("error", `Connection failed — ${result.error || "status " + result.status}. Check your key.`)
+      return
+    }
+
+    // Deepgram test if key provided
+    if (env.DEEPGRAM_API_KEY) {
+      const dgResult = await window.edith.testProvider("deepgram", { DEEPGRAM_API_KEY: env.DEEPGRAM_API_KEY })
+      if (!dgResult.ok) {
+        setStatus("error", `${PROVIDERS[selectedProvider].label} ✓ but Deepgram key is invalid.`)
+        return
       }
     }
 
-    function collectCredentials() {
-      const creds = { provider: selectedProvider }
-      switch (selectedProvider) {
-        case "groq":
-          creds.GROQ_API_KEY = document.getElementById("groq-key")?.value || ""
-          break
-        case "ollama":
-          creds.OLLAMA_INSTALLED = document.getElementById("ollama-installed")?.checked || false
-          break
-        case "anthropic":
-          creds.ANTHROPIC_API_KEY = document.getElementById("anthropic-key")?.value || ""
-          break
-        case "openai":
-          creds.OPENAI_API_KEY = document.getElementById("openai-key")?.value || ""
-          break
-      }
-      return creds
-    }
+    // Save to edith.json immediately on success
+    await saveToEdithJson(env, collectVoiceConfig())
 
-    async function testConnection() {
-      await new Promise(r => setTimeout(r, 1500))
+    setStatus("success", `${PROVIDERS[selectedProvider].label} connected! Saving to edith.json...`)
+    setTimeout(() => showStep(4), 900)
 
-      if (selectedProvider === "ollama") {
-        return credentials.OLLAMA_INSTALLED
-      }
+  } catch (err) {
+    setStatus("error", "Error: " + err.message)
+  } finally {
+    btn.disabled = false
+    btn.textContent = "Test & Continue"
+  }
+}
 
-      const key = credentials.GROQ_API_KEY || credentials.ANTHROPIC_API_KEY || credentials.OPENAI_API_KEY
-      return key && key.length > 10
-    }
+// ─────────────────────────────────────────────────────────────────────────────
+// Save to edith.json — THIS is the magic. No .env editing needed.
+// ─────────────────────────────────────────────────────────────────────────────
+async function saveToEdithJson(envKeys, voice) {
+  const p = PROVIDERS[selectedProvider]
 
-    function saveCredentials() {
-      console.log("Saving credentials:", credentials)
-    }
+  const patch = {
+    // env section → auto-injected into process.env on startup
+    env: { ...envKeys },
 
-    updateDots()
-  </script>
+    // voice config
+    voice: {
+      enabled: voice.enabled,
+      mode: voice.mode,
+      stt: {
+        engine: voice.sttEngine,
+        language: voice.language,
+        whisperModel: voice.whisperModel,
+        providers: {
+          deepgram: { apiKey: voice.deepgramApiKey || "" },
+        },
+      },
+      tts: { engine: "edge", voice: voice.ttsVoice },
+      wake: {
+        engine: voice.wakeEngine,
+        keyword: voice.wakeWord,
+        modelPath: voice.wakeModelPath || undefined,
+        providers: { picovoice: { accessKey: "" } },
+      },
+      vad: { engine: "silero" },
+    },
+
+    // default model preference
+    agents: {
+      defaults: {
+        model: {
+          primary: p.defaultModel,
+          fallbacks: [],
+        },
+        workspace: "./workspace",
+      },
+    },
+
+    identity: { name: "EDITH", emoji: "✦", theme: "dark minimal" },
+  }
+
+  const result = await window.edith.saveConfig(patch)
+  if (!result.ok) throw new Error(result.error || "Failed to write edith.json")
+
+  // Cache so we can show summary
+  savedCredentials = { ...savedCredentials, ...envKeys }
+  return result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 4 summary
+// ─────────────────────────────────────────────────────────────────────────────
+function renderSummary() {
+  const p = PROVIDERS[selectedProvider]
+  const summaryEl = document.getElementById("configured-summary")
+  const lines = []
+
+  lines.push(`<div style="margin-bottom:6px"><b style="color:#e5e5e5">Provider</b>&nbsp; ${p.label}</div>`)
+  lines.push(`<div style="margin-bottom:6px"><b style="color:#e5e5e5">Model</b>&nbsp; ${p.defaultModel}</div>`)
+
+  const envKey = p.isLocal
+    ? `${p.envKey}: ${savedCredentials[p.envKey] || p.defaultValue}`
+    : `${p.envKey}: ${"•".repeat(12)}`
+  lines.push(`<div style="margin-bottom:6px; color:#555; font-size:11px; font-family:monospace">${envKey}</div>`)
+  lines.push(`<div style="color:#555; font-size:11px">Saved to: edith.json → env</div>`)
+
+  summaryEl.innerHTML = lines.join("")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigation
+// ─────────────────────────────────────────────────────────────────────────────
+document.getElementById("step1-next").addEventListener("click", () => showStep(2))
+document.getElementById("step2-back").addEventListener("click", () => showStep(1))
+
+document.getElementById("step2-next").addEventListener("click", () => {
+  renderCredentialsForm()
+  showStep(3)
+})
+
+document.getElementById("step3-back").addEventListener("click", () => showStep(2))
+
+document.getElementById("step3-test").addEventListener("click", testConnection)
+
+document.getElementById("step4-done").addEventListener("click", async () => {
+  window.location.href = "index.html"
+})
+
+// Show summary when step 4 becomes active
+const observer = new MutationObserver(() => {
+  if (document.getElementById("step-4").classList.contains("active")) {
+    renderSummary()
+  }
+})
+observer.observe(document.getElementById("step-4"), { attributes: true, attributeFilter: ["class"] })
+
+updateDots()
+</script>
 </body>
 </html>

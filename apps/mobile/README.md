@@ -1,6 +1,6 @@
-# Orion Mobile
+# EDITH Mobile
 
-React Native app that connects to Orion gateway.
+React Native app that connects to EDITH gateway.
 
 ## Architecture
 
@@ -18,8 +18,8 @@ Mobile app is a thin client - no AI logic on device.
 ## Setup (when ready to implement)
 
 ```bash
-npx create-expo-app@latest orion-mobile
-cd orion-mobile
+npx create-expo-app@latest EDITH-mobile
+cd EDITH-mobile
 npx expo install expo-av expo-notifications
 ```
 

@@ -43,7 +43,7 @@ export default function Settings({
         autoCapitalize="none"
       />
       <Text style={s.hint}>
-        Your Orion gateway IP. Run ipconfig (Windows) or 
+        Your EDITH gateway IP. Run ipconfig (Windows) or 
         ifconfig (Mac/Linux) to find it.
       </Text>
 

@@ -1,0 +1,8 @@
+numpy
+python-dotenv
+sounddevice
+soundfile
+openai-whisper
+pvporcupine
+openwakeword
+onnxruntime

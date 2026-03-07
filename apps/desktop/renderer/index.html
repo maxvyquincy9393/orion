@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orion</title>
+  <title>EDITH</title>
   <style>
     * {
       margin: 0;
@@ -206,6 +206,26 @@
       cursor: not-allowed;
     }
 
+    .voice-btn {
+      width: 40px;
+      height: 40px;
+      border: none;
+      background: #14532d;
+      color: #dcfce7;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s;
+    }
+
+    .voice-btn.recording {
+      background: #991b1b;
+      color: #fee2e2;
+    }
+
     .status-bar {
       padding: 6px 16px;
       background: #0a0a0a;
@@ -230,7 +250,7 @@
 </head>
 <body>
   <div class="titlebar">
-    <span class="titlebar-title">Orion</span>
+    <span class="titlebar-title">EDITH</span>
     <div class="titlebar-buttons">
       <button class="titlebar-btn" id="minimize-btn">-</button>
       <button class="titlebar-btn close" id="close-btn">x</button>
@@ -244,14 +264,15 @@
         <span></span>
         <span></span>
       </div>
-      <span>Orion is thinking...</span>
+      <span>EDITH is thinking...</span>
     </div>
   </div>
 
   <div class="input-bar">
     <div class="input-wrapper">
-      <input type="text" id="message-input" placeholder="Message Orion..." />
+      <input type="text" id="message-input" placeholder="Message EDITH..." />
     </div>
+    <button class="voice-btn" id="voice-btn">Mic</button>
     <button class="send-btn" id="send-btn">-></button>
   </div>
 
@@ -264,6 +285,7 @@
     const chatContainer = document.getElementById("chat")
     const messageInput = document.getElementById("message-input")
     const sendBtn = document.getElementById("send-btn")
+    const voiceBtn = document.getElementById("voice-btn")
     const typingIndicator = document.getElementById("typing")
     const connectionStatus = document.getElementById("connection-status")
     const engineStatus = document.getElementById("engine-status")
@@ -271,6 +293,15 @@
     const closeBtn = document.getElementById("close-btn")
 
     const messages = []
+    let pendingAssistantNode = null
+    let mediaRecorder = null
+    let mediaStream = null
+    let recordedChunks = []
+    let activeVoiceRequestId = null
+    let voiceAudioChunks = []
+    let isRecording = false
+    let activeEdithBridge = window.edith ?? null
+    let bridgeAttached = false
 
     function formatTime(date) {
       return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -290,6 +321,7 @@
       chatContainer.insertBefore(div, typingIndicator)
       messages.push({ role, content, timestamp: new Date() })
       scrollToBottom()
+      return div
     }
 
     function escapeHtml(text) {
@@ -322,6 +354,178 @@
       }
     }
 
+    function assertOk(result) {
+      if (result && result.error) {
+        throw new Error(result.error)
+      }
+    }
+
+    function getEdithBridge() {
+      return activeEdithBridge
+    }
+
+    function getBridgeError() {
+      return new Error("Desktop bridge unavailable")
+    }
+
+    function updateAssistantPlaceholder(text) {
+      if (!pendingAssistantNode) {
+        pendingAssistantNode = addMessage("assistant", "")
+      }
+      const contentNode = pendingAssistantNode.querySelector(".message-content")
+      contentNode.textContent = text
+      scrollToBottom()
+    }
+
+    function finalizeAssistantPlaceholder(text) {
+      if (!pendingAssistantNode) {
+        addMessage("assistant", text)
+      } else {
+        const contentNode = pendingAssistantNode.querySelector(".message-content")
+        contentNode.textContent = text
+      }
+      pendingAssistantNode = null
+      hideTyping()
+      sendBtn.disabled = false
+    }
+
+    function arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer)
+      let binary = ""
+      for (let index = 0; index < bytes.length; index += 1) {
+        binary += String.fromCharCode(bytes[index])
+      }
+      return btoa(binary)
+    }
+
+    function decodeBase64Chunk(data) {
+      const binary = atob(data)
+      const bytes = new Uint8Array(binary.length)
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index)
+      }
+      return bytes
+    }
+
+    async function playVoiceResponse() {
+      if (voiceAudioChunks.length === 0) {
+        return
+      }
+
+      const byteArrays = voiceAudioChunks.map(decodeBase64Chunk)
+      const totalLength = byteArrays.reduce((sum, chunk) => sum + chunk.length, 0)
+      const merged = new Uint8Array(totalLength)
+      let offset = 0
+      for (const chunk of byteArrays) {
+        merged.set(chunk, offset)
+        offset += chunk.length
+      }
+
+      const blob = new Blob([merged], { type: "audio/mpeg" })
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.play().catch((error) => {
+        console.error("Failed to play voice response", error)
+      })
+      audio.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true })
+      audio.addEventListener("error", () => URL.revokeObjectURL(url), { once: true })
+    }
+
+    async function sendVoiceStop(blob, requestId) {
+      const bridge = getEdithBridge()
+      if (!bridge) {
+        throw getBridgeError()
+      }
+
+      const arrayBuffer = await blob.arrayBuffer()
+      const data = arrayBufferToBase64(arrayBuffer)
+      const result = await bridge.sendGatewayMessage({
+        type: "voice_stop",
+        userId: "owner",
+        requestId,
+        mimeType: blob.type || mediaRecorder?.mimeType || "audio/webm",
+        data,
+      })
+      assertOk(result)
+    }
+
+    function resetVoiceCaptureState() {
+      mediaRecorder = null
+      recordedChunks = []
+      isRecording = false
+      voiceBtn.classList.remove("recording")
+      voiceBtn.textContent = "Mic"
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((track) => track.stop())
+        mediaStream = null
+      }
+    }
+
+    async function startVoiceCapture() {
+      if (isRecording) {
+        return
+      }
+
+      const requestId = (window.crypto?.randomUUID?.() || `voice-${Date.now()}`)
+      activeVoiceRequestId = requestId
+      voiceAudioChunks = []
+      recordedChunks = []
+
+      try {
+        const bridge = getEdithBridge()
+        if (!bridge) {
+          throw getBridgeError()
+        }
+
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        mediaRecorder = new MediaRecorder(mediaStream)
+        const startResult = await bridge.sendGatewayMessage({
+          type: "voice_start",
+          userId: "owner",
+          requestId,
+          encoding: "base64",
+          mimeType: mediaRecorder.mimeType || "audio/webm",
+          channelCount: 1,
+        })
+        assertOk(startResult)
+
+        mediaRecorder.addEventListener("dataavailable", (event) => {
+          if (event.data && event.data.size > 0) {
+            recordedChunks.push(event.data)
+          }
+        })
+
+        mediaRecorder.addEventListener("stop", async () => {
+          try {
+            const blob = new Blob(recordedChunks, { type: mediaRecorder?.mimeType || "audio/webm" })
+            showTyping()
+            await sendVoiceStop(blob, requestId)
+          } catch (error) {
+            hideTyping()
+            addMessage("assistant", `Voice send failed: ${error.message || error}`)
+          } finally {
+            resetVoiceCaptureState()
+          }
+        }, { once: true })
+
+        mediaRecorder.start()
+        isRecording = true
+        voiceBtn.classList.add("recording")
+        voiceBtn.textContent = "Stop"
+      } catch (error) {
+        resetVoiceCaptureState()
+        addMessage("assistant", `Microphone error: ${error.message || error}`)
+      }
+    }
+
+    function stopVoiceCapture() {
+      if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        resetVoiceCaptureState()
+        return
+      }
+      mediaRecorder.stop()
+    }
+
     async function sendMessage() {
       const content = messageInput.value.trim()
       if (!content) return
@@ -332,14 +536,27 @@
       sendBtn.disabled = true
 
       try {
-        await window.orion.sendMessage(content, "owner")
+        const bridge = getEdithBridge()
+        if (!bridge) {
+          throw getBridgeError()
+        }
+
+        const result = await bridge.sendMessage(content, "owner")
+        assertOk(result)
       } catch (err) {
         hideTyping()
-        addMessage("assistant", "Failed to send message. Please try again.")
+        addMessage("assistant", err?.message || "Failed to send message. Please try again.")
       }
     }
 
     sendBtn.addEventListener("click", sendMessage)
+    voiceBtn.addEventListener("click", () => {
+      if (isRecording) {
+        stopVoiceCapture()
+      } else {
+        startVoiceCapture()
+      }
+    })
 
     messageInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -349,31 +566,72 @@
     })
 
     minimizeBtn.addEventListener("click", () => {
-      window.orion.minimizeWindow()
+      getEdithBridge()?.minimizeWindow()
     })
 
     closeBtn.addEventListener("click", () => {
-      window.orion.closeWindow()
+      getEdithBridge()?.closeWindow()
     })
 
-    window.orion.onConnected(() => {
+    function handleBridgeConnected() {
       updateConnectionStatus("connected")
       sendBtn.disabled = false
-    })
+    }
 
-    window.orion.onMessage((msg) => {
-      if (msg.type === "response") {
+    function handleGatewayMessage(msg) {
+      if (msg.type === "chunk") {
+        updateAssistantPlaceholder((pendingAssistantNode?.querySelector(".message-content")?.textContent || "") + (msg.chunk || ""))
+      } else if (msg.type === "final") {
+        finalizeAssistantPlaceholder(msg.content || "")
+      } else if (msg.type === "voice_transcript") {
+        addMessage("user", msg.text || "")
+      } else if (msg.type === "assistant_transcript") {
+        addMessage("assistant", msg.text || "")
+      } else if (msg.type === "voice_audio") {
+        if (msg.requestId === activeVoiceRequestId || activeVoiceRequestId === null) {
+          voiceAudioChunks.push(msg.data || "")
+        }
+      } else if (msg.type === "voice_stopped") {
         hideTyping()
-        sendBtn.disabled = false
-        addMessage("assistant", msg.content)
+        if (msg.requestId === activeVoiceRequestId) {
+          playVoiceResponse()
+          activeVoiceRequestId = null
+          voiceAudioChunks = []
+        }
+      } else if (msg.type === "voice_started") {
+        showTyping()
       } else if (msg.type === "status") {
         if (msg.engines && msg.engines.length > 0) {
           engineStatus.textContent = `Engine: ${msg.engines[0]}`
         }
+      } else if (msg.type === "error") {
+        hideTyping()
+        sendBtn.disabled = false
+        addMessage("assistant", msg.message || "Gateway error")
       }
-    })
+    }
 
-    updateConnectionStatus("connecting")
+    function attachEdithBridge(bridge) {
+      if (!bridge || bridgeAttached) {
+        return
+      }
+
+      activeEdithBridge = bridge
+      bridgeAttached = true
+      bridge.onConnected(handleBridgeConnected)
+      bridge.onMessage(handleGatewayMessage)
+      updateConnectionStatus("connecting")
+      engineStatus.textContent = ""
+    }
+
+    window.attachEdithBridge = attachEdithBridge
+
+    if (activeEdithBridge) {
+      attachEdithBridge(activeEdithBridge)
+    } else {
+      updateConnectionStatus("disconnected")
+      engineStatus.textContent = "Desktop bridge unavailable"
+    }
   </script>
 </body>
 </html>

@@ -1,11 +1,13 @@
 # ============================================
-# Orion — .gitignore
+# EDITH — .gitignore
 # ============================================
 
-# Environment variables — NEVER commit
+# Environment variables & Config — NEVER commit
 .env
 .env.local
 .env.*.local
+edith.json
+edith.*.json
 
 # Python
 __pycache__/
@@ -18,6 +20,7 @@ __pycache__/
 env/
 venv/
 ENV/
+.venv-voice/
 
 # OS files
 .DS_Store
@@ -38,6 +41,7 @@ logs/
 # Build
 dist/
 build/
+output/
 *.egg-info
 
 # Temporary
@@ -56,3 +60,64 @@ test-results/
 *.db
 *.sqlite
 *.sqlite3
+
+# Local pnpm artifact folders that may appear inside tracked desktop node_modules
+apps/desktop/node_modules/.pnpm/@types+plist@3.0.5/
+apps/desktop/node_modules/.pnpm/dmg-license@1.0.11/
+
+# Node.js & pnpm
+node_modules/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Electron app build output
+out/
+release/
+dist/
+*.asar
+
+# Local models and large binary files
+models/
+*.onnx
+*.bin
+*.pt
+*.safetensors
+*.whisper
+*.tflite
+
+# Python venv & local environments
+.venv/
+.venv-voice/
+venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Electron app data & crash reports
+~/.edith/
+crashes/
+*.dmp
+
+# Claude Code temp files
+.claude/
+.claude-temp/
+
+# Test fixtures (local/sensitive)
+EDITH-ts/src/os-agent/__tests__/fixtures/*.json
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+test-results/
+*.coverage

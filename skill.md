@@ -1,15 +1,15 @@
-# SKILL.md — Orion Project Context
+# SKILL.md — EDITH Project Context
 
-> This file is the single source of truth for all AI coding assistants working on Orion.
+> This file is the single source of truth for all AI coding assistants working on EDITH.
 > Read this before generating any code, suggesting any architecture, or making any decisions.
 > GitHub Copilot, OpenCode, Gemini CLI, and Codex must all follow this context.
-> **Say "Orion context loaded" before starting any task to confirm you have read this.**
+> **Say "EDITH context loaded" before starting any task to confirm you have read this.**
 
 ---
 
-## What is Orion?
+## What is EDITH?
 
-Orion is a **Persistent AI Companion System with System Access** — not a chatbot, not a notification bot.
+EDITH is a **Persistent AI Companion System with System Access** — not a chatbot, not a notification bot.
 It is an AI that lives in the background, remembers everything, reaches out proactively, can see through
 a live camera, executes complex multi-step tasks via agents, browses the web autonomously, and can
 control the user's system — all within a fully configurable permission sandbox.
@@ -18,12 +18,12 @@ Core philosophy: **AI that comes to you, not one you go to. And when it acts, it
 
 ---
 
-## The Problem Orion Solves
+## The Problem EDITH Solves
 
 Every AI tool today is reactive, blind, and sandboxed by default with no way to customize access.
 The user opens the app, types a message, gets a response. It cannot see, act, browse, or remember.
 
-Orion is different:
+EDITH is different:
 - Runs as a background process, always aware
 - Remembers all conversations permanently across sessions
 - Initiates contact proactively — no prompt needed
@@ -32,7 +32,7 @@ Orion is different:
 - Browses the web autonomously — for free, no API cost
 - Controls the user's system within a fully configurable sandbox
 - Executes complex multi-step tasks via LangGraph agent system
-- Every capability is toggleable — user decides what Orion can and cannot do
+- Every capability is toggleable — user decides what EDITH can and cannot do
 
 ---
 
@@ -113,7 +113,7 @@ Never leave uncommitted changes. Even WIP — use `wip:` prefix.
 module_name.py
 
 What this module does and why it exists.
-Part of Orion — Persistent AI Companion System.
+Part of EDITH — Persistent AI Companion System.
 """
 ```
 
@@ -180,7 +180,7 @@ def function_name(param: type) -> type:
 ## Project Structure
 
 ```
-orion/
+edith/
 ├── main.py                        # Entry point — starts all services
 ├── config.py                      # Loads all env vars and API keys
 ├── requirements.txt               # All Python dependencies
@@ -276,13 +276,13 @@ orion/
 
 ## Permission System — Core Design
 
-Every action Orion takes must pass through the permission sandbox first. No exceptions.
+Every action EDITH takes must pass through the permission sandbox first. No exceptions.
 
 ### permissions.yaml (user editable)
 ```yaml
-# Orion Permission Configuration
+# EDITH Permission Configuration
 # Set to true to enable, false to disable
-# require_confirm: Orion will ask before executing
+# require_confirm: EDITH will ask before executing
 
 permissions:
 
@@ -305,7 +305,7 @@ permissions:
     delete: false             # Delete is disabled by default
     require_confirm: true     # Always ask before writing
     allowed_paths:
-      - "~/Documents/orion"
+      - "~/Documents/edith"
       - "~/Desktop"
     blocked_paths:
       - "~/.ssh"
@@ -430,7 +430,7 @@ class BrowserAgent:
 
 All actions require permission check first. See Permission System above.
 
-### What Orion Can Do (when enabled)
+### What EDITH Can Do (when enabled)
 
 | Capability | Module | Default |
 |---|---|---|
@@ -475,7 +475,7 @@ def route_to_agent(task: str) -> AgentGraph: ...
 
 ### LangGraph Agent (agents/graph.py)
 ```python
-class OrionAgentGraph:
+class EdithAgentGraph:
     def build_graph(self) -> StateGraph: ...
     def run(self, task: str, context: dict) -> dict: ...
     def stream_run(self, task: str, context: dict) -> Iterator[dict]: ...
@@ -567,7 +567,7 @@ ANTHROPIC_API_KEY=
 OLLAMA_BASE_URL=http://localhost:11434
 
 # Database — Free
-DATABASE_URL=postgresql://user:password@localhost:5432/orion
+DATABASE_URL=postgresql://user:password@localhost:5432/edith
 SUPABASE_URL=
 SUPABASE_KEY=
 
@@ -601,9 +601,9 @@ LOG_LEVEL=INFO
 
 ---
 
-## What Makes Orion Different
+## What Makes EDITH Different
 
-| Feature | Normal AI / Clawdbot | Orion |
+| Feature | Normal AI / Clawdbot | EDITH |
 |---|---|---|
 | Memory | Resets every session | Permanent, cross-session |
 | Behavior | Waits to be asked | Proactively reaches out |
@@ -659,7 +659,7 @@ LOG_LEVEL=INFO
 
 ## Repository
 
-- **Repo:** github.com/maxvyquincy9393/orion
+- **Repo:** github.com/maxvyquincy9393/edith
 - **Branch:** main
 - **Auto-push:** always running via scripts/autopush.py
 

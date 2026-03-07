@@ -1,5 +1,5 @@
-# Orion — Python Dependencies
-# Part of Orion — Persistent AI Companion System.
+# EDITH — Python Dependencies
+# Part of EDITH — Persistent AI Companion System.
 
 # LLM Frameworks
 langchain>=0.2.0
