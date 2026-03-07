@@ -148,6 +148,14 @@ interface GatewayClientMessage {
   sequence?: number
   keyword?: string
   windowSeconds?: number
+  /**
+   * [Phase 3 Vision] Analysis mode for vision_analyze messages.
+   *   "describe" — full natural language description of the image
+   *   "ocr"      — extract text only (free, Tesseract, no LLM call)
+   *   "find"     — find a specific UI element (content = element query)
+   * Defaults to "describe" when not specified.
+   */
+  visionMode?: "describe" | "ocr" | "find"
 }
 
 function safeSend(socket: Pick<SocketLike, "send">, payload: unknown): boolean {
@@ -1034,6 +1042,36 @@ export class GatewayServer {
           }
         },
       )
+
+      /**
+       * POST /api/config/prepare-wake-model — download a recommended host wake-word model.
+       * Used by onboarding/settings so users do not have to manually edit edith.json.
+       */
+      app.post<{ Body?: { engine?: string; modelName?: string; keyword?: string } }>(
+        "/api/config/prepare-wake-model",
+        async (req, reply) => {
+          const requestedEngine = asString(req.body?.engine) ?? "openwakeword"
+          if (requestedEngine !== "openwakeword") {
+            return reply.code(400).send({
+              ok: false,
+              error: `Unsupported wake model engine: ${requestedEngine}`,
+            })
+          }
+
+          try {
+            const { prepareOpenWakeWordModel } = await import("../voice/wake-model-assets.js")
+            const prepared = await prepareOpenWakeWordModel({
+              modelName: asString(req.body?.modelName) ?? asString(req.body?.keyword) ?? undefined,
+            })
+            return { ok: true, prepared }
+          } catch (err) {
+            return reply.code(500).send({
+              ok: false,
+              error: (err as Error).message,
+            })
+          }
+        },
+      )
     })
   }
 
@@ -1128,6 +1166,20 @@ export class GatewayServer {
         return this.handleVoiceStop(userId, msg)
       case "voice_wake_word":
         return this.handleWakeWord(userId, msg)
+
+      // ── Phase 3: Vision Analysis ─────────────────────────────────────
+      // Handles vision requests from mobile (React Native) and desktop clients.
+      //
+      // Message format:
+      //   { type: "vision_analyze", data: "<base64>", mimeType: "image/png",
+      //     visionMode: "describe" | "ocr" | "find", content: "<element query>" }
+      //
+      // Response: { type: "vision_result", mode, result, requestId }
+      //
+      // Paper basis: ScreenAgent (mobile → server vision pipeline)
+      case "vision_analyze":
+        return this.handleVisionAnalyze(userId, msg)
+
       default:
         return { type: "error", message: `unknown type: ${msg.type}` }
     }
@@ -1244,6 +1296,109 @@ export class GatewayServer {
       return {
         type: "error",
         message: `Wake word check failed: ${String(err)}`,
+        requestId: msg.requestId,
+      }
+    }
+  }
+
+  /**
+   * Handle a vision_analyze WebSocket message from mobile or desktop client.
+   *
+   * This is the bridge between mobile camera captures and the VisionCortex.
+   * The mobile client sends a base64-encoded image, we route it through
+   * the appropriate vision analysis path based on `visionMode`.
+   *
+   * Vision modes:
+   *   "describe" — ask multimodal LLM to describe the image (uses API, costs $)
+   *   "ocr"      — extract text via Tesseract (free, no LLM call)
+   *   "find"     — find a named element (msg.content = element query)
+   *
+   * The result is sent back as { type: "vision_result", mode, result }.
+   *
+   * Paper basis:
+   *   ScreenAgent (IJCAI 2024): mobile → server vision pipeline design
+   *   OSWorld (arXiv:2404.07972): provider-agnostic routing
+   */
+  private async handleVisionAnalyze(
+    userId: string,
+    msg: GatewayClientMessage,
+  ): Promise<GatewayResponse> {
+    // Validate: require base64 image data
+    if (typeof msg.data !== "string" || msg.data.trim().length === 0) {
+      return {
+        type: "error",
+        message: "vision_analyze requires base64 image in 'data' field",
+        requestId: msg.requestId,
+      }
+    }
+
+    try {
+      // Decode base64 → Buffer for processing
+      const imageBuffer = Buffer.from(msg.data, "base64")
+      const mode = msg.visionMode ?? "describe"
+
+      // Lazy-import VisionCortex to avoid circular dependencies
+      // VisionCortex is initialized by the OS Agent, not the gateway directly
+      const { VisionCortex } = await import("../os-agent/vision-cortex.js")
+      const visionCortex = new VisionCortex({
+        enabled: true,
+        ocrEngine: "tesseract",
+        elementDetection: "accessibility",
+        multimodalEngine: "gemini",
+        monitorIntervalMs: 1000,
+      })
+      await visionCortex.initialize()
+
+      let result: string | object
+
+      switch (mode) {
+        case "ocr":
+          // OCR-only: free, no LLM, fast (~400ms)
+          result = await visionCortex.extractText(imageBuffer)
+          break
+
+        case "find": {
+          // Element finding: requires a query string in msg.content
+          const query = msg.content?.trim()
+          if (!query) {
+            return {
+              type: "error",
+              message: "vision_analyze 'find' mode requires element query in 'content' field",
+              requestId: msg.requestId,
+            }
+          }
+          // findElement() uses captured screen, not the provided image
+          // TODO: future — support finding elements in provided image
+          const element = await visionCortex.findElement(query)
+          result = element ?? { found: false }
+          break
+        }
+
+        case "describe":
+        default:
+          // Full multimodal description via LLM (costs API credits)
+          result = await visionCortex.describeImage(imageBuffer, msg.content)
+          break
+      }
+
+      logger.info("vision analysis complete", {
+        userId,
+        mode,
+        imageBytes: imageBuffer.length,
+        resultType: typeof result,
+      })
+
+      return {
+        type: "vision_result",
+        mode,
+        result,
+        requestId: msg.requestId,
+      }
+    } catch (err) {
+      logger.error("vision_analyze failed", { userId, error: String(err) })
+      return {
+        type: "error",
+        message: `Vision analysis failed: ${String(err)}`,
         requestId: msg.requestId,
       }
     }

@@ -48,6 +48,69 @@ function deepMerge(target, source) {
   return result
 }
 
+function resolveTsxCommand() {
+  const localTsxCli = path.join(
+    NOVA_ENGINE_DIR,
+    "node_modules",
+    "tsx",
+    "dist",
+    "cli.mjs",
+  )
+
+  if (fs.existsSync(localTsxCli)) {
+    return { command: process.execPath, args: [localTsxCli] }
+  }
+
+  return {
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    args: ["tsx"],
+  }
+}
+
+function prepareWakeModelOnHost(modelName = "hey_mycroft") {
+  return new Promise((resolve, reject) => {
+    const tsx = resolveTsxCommand()
+    const child = spawn(
+      tsx.command,
+      [...tsx.args, "src/cli/voice-wake-prepare.ts", "--json", "--model", modelName],
+      {
+        cwd: NOVA_ENGINE_DIR,
+        windowsHide: true,
+      },
+    )
+
+    let stdout = ""
+    let stderr = ""
+
+    child.stdout.on("data", (data) => {
+      stdout += data.toString()
+    })
+
+    child.stderr.on("data", (data) => {
+      stderr += data.toString()
+    })
+
+    child.on("error", reject)
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `Wake model prepare exited with code ${code}`))
+        return
+      }
+
+      try {
+        const lines = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+        const parsed = JSON.parse(lines[lines.length - 1] || "{}")
+        resolve(parsed)
+      } catch (err) {
+        reject(err)
+      }
+    })
+  })
+}
+
 function isConfigured() {
   const cfg = readEdithConfig()
   if (!cfg || !cfg.env) return false
@@ -258,6 +321,15 @@ ipcMain.handle("config:pick-wake-model", async () => {
     }
 
     return { ok: true, path: result.filePaths[0] }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
+
+ipcMain.handle("config:prepare-wake-model", async (_, options = {}) => {
+  try {
+    const result = await prepareWakeModelOnHost(options.modelName || "hey_mycroft")
+    return result
   } catch (err) {
     return { ok: false, error: err.message }
   }

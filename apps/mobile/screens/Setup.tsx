@@ -144,6 +144,7 @@ export default function Setup({ gatewayUrl, onComplete }: SetupProps) {
   const [apiKey, setApiKey] = useState("")
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [preparingWakeModel, setPreparingWakeModel] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const [voiceEnabled, setVoiceEnabled] = useState(true)
@@ -247,6 +248,40 @@ export default function Setup({ gatewayUrl, onComplete }: SetupProps) {
     )
   }
 
+  async function prepareWakeModel() {
+    setPreparingWakeModel(true)
+
+    try {
+      const res = await fetch(`${httpBase}/api/config/prepare-wake-model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          engine: "openwakeword",
+          modelName: "hey_mycroft",
+        }),
+      })
+      const data = await res.json()
+
+      if (!data.ok || !data.prepared?.modelPath) {
+        Alert.alert("Wake Model Error", data.error || "Failed to prepare the recommended host model.")
+        return
+      }
+
+      setVoiceWakeEngine("openwakeword")
+      setVoiceWakeWord(data.prepared.keyword || "hey mycroft")
+      setVoiceWakeModelPath(data.prepared.modelPath)
+      Alert.alert(
+        "Wake Model Ready",
+        `Prepared ${data.prepared.keyword || "hey mycroft"} on the gateway host.`,
+      )
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Network error"
+      Alert.alert("Wake Model Error", msg)
+    } finally {
+      setPreparingWakeModel(false)
+    }
+  }
+
   function renderVoiceSection() {
     return (
       <View style={s.section}>
@@ -276,6 +311,20 @@ export default function Setup({ gatewayUrl, onComplete }: SetupProps) {
         {renderChoiceRow("VAD Engine", voiceVadEngine, VAD_ENGINE_OPTIONS, (value) => setVoiceVadEngine(value as VoiceVadEngine))}
         {renderTextField("Edge TTS Voice", voiceTtsVoice, setVoiceTtsVoice, DEFAULT_TTS_VOICE)}
         {renderTextField("Wake Word", voiceWakeWord, setVoiceWakeWord, DEFAULT_WAKE_WORD)}
+        {voiceWakeEngine === "openwakeword" && (
+          <TouchableOpacity style={s.secondaryBtn} onPress={prepareWakeModel} disabled={preparingWakeModel}>
+            {preparingWakeModel ? (
+              <ActivityIndicator color="#1d4ed8" />
+            ) : (
+              <Text style={s.secondaryBtnText}>Prepare Recommended Host Model</Text>
+            )}
+          </TouchableOpacity>
+        )}
+        {voiceWakeEngine === "openwakeword" && (
+          <Text style={s.inlineHint}>
+            This prepares the official OpenWakeWord preset on the gateway host and fills the matching keyword/path.
+          </Text>
+        )}
         {renderTextField("Wake Model Path (optional, on gateway host)", voiceWakeModelPath, setVoiceWakeModelPath, "C:\\models\\hey-edith.onnx")}
         {renderTextField("Deepgram API Key (optional)", voiceDeepgramApiKey, setVoiceDeepgramApiKey, "dg_...", true)}
         {renderTextField("Picovoice Access Key (optional)", voicePicovoiceAccessKey, setVoicePicovoiceAccessKey, "pv_...", true)}
@@ -590,6 +639,26 @@ const s = StyleSheet.create({
   },
   choiceChipTextActive: {
     color: "#fff",
+  },
+  secondaryBtn: {
+    borderWidth: 1,
+    borderColor: "#1d4ed8",
+    borderRadius: 10,
+    padding: 12,
+    alignItems: "center",
+    marginBottom: 10,
+    backgroundColor: "#10192d",
+  },
+  secondaryBtnText: {
+    color: "#8fb3ff",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  inlineHint: {
+    color: "#6f7e9c",
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
   },
   providerCard: {
     padding: 16,

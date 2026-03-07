@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld("edith", {
   pickWakeModel: () =>
     ipcRenderer.invoke("config:pick-wake-model"),
 
+  prepareWakeModel: (options) =>
+    ipcRenderer.invoke("config:prepare-wake-model", options),
+
   isConfigured: () =>
     ipcRenderer.invoke("config:is-configured"),
 

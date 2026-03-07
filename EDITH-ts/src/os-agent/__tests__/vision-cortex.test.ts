@@ -36,7 +36,7 @@ vi.mock("execa", () => ({ execa: vi.fn() }))
 vi.mock("node:fs/promises", () => ({
   default: {
     writeFile: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue(Buffer.from("extracted text")),
+    readFile: vi.fn().mockResolvedValue("extracted text\n"),
     unlink: vi.fn().mockResolvedValue(undefined),
     mkdir: vi.fn().mockResolvedValue(undefined),
   },
@@ -100,7 +100,7 @@ describe("VisionCortex", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockFs.writeFile.mockResolvedValue(undefined)
-    mockFs.readFile.mockResolvedValue(Buffer.from("extracted text\n"))
+    mockFs.readFile.mockResolvedValue("extracted text\n")
     mockFs.unlink.mockResolvedValue(undefined)
     setupDefaultExecaMock()
   })
@@ -165,7 +165,7 @@ describe("VisionCortex", () => {
       vision.setGUIAgent(mockGui as any)
 
       // OCR readFile returns extracted text
-      mockFs.readFile.mockResolvedValue(Buffer.from("Hello World\n"))
+      mockFs.readFile.mockResolvedValue("Hello World\n")
 
       const result = await vision.captureAndAnalyze()
 
@@ -216,7 +216,7 @@ describe("VisionCortex", () => {
       const vision = new VisionCortex(config)
 
       const testText = "Hello World - OCR extracted"
-      mockFs.readFile.mockResolvedValue(Buffer.from(testText + "\n"))
+      mockFs.readFile.mockResolvedValue(testText + "\n")
 
       const result = await vision.extractText(FAKE_PNG)
 
@@ -368,7 +368,7 @@ describe("VisionCortex", () => {
       expect(state?.resolution.height).toBe(1440)
     })
 
-    it("getScreenState() returns null when PowerShell throws (graceful degradation)", async () => {
+    it("getScreenState() falls back to unknown title and default resolution when PowerShell throws", async () => {
       const config = createMockVisionConfig({ enabled: true })
       const vision = new VisionCortex(config)
 
@@ -376,7 +376,11 @@ describe("VisionCortex", () => {
 
       const state = await vision.getScreenState()
 
-      expect(state).toBeNull()
+      expect(state).toEqual({
+        activeWindowTitle: "Unknown",
+        activeWindowProcess: "unknown",
+        resolution: { width: 1920, height: 1080 },
+      })
     })
   })
 })

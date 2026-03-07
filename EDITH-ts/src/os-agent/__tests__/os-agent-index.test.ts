@@ -46,7 +46,8 @@ const mockListWindows = vi.fn().mockResolvedValue([])
 const systemState = { cpuUsage: 10, ramUsage: 50, diskUsage: 30, topProcesses: [], networkConnected: true, idleTimeSeconds: 0 }
 
 vi.mock("../system-monitor.js", () => ({
-  SystemMonitor: vi.fn().mockImplementation(() => ({
+  SystemMonitor: vi.fn().mockImplementation(function () {
+    return {
     initialize: mockInitialize,
     shutdown: mockShutdown,
     startMonitoring: mockStartMonitoring,
@@ -54,31 +55,37 @@ vi.mock("../system-monitor.js", () => ({
     get state() { return systemState },
     executeCommand: mockExecuteCommand,
     isInitialized: true,
-  })),
+    }
+  }),
 }))
 
 vi.mock("../gui-agent.js", () => ({
-  GUIAgent: vi.fn().mockImplementation(() => ({
+  GUIAgent: vi.fn().mockImplementation(function () {
+    return {
     initialize: mockInitialize,
     shutdown: mockShutdown,
     execute: mockExecuteGUI,
     listWindows: mockListWindows,
     isInitialized: true,
-  })),
+    }
+  }),
 }))
 
 vi.mock("../vision-cortex.js", () => ({
-  VisionCortex: vi.fn().mockImplementation(() => ({
+  VisionCortex: vi.fn().mockImplementation(function () {
+    return {
     initialize: mockInitialize,
     shutdown: mockShutdown,
     setGUIAgent: mockSetGUIAgent,
     captureAndAnalyze: mockCaptureAndAnalyze,
     isInitialized: true,
-  })),
+    }
+  }),
 }))
 
 vi.mock("../voice-io.js", () => ({
-  VoiceIO: vi.fn().mockImplementation(() => ({
+  VoiceIO: vi.fn().mockImplementation(function () {
+    return {
     initialize: mockInitialize,
     shutdown: mockShutdown,
     speak: mockSpeak,
@@ -87,27 +94,32 @@ vi.mock("../voice-io.js", () => ({
     audioLevel: 0,
     lastTranscript: undefined,
     isInitialized: true,
-  })),
+    }
+  }),
 }))
 
 vi.mock("../iot-bridge.js", () => ({
-  IoTBridge: vi.fn().mockImplementation(() => ({
+  IoTBridge: vi.fn().mockImplementation(function () {
+    return {
     initialize: mockInitialize,
     shutdown: mockShutdown,
     execute: mockIoTExecute,
     getStates: vi.fn().mockResolvedValue({ connectedDevices: 0, devices: [] }),
     parseNaturalLanguage: vi.fn().mockReturnValue([]),
     isInitialized: true,
-  })),
+    }
+  }),
 }))
 
 vi.mock("../perception-fusion.js", () => ({
-  PerceptionFusion: vi.fn().mockImplementation(() => ({
+  PerceptionFusion: vi.fn().mockImplementation(function () {
+    return {
     startLoop: mockStartLoop,
     stopLoop: mockStopLoop,
     getSnapshot: mockGetSnapshot,
     summarize: mockSummarize,
-  })),
+    }
+  }),
 }))
 
 // ── Imports (after mocks) ─────────────────────────────────────────────────────
@@ -131,7 +143,7 @@ const MockPerceptionFusion = vi.mocked(PerceptionFusion)
 
 describe("OSAgent", () => {
   beforeEach(() => {
-    vi.resetAllMocks()
+    vi.clearAllMocks()
     // Re-apply default implementations after reset
     mockInitialize.mockResolvedValue(undefined)
     mockShutdown.mockResolvedValue(undefined)
@@ -145,46 +157,58 @@ describe("OSAgent", () => {
     mockIoTExecute.mockResolvedValue({ success: true })
     mockCaptureAndAnalyze.mockResolvedValue({ success: true, data: {} })
     mockListWindows.mockResolvedValue([])
-    mockSetGUIAgent.mockImplementation(() => {})
-    mockStartMonitoring.mockImplementation(() => {})
-    mockStopMonitoring.mockImplementation(() => {})
+    mockSetGUIAgent.mockImplementation(function () {})
+    mockStartMonitoring.mockImplementation(function () {})
+    mockStopMonitoring.mockImplementation(function () {})
 
     // Re-mock constructors
-    MockGUIAgent.mockImplementation(() => ({
-      initialize: mockInitialize, shutdown: mockShutdown,
-      execute: mockExecuteGUI, listWindows: mockListWindows, isInitialized: true,
-    } as any))
+    MockGUIAgent.mockImplementation(function () {
+      return {
+        initialize: mockInitialize, shutdown: mockShutdown,
+        execute: mockExecuteGUI, listWindows: mockListWindows, isInitialized: true,
+      } as any
+    })
 
-    MockVisionCortex.mockImplementation(() => ({
-      initialize: mockInitialize, shutdown: mockShutdown,
-      setGUIAgent: mockSetGUIAgent, captureAndAnalyze: mockCaptureAndAnalyze, isInitialized: true,
-    } as any))
+    MockVisionCortex.mockImplementation(function () {
+      return {
+        initialize: mockInitialize, shutdown: mockShutdown,
+        setGUIAgent: mockSetGUIAgent, captureAndAnalyze: mockCaptureAndAnalyze, isInitialized: true,
+      } as any
+    })
 
-    MockSystemMonitor.mockImplementation(() => ({
-      initialize: mockInitialize, shutdown: mockShutdown,
-      startMonitoring: mockStartMonitoring, stopMonitoring: mockStopMonitoring,
-      get state() { return systemState }, executeCommand: mockExecuteCommand, isInitialized: true,
-    } as any))
+    MockSystemMonitor.mockImplementation(function () {
+      return {
+        initialize: mockInitialize, shutdown: mockShutdown,
+        startMonitoring: mockStartMonitoring, stopMonitoring: mockStopMonitoring,
+        get state() { return systemState }, executeCommand: mockExecuteCommand, isInitialized: true,
+      } as any
+    })
 
-    MockVoiceIO.mockImplementation(() => ({
-      initialize: mockInitialize, shutdown: mockShutdown, speak: mockSpeak,
-      isSpeaking: false, wakeWordDetected: false, audioLevel: 0, lastTranscript: undefined, isInitialized: true,
-    } as any))
+    MockVoiceIO.mockImplementation(function () {
+      return {
+        initialize: mockInitialize, shutdown: mockShutdown, speak: mockSpeak,
+        isSpeaking: false, wakeWordDetected: false, audioLevel: 0, lastTranscript: undefined, isInitialized: true,
+      } as any
+    })
 
-    MockIoTBridge.mockImplementation(() => ({
-      initialize: mockInitialize, shutdown: mockShutdown, execute: mockIoTExecute,
-      getStates: vi.fn().mockResolvedValue({ connectedDevices: 0, devices: [] }),
-      parseNaturalLanguage: vi.fn().mockReturnValue([]), isInitialized: true,
-    } as any))
+    MockIoTBridge.mockImplementation(function () {
+      return {
+        initialize: mockInitialize, shutdown: mockShutdown, execute: mockIoTExecute,
+        getStates: vi.fn().mockResolvedValue({ connectedDevices: 0, devices: [] }),
+        parseNaturalLanguage: vi.fn().mockReturnValue([]), isInitialized: true,
+      } as any
+    })
 
-    MockPerceptionFusion.mockImplementation(() => ({
-      startLoop: mockStartLoop, stopLoop: mockStopLoop,
-      getSnapshot: mockGetSnapshot, summarize: mockSummarize,
-    } as any))
+    MockPerceptionFusion.mockImplementation(function () {
+      return {
+        startLoop: mockStartLoop, stopLoop: mockStopLoop,
+        getSnapshot: mockGetSnapshot, summarize: mockSummarize,
+      } as any
+    })
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
+    vi.clearAllMocks()
   })
 
   // ── [Lifecycle] ───────────────────────────────────────────────────────────
@@ -236,13 +260,15 @@ describe("OSAgent", () => {
   describe("[Resilience]", () => {
     it("partial initialization failure does not throw (Promise.allSettled)", async () => {
       // Make GUIAgent.initialize() reject
-      MockGUIAgent.mockImplementationOnce(() => ({
-        initialize: vi.fn().mockRejectedValue(new Error("GPU not found")),
-        shutdown: mockShutdown,
-        execute: mockExecuteGUI,
-        listWindows: mockListWindows,
-        isInitialized: false,
-      } as any))
+      MockGUIAgent.mockImplementationOnce(function () {
+        return {
+          initialize: vi.fn().mockRejectedValue(new Error("GPU not found")),
+          shutdown: mockShutdown,
+          execute: mockExecuteGUI,
+          listWindows: mockListWindows,
+          isInitialized: false,
+        } as any
+      })
 
       const config = createMockOSAgentConfig()
       const agent = new OSAgent(config)
@@ -253,13 +279,15 @@ describe("OSAgent", () => {
 
     it("one subsystem shutdown failure does not prevent others from shutting down", async () => {
       // Make VoiceIO.shutdown() reject
-      MockVoiceIO.mockImplementationOnce(() => ({
-        initialize: mockInitialize,
-        shutdown: vi.fn().mockRejectedValue(new Error("Audio device busy")),
-        speak: mockSpeak,
-        isSpeaking: false, wakeWordDetected: false, audioLevel: 0, lastTranscript: undefined,
-        isInitialized: true,
-      } as any))
+      MockVoiceIO.mockImplementationOnce(function () {
+        return {
+          initialize: mockInitialize,
+          shutdown: vi.fn().mockRejectedValue(new Error("Audio device busy")),
+          speak: mockSpeak,
+          isSpeaking: false, wakeWordDetected: false, audioLevel: 0, lastTranscript: undefined,
+          isInitialized: true,
+        } as any
+      })
 
       const config = createMockOSAgentConfig()
       const agent = new OSAgent(config)

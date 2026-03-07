@@ -255,6 +255,7 @@
       display: inline-block;
       background: #222;
       color: #1d4ed8;
+      border: none;
       padding: 8px 16px;
       border-radius: 6px;
       font-size: 13px;
@@ -440,7 +441,11 @@
             placeholder="C:\\models\\hey-edith.onnx or C:\\models\\hey-edith.ppn"
           />
           <span class="input-link">Use a host-local .ppn for Porcupine or .onnx/.tflite for OpenWakeWord.</span>
-          <button type="button" class="install-btn" id="voice-model-browse">Browse Host File</button>
+          <div class="btn-group" style="justify-content: flex-start; margin-top: 12px;">
+            <button type="button" class="install-btn" id="voice-model-browse">Browse Host File</button>
+            <button type="button" class="install-btn" id="voice-model-prepare">Prepare Recommended Model</button>
+          </div>
+          <div class="test-status" id="voice-model-status" style="display: none; margin-top: 12px;"></div>
         </div>
         <div class="input-group">
           <label class="input-label">VAD Engine</label>
@@ -522,30 +527,87 @@
 
     function bindVoiceControls() {
       const browseButton = document.getElementById("voice-model-browse")
-      if (!browseButton) {
-        return
-      }
+      const prepareButton = document.getElementById("voice-model-prepare")
+      const status = document.getElementById("voice-model-status")
 
-      if (!window.edith?.pickWakeModel) {
-        browseButton.style.display = "none"
-        return
-      }
-
-      browseButton.addEventListener("click", async () => {
-        try {
-          const result = await window.edith.pickWakeModel()
-          if (!result?.ok || !result.path) {
-            return
-          }
-
-          const input = document.getElementById("voice-wake-model-path")
-          if (input) {
-            input.value = result.path
-          }
-        } catch (err) {
-          console.error("Failed to pick wake model:", err)
+      function setVoiceModelStatus(kind, message) {
+        if (!status) {
+          return
         }
-      })
+
+        status.style.display = "block"
+        status.className = `test-status ${kind}`
+        status.textContent = message
+      }
+
+      if (!browseButton && !prepareButton) {
+        return
+      }
+
+      if (browseButton && !window.edith?.pickWakeModel) {
+        browseButton.style.display = "none"
+      }
+
+      if (browseButton && window.edith?.pickWakeModel) {
+        browseButton.addEventListener("click", async () => {
+          try {
+            const result = await window.edith.pickWakeModel()
+            if (!result?.ok || !result.path) {
+              return
+            }
+
+            const input = document.getElementById("voice-wake-model-path")
+            if (input) {
+              input.value = result.path
+            }
+          } catch (err) {
+            console.error("Failed to pick wake model:", err)
+            setVoiceModelStatus("error", "Could not open the host file picker.")
+          }
+        })
+      }
+
+      if (prepareButton && !window.edith?.prepareWakeModel) {
+        prepareButton.style.display = "none"
+      }
+
+      if (prepareButton && window.edith?.prepareWakeModel) {
+        prepareButton.addEventListener("click", async () => {
+          const originalLabel = prepareButton.textContent
+          prepareButton.disabled = true
+          prepareButton.textContent = "Preparing..."
+
+          try {
+            const result = await window.edith.prepareWakeModel({ modelName: "hey_mycroft" })
+            if (!result?.ok || !result.prepared?.modelPath) {
+              setVoiceModelStatus("error", result?.error || "Could not prepare the wake-word model on this host.")
+              return
+            }
+
+            const engineInput = document.getElementById("voice-wake-engine")
+            const keywordInput = document.getElementById("voice-wake-word")
+            const modelInput = document.getElementById("voice-wake-model-path")
+
+            if (engineInput) {
+              engineInput.value = "openwakeword"
+            }
+            if (keywordInput) {
+              keywordInput.value = result.prepared.keyword || "hey mycroft"
+            }
+            if (modelInput) {
+              modelInput.value = result.prepared.modelPath
+            }
+
+            setVoiceModelStatus("success", `Prepared ${result.prepared.keyword || "hey mycroft"} on this host.`)
+          } catch (err) {
+            console.error("Failed to prepare wake model:", err)
+            setVoiceModelStatus("error", "Could not prepare the recommended wake-word model.")
+          } finally {
+            prepareButton.disabled = false
+            prepareButton.textContent = originalLabel
+          }
+        })
+      }
     }
 
     function collectVoiceConfig() {

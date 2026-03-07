@@ -41,6 +41,7 @@ logs/
 # Build
 dist/
 build/
+output/
 *.egg-info
 
 # Temporary

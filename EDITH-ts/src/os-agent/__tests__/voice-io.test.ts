@@ -52,6 +52,7 @@ vi.mock("../../voice/providers.js", () => ({
 }))
 
 vi.mock("../../voice/python-runtime.js", () => ({
+  VOICE_PROJECT_ROOT: "/tmp/project",
   VOICE_PYTHON_CWD: "/tmp/voice",
   resolveVoicePythonCommand: vi.fn().mockReturnValue("python3"),
 }))
@@ -79,9 +80,11 @@ vi.mock("../voice-plan.js", () => ({
 
 /** EdgeEngine mock — generate() returns FAKE_MP3 deterministically */
 vi.mock("../../voice/edge-engine.js", () => ({
-  EdgeEngine: vi.fn().mockImplementation(() => ({
-    generate: vi.fn().mockResolvedValue(FAKE_MP3),
-  })),
+  EdgeEngine: vi.fn().mockImplementation(function () {
+    return {
+      generate: vi.fn().mockResolvedValue(FAKE_MP3),
+    }
+  }),
 }))
 
 // ── Imports (after mocks) ─────────────────────────────────────────────────────
@@ -97,15 +100,14 @@ const mockFs = fs as any
 
 describe("VoiceIO", () => {
   beforeEach(() => {
-    vi.resetAllMocks()
-    // Re-apply defaults after reset
+    vi.clearAllMocks()
     mockFs.writeFile.mockResolvedValue(undefined)
     mockFs.unlink.mockResolvedValue(undefined)
     mockExeca.mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 } as any)
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
+    vi.clearAllMocks()
   })
 
   // ── [Initialization] ──────────────────────────────────────────────────────
@@ -248,9 +250,11 @@ describe("VoiceIO", () => {
     it("speak() returns success=false with error message when EdgeEngine.generate() throws", async () => {
       // Override the EdgeEngine mock to fail
       const { EdgeEngine } = await import("../../voice/edge-engine.js") as any
-      EdgeEngine.mockImplementationOnce(() => ({
-        generate: vi.fn().mockRejectedValue(new Error("EdgeEngine: network unavailable")),
-      }))
+      EdgeEngine.mockImplementationOnce(function () {
+        return {
+          generate: vi.fn().mockRejectedValue(new Error("EdgeEngine: network unavailable")),
+        }
+      })
 
       const config = createMockVoiceConfig({ enabled: false })
       // Re-create after clearing the mock module-level singleton

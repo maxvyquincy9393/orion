@@ -12,6 +12,7 @@ import {
 
 type PythonDependencyStatus = {
   pythonAvailable: boolean
+  dotenv: boolean
   sounddevice: boolean
   soundfile: boolean
   whisper: boolean
@@ -74,6 +75,7 @@ def has_module(name):
 
 print(json.dumps({
     "pythonAvailable": True,
+    "dotenv": has_module("dotenv"),
     "sounddevice": has_module("sounddevice"),
     "soundfile": has_module("soundfile"),
     "whisper": has_module("whisper"),

@@ -40,6 +40,7 @@ vi.mock("node:fs/promises", () => ({
 }))
 
 vi.mock("node:os", () => ({
+  tmpdir: vi.fn().mockReturnValue("/tmp"),
   default: {
     tmpdir: vi.fn().mockReturnValue("/tmp"),
     platform: () => "win32",
@@ -50,6 +51,7 @@ vi.mock("node:os", () => ({
 
 import { execa } from "execa"
 import fs from "node:fs/promises"
+import os from "node:os"
 
 const mockExeca = vi.mocked(execa)
 const mockFs = fs as typeof fs & { readFile: ReturnType<typeof vi.fn>; unlink: ReturnType<typeof vi.fn> }
@@ -74,6 +76,7 @@ describe("GUIAgent", () => {
     mockExeca.mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 } as any)
     vi.mocked(fs.readFile).mockResolvedValue(FAKE_PNG as any)
     vi.mocked(fs.unlink).mockResolvedValue(undefined)
+    vi.mocked(os.tmpdir).mockReturnValue("/tmp")
   })
 
   afterEach(() => {
@@ -184,7 +187,6 @@ describe("GUIAgent", () => {
       expect(mockExeca).toHaveBeenCalledWith(
         "screencapture",
         expect.arrayContaining(["-x"]),
-        undefined,
       )
 
       Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true })
