@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView, Platform,
   StatusBar, SafeAreaView
 } from "react-native"
+import Setup from "./screens/Setup"
 
 interface Message {
   id: string
@@ -13,12 +14,15 @@ interface Message {
   timestamp: Date
 }
 
+type Screen = "setup" | "chat"
+
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [connected, setConnected] = useState(false)
   const [thinking, setThinking] = useState(false)
   const [gatewayUrl, setGatewayUrl] = useState("ws://192.168.1.1:18789/ws")
+  const [screen, setScreen] = useState<Screen>("setup")
   const ws = useRef<WebSocket | null>(null)
   const listRef = useRef<FlatList>(null)
 
@@ -77,11 +81,23 @@ export default function App() {
     <SafeAreaView style={s.container}>
       <StatusBar barStyle="light-content" />
       
+      {screen === "setup" ? (
+        <Setup
+          gatewayUrl={gatewayUrl.replace("ws://", "http://").replace("wss://", "https://").replace(/\/ws$/, "")}
+          onComplete={() => setScreen("chat")}
+        />
+      ) : (
+      <>
       <View style={s.header}>
-        <Text style={s.headerTitle}>Orion</Text>
-        <View style={[s.dot, 
-          { backgroundColor: connected ? "#22c55e" : "#ef4444" }
-        ]} />
+        <Text style={s.headerTitle}>Nova</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity onPress={() => setScreen("setup")}>
+            <Text style={{ color: "#888", fontSize: 13 }}>Setup</Text>
+          </TouchableOpacity>
+          <View style={[s.dot, 
+            { backgroundColor: connected ? "#22c55e" : "#ef4444" }
+          ]} />
+        </View>
       </View>
 
       <FlatList
@@ -102,7 +118,7 @@ export default function App() {
           </View>
         )}
         ListFooterComponent={thinking ? (
-          <Text style={s.thinking}>Orion is thinking...</Text>
+          <Text style={s.thinking}>Nova is thinking...</Text>
         ) : null}
       />
 
@@ -114,7 +130,7 @@ export default function App() {
             style={s.input}
             value={input}
             onChangeText={setInput}
-            placeholder="Message Orion..."
+            placeholder="Message Nova..."
             placeholderTextColor="#555"
             multiline
             onSubmitEditing={send}
@@ -125,6 +141,8 @@ export default function App() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      </>
+      )}
     </SafeAreaView>
   )
 }

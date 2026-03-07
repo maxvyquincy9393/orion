@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orion</title>
+  <title>Nova</title>
   <style>
     * {
       margin: 0;
@@ -230,7 +230,7 @@
 </head>
 <body>
   <div class="titlebar">
-    <span class="titlebar-title">Orion</span>
+    <span class="titlebar-title">Nova</span>
     <div class="titlebar-buttons">
       <button class="titlebar-btn" id="minimize-btn">-</button>
       <button class="titlebar-btn close" id="close-btn">x</button>
@@ -244,13 +244,13 @@
         <span></span>
         <span></span>
       </div>
-      <span>Orion is thinking...</span>
+      <span>Nova is thinking...</span>
     </div>
   </div>
 
   <div class="input-bar">
     <div class="input-wrapper">
-      <input type="text" id="message-input" placeholder="Message Orion..." />
+      <input type="text" id="message-input" placeholder="Message Nova..." />
     </div>
     <button class="send-btn" id="send-btn">-></button>
   </div>
@@ -332,7 +332,7 @@
       sendBtn.disabled = true
 
       try {
-        await window.orion.sendMessage(content, "owner")
+        await window.nova.sendMessage(content, "owner")
       } catch (err) {
         hideTyping()
         addMessage("assistant", "Failed to send message. Please try again.")
@@ -349,19 +349,19 @@
     })
 
     minimizeBtn.addEventListener("click", () => {
-      window.orion.minimizeWindow()
+      window.nova.minimizeWindow()
     })
 
     closeBtn.addEventListener("click", () => {
-      window.orion.closeWindow()
+      window.nova.closeWindow()
     })
 
-    window.orion.onConnected(() => {
+    window.nova.onConnected(() => {
       updateConnectionStatus("connected")
       sendBtn.disabled = false
     })
 
-    window.orion.onMessage((msg) => {
+    window.nova.onMessage((msg) => {
       if (msg.type === "response") {
         hideTyping()
         sendBtn.disabled = false

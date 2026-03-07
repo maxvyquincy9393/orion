@@ -1,12 +1,26 @@
 const { contextBridge, ipcRenderer } = require("electron")
 
-contextBridge.exposeInMainWorld("orion", {
+contextBridge.exposeInMainWorld("nova", {
   sendMessage: (content, userId) =>
     ipcRenderer.invoke("send:message", content, userId),
 
   getStatus: () =>
     ipcRenderer.invoke("get:status"),
 
+  // ── Config / Onboarding ──────────────────────────────────────────
+  saveConfig: (config) =>
+    ipcRenderer.invoke("config:save", config),
+
+  loadConfig: () =>
+    ipcRenderer.invoke("config:load"),
+
+  testProvider: (provider, credentials) =>
+    ipcRenderer.invoke("config:test-provider", provider, credentials),
+
+  isConfigured: () =>
+    ipcRenderer.invoke("config:is-configured"),
+
+  // ── Window controls ──────────────────────────────────────────────
   minimizeWindow: () =>
     ipcRenderer.invoke("window:minimize"),
 

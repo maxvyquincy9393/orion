@@ -1,0 +1,312 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  userId    String
+  role      String
+  content   String
+  channel   String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([channel])
+  @@index([userId, role])
+}
+
+model Thread {
+  id        String   @id @default(cuid())
+  userId    String
+  state     String
+  context   Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, state])
+}
+
+model TriggerLog {
+  id          String   @id @default(cuid())
+  userId      String
+  triggerName String
+  actedOn     Boolean  @default(false)
+  firedAt     DateTime @default(now())
+
+  @@index([userId, firedAt])
+}
+
+model VoiceProfile {
+  id             String   @id @default(cuid())
+  userId         String
+  profileName    String
+  cloneType      String
+  modelPath      String?
+  referenceAudio String?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, profileName])
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  source    String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([source])
+}
+
+model PairingCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  channel   String
+  senderId  String
+  expiresAt DateTime
+  approved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([code])
+  @@index([senderId, channel])
+}
+
+model ApprovedUser {
+  id         String    @id @default(cuid())
+  userId     String
+  channel    String
+  approvedAt DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@unique([userId, channel])
+}
+
+model DeviceToken {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique  // SHA-256 hashed
+  userId     String
+  channel    String
+  deviceName String   @default("unknown")
+  createdAt  DateTime @default(now())
+  lastUsed   DateTime @updatedAt
+  revokedAt  DateTime?
+
+  @@index([userId])
+}
+
+model PairingSession {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  userId    String
+  channel   String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+}
+
+model UserProfile {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  facts      Json
+  opinions   Json
+  topics     Json
+  updatedAt  DateTime @updatedAt
+}
+
+/**
+ * Memory Node with IEU (Intent-Experience-Utility) triplet support
+ * 
+ * Stores memories with:
+ * - Q-value for Bellman Q-learning updates
+ * - Utility score for ranking
+ * - Metadata for intent tracking and experience context
+ */
+model MemoryNode {
+  id         String   @id @default(cuid())
+  userId     String
+  content    String
+  level      Int
+  validFrom  DateTime @default(now())
+  validUntil DateTime?
+  category   String
+  embedding  Bytes?
+  
+  // IEU Triplet components
+  utilityScore   Float  @default(0.5)  // U: Utility score for ranking
+  qValue         Float  @default(0.5)  // Q-value for Bellman updates
+  
+  // Metadata stores intent, experience context, feedback history
+  metadata       Json?
+  
+  // Statistics
+  retrievalCount Int    @default(0)
+  successCount   Int    @default(0)
+
+  @@index([userId, level])
+  @@index([userId, validUntil])
+  @@index([userId, qValue])      // Index for Q-value based retrieval
+  @@index([userId, utilityScore]) // Index for utility-based ranking
+}
+
+/**
+ * FTS5 Virtual Table for full-text search (OC-10)
+ * 
+ * Enables fast keyword search using SQLite FTS5 extension.
+ * This is used by HybridRetriever for lexical search alongside
+ * vector search for semantic similarity.
+ * 
+ * Note: FTS tables are virtual and don't use standard Prisma migrations.
+ * The table must be created manually via raw SQL:
+ * CREATE VIRTUAL TABLE MemoryNodeFTS USING fts5(content, content_rowid=rowid);
+ */
+model MemoryNodeFTS {
+  rowid   Int    @id
+  content String
+
+  @@ignore // Virtual table, managed via raw SQL
+}
+
+/**
+ * Usage Event for LLM observability (OC-11)
+ *
+ * Tracks all LLM API calls with:
+ * - Token counts (prompt, completion, total)
+ * - Cost estimation
+ * - Latency metrics
+ * - Success/failure rates
+ * - Request metadata
+ *
+ * Uses ring buffer in UsageTracker for high-throughput scenarios.
+ */
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String?
+
+  // Provider and model
+  provider String
+  model    String
+
+  // Token counts
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+
+  // Cost estimation (USD)
+  estimatedCostUsd Float
+
+  // Performance metrics
+  latencyMs Int
+
+  // Request metadata
+  requestType String // chat, embedding, function_calling, tool_use
+  success     Boolean
+  errorType   String?
+
+  // Timestamps
+  timestamp DateTime
+  createdAt DateTime @default(now())
+
+  // Indexes for efficient queries
+  @@index([userId, timestamp])
+  @@index([provider, model])
+  @@index([timestamp])
+}
+
+/**
+ * Tenant configuration for multi-tenancy (OC-12)
+ *
+ * Stores tenant-level configuration and resource quotas.
+ * Used by WorkspaceResolver for tenant isolation.
+ */
+model Tenant {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  userId    String   @unique
+  
+  // Tenant metadata
+  displayName String?
+  tier        String   @default("free") // free, pro, enterprise
+  
+  // Resource limits (JSON for flexibility)
+  limits Json
+  
+  // Feature flags
+  features Json
+  
+  // Custom configuration
+  customConfig Json?
+  
+  // Workspace path (relative to saasDataDir)
+  workspacePath String?
+  
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastAccessedAt DateTime @default(now())
+  
+  // Indexes
+  @@index([tier])
+  @@index([createdAt])
+}
+
+model CausalNode {
+  id        String   @id @default(cuid())
+  userId    String
+  event     String
+  eventKey  String   // Stage-3 enforced dedupe key (lower/trim normalized event)
+  category  String
+  createdAt DateTime @default(now())
+
+  causesEdges CausalEdge[] @relation("from")
+  effectEdges CausalEdge[] @relation("to")
+  hyperEdges  HyperEdgeMembership[]
+
+  @@index([userId, category])
+  @@unique([userId, eventKey])
+}
+
+model CausalEdge {
+  id        String   @id @default(cuid())
+  userId    String
+  fromId    String
+  toId      String
+  strength  Float    @default(0.5)
+  evidence  Int      @default(1)
+  createdAt DateTime @default(now())
+
+  from CausalNode @relation("from", fields: [fromId], references: [id], onDelete: Cascade)
+  to   CausalNode @relation("to", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+  @@index([userId])
+}
+
+model HyperEdge {
+  id       String   @id @default(cuid())
+  userId   String
+  relation String
+  context  String
+  memberSetHash String // Stage-3 enforced dedupe key (hash of normalized relation + member set)
+  weight   Float    @default(0.5)
+  members  HyperEdgeMembership[]
+
+  @@index([userId])
+  @@unique([userId, relation, memberSetHash])
+}
+
+model HyperEdgeMembership {
+  hyperEdgeId String
+  nodeId      String
+
+  hyperEdge HyperEdge  @relation(fields: [hyperEdgeId], references: [id], onDelete: Cascade)
+  node      CausalNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@id([hyperEdgeId, nodeId])
+}

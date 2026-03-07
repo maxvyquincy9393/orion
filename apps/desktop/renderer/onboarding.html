@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orion Setup</title>
+  <title>Nova Setup</title>
   <style>
     * {
       margin: 0;
@@ -265,7 +265,7 @@
 </head>
 <body>
   <div class="container">
-    <div class="logo">Orion</div>
+    <div class="logo">Nova</div>
     <div class="subtitle">Your persistent AI companion</div>
 
     <div class="progress-dots">
@@ -276,9 +276,9 @@
     </div>
 
     <div class="step active" id="step-1">
-      <div class="step-title">Welcome to Orion</div>
+      <div class="step-title">Welcome to Nova</div>
       <div class="step-desc">
-        Orion is a persistent AI companion that learns from your conversations,
+        Nova is a persistent AI companion that learns from your conversations,
         proactively reaches out, and helps you stay on top of your tasks.
         Let's get you set up.
       </div>
@@ -330,7 +330,7 @@
     <div class="step" id="step-4">
       <div class="step-title">All Set!</div>
       <div class="step-desc">
-        Orion is ready to go. You can start chatting now.
+        Nova is ready to go. You can start chatting now.
         The app will run in the system tray.
       </div>
       <button class="btn btn-primary" id="step4-done">Start Chatting</button>
@@ -392,30 +392,12 @@
     })
 
     document.getElementById("step3-test").addEventListener("click", async () => {
-      const status = document.getElementById("test-status")
-      const btn = document.getElementById("step3-test")
-      btn.disabled = true
-      btn.textContent = "Testing..."
-
-      credentials = collectCredentials()
-
-      const success = await testConnection()
-
-      status.style.display = "block"
-      if (success) {
-        status.className = "test-status success"
-        status.textContent = "Connection successful!"
-        setTimeout(() => showStep(4), 1000)
-      } else {
-        status.className = "test-status error"
-        status.textContent = "Connection failed. Please check your credentials."
-        btn.disabled = false
-        btn.textContent = "Test Connection"
-      }
+      await testConnection()
     })
 
-    document.getElementById("step4-done").addEventListener("click", () => {
-      saveCredentials()
+    document.getElementById("step4-done").addEventListener("click", async () => {
+      await saveCredentials()
+      // Reload — main.js will detect nova.json exists and start gateway + load chat
       window.location.href = "index.html"
     })
 
@@ -492,18 +474,75 @@
     }
 
     async function testConnection() {
-      await new Promise(r => setTimeout(r, 1500))
+      const btn = document.getElementById("step3-test")
+      const status = document.getElementById("test-status")
+      btn.disabled = true
+      btn.textContent = "Testing..."
+      status.style.display = "none"
 
-      if (selectedProvider === "ollama") {
-        return credentials.OLLAMA_INSTALLED
+      credentials = collectCredentials()
+
+      try {
+        const result = await window.nova.testProvider(selectedProvider, credentials)
+        status.style.display = "block"
+        if (result.ok) {
+          status.className = "test-status success"
+          status.textContent = "Connection successful!"
+          setTimeout(() => showStep(4), 1000)
+        } else {
+          status.className = "test-status error"
+          status.textContent = `Connection failed (${result.error || "status " + result.status}). Check your credentials.`
+          btn.disabled = false
+          btn.textContent = "Test Connection"
+        }
+      } catch (err) {
+        status.style.display = "block"
+        status.className = "test-status error"
+        status.textContent = "Connection test error: " + err.message
+        btn.disabled = false
+        btn.textContent = "Test Connection"
       }
-
-      const key = credentials.GROQ_API_KEY || credentials.ANTHROPIC_API_KEY || credentials.OPENAI_API_KEY
-      return key && key.length > 10
     }
 
-    function saveCredentials() {
-      console.log("Saving credentials:", credentials)
+    async function saveCredentials() {
+      // Build nova.json config from wizard selections
+      const novaConfig = {
+        env: {},
+        identity: { name: "Nova", emoji: "✦", theme: "dark minimal" },
+        agents: {
+          defaults: {
+            model: { primary: "", fallbacks: [] },
+            workspace: "./workspace"
+          }
+        }
+      }
+
+      switch (selectedProvider) {
+        case "groq":
+          novaConfig.env.GROQ_API_KEY = credentials.GROQ_API_KEY || ""
+          novaConfig.agents.defaults.model.primary = "groq/llama-3.3-70b-versatile"
+          break
+        case "ollama":
+          novaConfig.env.OLLAMA_HOST = "http://127.0.0.1:11434"
+          novaConfig.agents.defaults.model.primary = "ollama/llama3.2"
+          break
+        case "anthropic":
+          novaConfig.env.ANTHROPIC_API_KEY = credentials.ANTHROPIC_API_KEY || ""
+          novaConfig.agents.defaults.model.primary = "anthropic/claude-sonnet-4-20250514"
+          break
+        case "openai":
+          novaConfig.env.OPENAI_API_KEY = credentials.OPENAI_API_KEY || ""
+          novaConfig.agents.defaults.model.primary = "openai/gpt-4o"
+          break
+      }
+
+      const result = await window.nova.saveConfig(novaConfig)
+      if (result.error) {
+        console.error("Failed to save config:", result.error)
+        alert("Failed to save configuration: " + result.error)
+        return
+      }
+      console.log("Config saved to", result.path)
     }
 
     updateDots()

@@ -1,8 +1,8 @@
 {
-  "name": "orion-desktop",
+  "name": "nova-desktop",
   "version": "0.1.0",
-  "description": "Desktop wrapper for Orion gateway",
-  "author": "Orion Team",
+  "description": "Desktop wrapper for Nova gateway",
+  "author": "Nova Team",
   "main": "main.js",
   "scripts": {
     "dev": "electron .",
@@ -21,8 +21,8 @@
     "electron-builder": "^24.9.1"
   },
   "build": {
-    "appId": "ai.orion.app",
-    "productName": "Orion",
+    "appId": "ai.nova.app",
+    "productName": "Nova",
     "directories": {
       "output": "dist"
     },
