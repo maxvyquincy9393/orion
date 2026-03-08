@@ -1,8 +1,10 @@
 import { browserTool, getCurrentBrowserObservation, type BrowserObservation } from "./browser.js"
 import { codeRunnerTool } from "./code-runner.js"
 import { fileAgentTool } from "./file-agent.js"
+import { calendarTool } from "./calendar.js"
+import { camelGuard, inferToolResultTaintSources, type TaintSource } from "../../security/camel-guard.js"
 
-export type ToolName = "browser" | "codeRunner" | "fileAgent"
+export type ToolName = "browser" | "codeRunner" | "fileAgent" | "calendar"
 
 export interface ToolMetadata {
   name: ToolName
@@ -16,6 +18,7 @@ export interface ToolResult {
   output: string
   error?: string
   observation?: BrowserObservation
+  taintSources: TaintSource[]
 }
 
 interface ExecutableTool {
@@ -26,6 +29,7 @@ const executableTools: Record<ToolName, ExecutableTool> = {
   browser: browserTool as unknown as ExecutableTool,
   codeRunner: codeRunnerTool as unknown as ExecutableTool,
   fileAgent: fileAgentTool as unknown as ExecutableTool,
+  calendar: calendarTool as unknown as ExecutableTool,
 }
 
 /**
@@ -54,6 +58,13 @@ export const TOOL_REGISTRY: Record<ToolName, ToolMetadata> = {
     requiredCapability: null,
     dangerLevel: "medium",
   },
+  calendar: {
+    name: "calendar",
+    description:
+      "Manage calendar events: list upcoming, find free time slots, create/delete events with conflict detection.",
+    requiredCapability: null,
+    dangerLevel: "low",
+  },
 }
 
 function normalizeToolOutput(output: unknown): string {
@@ -74,18 +85,42 @@ export async function executeToolByName(
       success: false,
       output: "",
       error: `Unknown tool: ${toolName}`,
+      taintSources: [],
+    }
+  }
+
+  const action = typeof params.action === "string" ? params.action : "execute"
+  const taintedSources = Array.isArray(params.taintedSources)
+    ? params.taintedSources.filter((item): item is TaintSource => typeof item === "string")
+    : []
+  const guardResult = camelGuard.check({
+    actorId: options?.actorId ?? "unknown",
+    toolName,
+    action,
+    taintedSources,
+    capabilityToken: typeof params.capabilityToken === "string" ? params.capabilityToken : undefined,
+  })
+
+  if (!guardResult.allowed) {
+    return {
+      success: false,
+      output: "",
+      error: guardResult.reason,
+      taintSources: [],
     }
   }
 
   const output = normalizeToolOutput(await tool.execute(params))
   const success = !/^.*failed:/i.test(output) && !/^.*error:/i.test(output)
   const observation = toolName === "browser" ? await getCurrentBrowserObservation().catch(() => null) : null
+  const resultTaintSources = success ? inferToolResultTaintSources(toolName, action) : []
 
   return {
     success,
     output,
     error: success ? undefined : output,
     observation: observation ?? undefined,
+    taintSources: resultTaintSources,
   }
 }
 
