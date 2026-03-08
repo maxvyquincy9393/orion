@@ -172,6 +172,9 @@ const ConfigSchema = z.object({
   // Speaker ID (Resemblyzer Python sidecar)
   SPEAKER_ID_ENABLED: boolFromEnv.default(false),
   SPEAKER_ID_CONFIDENCE_THRESHOLD: floatFromEnv.default(0.75),
+  // Phase 11: Multi-Agent Orchestration
+  AGENT_MAX_CONCURRENT: intFromEnv.default(5),
+  SKILL_MARKETPLACE_ENABLED: boolFromEnv.default(true),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)

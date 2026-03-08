@@ -22,6 +22,7 @@ import { mcpClient, type MCPServerConfig } from "../mcp/client.js"
 import { offlineCoordinator } from "../offline/coordinator.js"
 import { habitModel } from "../background/habit-model.js"
 import { localEmbedder } from "../memory/local-embedder.js"
+import { skillMarketplace } from "../skills/marketplace.js"
 import config from "../config.js"
 
 const log = createLogger("startup")
@@ -73,6 +74,13 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   await pluginLoader.loadAllFromDefaultDir()
   void agentRunner
   initializeEventHandlers()
+
+  // Phase 11: Discover skills from trusted directories
+  if (config.SKILL_MARKETPLACE_ENABLED) {
+    void skillMarketplace.discover()
+      .then((count) => log.info("skill marketplace ready", { skills: count }))
+      .catch((err) => log.warn("skill marketplace discovery failed", { err }))
+  }
 
   // Phase 9: Initialize local embedder if enabled
   if (config.LOCAL_EMBEDDER_ENABLED) {

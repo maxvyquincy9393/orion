@@ -17,6 +17,8 @@ import { buildSystemPrompt } from "../core/system-prompt-builder.js"
 import { LoopDetector } from "../core/loop-detector.js"
 import { LATSPlanner } from "./lats-planner.js"
 import { loadEDITHConfig } from "../config/edith-config.js"
+// Phase 11: SharedTaskMemory for multi-agent context sharing
+import { getOrCreateSession, clearSession } from "../acp/shared-memory.js"
 
 const logger = createLogger("runner")
 
@@ -162,53 +164,63 @@ export class AgentRunner {
     const loopDetector = new LoopDetector()
 
     const supervisorRun = async (): Promise<string> => {
-      const dag = await taskPlanner.plan(goal)
-      const boundedDag = this.limitDagSize(dag, maxSubtasks)
-      const executionWaves = taskPlanner.getExecutionOrder(boundedDag)
-      const completedResults = new Map<string, TaskResult>()
+      // Phase 11: create session-scoped shared memory for agent coordination
+      const sessionId = `supervisor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const memory = getOrCreateSession(sessionId)
 
-      for (const wave of executionWaves) {
-        logger.info("executing wave", { tasks: wave.map((node) => node.id) })
+      try {
+        const dag = await taskPlanner.plan(goal)
+        const boundedDag = this.limitDagSize(dag, maxSubtasks)
+        const executionWaves = taskPlanner.getExecutionOrder(boundedDag)
+        const completedResults = new Map<string, TaskResult>()
 
-        // Phase I-2: Pass loopDetector to executeNode
-        const waveResults = await Promise.all(
-          wave.map((node) => executionMonitor.executeNode(node, completedResults, loopDetector)),
-        )
+        for (const wave of executionWaves) {
+          logger.info("executing wave", { tasks: wave.map((node) => node.id) })
 
-        for (const result of waveResults) {
-          completedResults.set(result.nodeId, result)
-          
-          // Phase I-2: Check for loop break signal
-          if (result.loopBreak) {
-            logger.warn("supervisor halted by loop detector", { 
-              nodeId: result.nodeId, 
-              signal: result.loopSignal 
-            })
-            // Synthesize with completed results so far
-            break
+          // Phase I-2: Pass loopDetector to executeNode
+          const waveResults = await Promise.all(
+            wave.map((node) => executionMonitor.executeNode(node, completedResults, loopDetector)),
+          )
+
+          for (const result of waveResults) {
+            completedResults.set(result.nodeId, result)
+
+            // Phase 11: write each result to shared memory for downstream agents
+            const node = boundedDag.nodes.find((n) => n.id === result.nodeId)
+            if (node && result.output.trim()) {
+              memory.write({
+                agentType: node.agentType,
+                nodeId: result.nodeId,
+                content: result.output,
+                category: result.success ? "finding" : "error",
+                visibility: "shared",
+              })
+            }
+
+            // Phase I-2: Check for loop break signal
+            if (result.loopBreak) {
+              logger.warn("supervisor halted by loop detector", {
+                nodeId: result.nodeId,
+                signal: result.loopSignal,
+              })
+              break
+            }
           }
         }
-      }
 
-      const successfulOutputs = boundedDag.nodes
-        .map((node) => {
-          const result = completedResults.get(node.id)
+        // Phase 11: use structured shared context for synthesis (richer than raw outputs)
+        const sharedContext = memory.buildSynthesisContext(6_000)
 
-          if (!result) {
-            return `[${node.id}] success=false attempts=0\nTask: ${node.task}\nOutput: missing result`
-          }
-
-          return `[${node.id}] success=${result.success} attempts=${result.attempts}\nTask: ${node.task}\nOutput: ${result.output.slice(0, 900)}`
-        })
-        .join("\n\n---\n\n")
-
-      const synthesisPrompt = `Synthesize these task results into one coherent response for this goal.
+        const synthesisPrompt = `Synthesize these multi-agent task results into one coherent response.
 Goal: ${goal}
-Results: ${successfulOutputs.slice(0, 4000)}
+${sharedContext || `Results: ${[...completedResults.values()].map((r) => r.output).join("\n---\n").slice(0, 4000)}`}
 
 Provide a clear, unified answer.`
 
-      return orchestrator.generate("reasoning", { prompt: synthesisPrompt })
+        return orchestrator.generate("reasoning", { prompt: synthesisPrompt })
+      } finally {
+        clearSession(sessionId)
+      }
     }
 
     const timeoutPromise = new Promise<never>((_, reject) => {
