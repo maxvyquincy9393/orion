@@ -1,3 +1,4 @@
+import path from "path"
 import { defineConfig } from "vitest/config"
 import type { Plugin } from "vite"
 
@@ -24,8 +25,14 @@ const stripShebangPlugin: Plugin = {
 
 export default defineConfig({
   plugins: [stripShebangPlugin],
+  resolve: {
+    alias: {
+      // Shim react-native to avoid Rollup failing on Flow's `import typeof` syntax
+      "react-native": path.resolve(__dirname, "apps/mobile/__mocks__/react-native.ts"),
+    },
+  },
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "apps/mobile/**/*.test.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "json-summary"],
