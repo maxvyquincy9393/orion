@@ -31,6 +31,8 @@ export default defineConfig({
     exclude: [
       "src/channels/**/*.test.ts",
       "src/gateway/**/*.test.ts",
+      "src/**/*.e2e.test.ts",
+      "src/**/*.live.test.ts",
     ],
   },
 })

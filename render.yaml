@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: edith-gateway
+    env: node
+    buildCommand: pnpm install && pnpm build
+    startCommand: node dist/main.js --mode gateway
+    healthCheckPath: /health
+    disk:
+      name: edith-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        generateValue: false
