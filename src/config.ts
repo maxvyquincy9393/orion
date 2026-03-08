@@ -103,6 +103,10 @@ const ConfigSchema = z.object({
   EMAIL_SMTP_PORT: z.string().default("587"),
   // Vision configuration (T-1.7)
   VISION_ENGINE: z.string().default("gemini"),
+  VISION_GEMINI_MODEL: z.string().default("gemini-1.5-flash"),
+  VISION_OPENAI_MODEL: z.string().default("gpt-4o"),
+  VISION_CLAUDE_MODEL: z.string().default("claude-opus-4-5"),
+  VISION_OLLAMA_MODEL: z.string().default("llava"),
   // Voice configuration (T-3)
   VOICE_WHISPER_MODEL: z.string().default("base"),
   // Phase I-0: Hybrid Search
@@ -230,6 +234,8 @@ const ConfigSchema = z.object({
   HARDWARE_MONITOR_DDC_BUS: intFromEnv.default(0),
   OCTOPRINT_URL: z.string().default(""),
   OCTOPRINT_API_KEY: z.string().default(""),
+  // Security: pipeline rate limiter
+  PIPELINE_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(60),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
