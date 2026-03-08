@@ -49,6 +49,8 @@ import { pipelineRateLimiter } from "../security/pipeline-rate-limiter.js"
 import { dmPolicy } from "../security/dm-policy.js"
 import { edithMetrics } from "../observability/metrics.js"
 import { auditEngine } from "../security/audit.js"
+import { intentPredictor } from "../predictive/intent-predictor.js"
+import { preFetcher } from "../predictive/pre-fetcher.js"
 
 const log = createLogger("core.pipeline")
 
@@ -350,6 +352,15 @@ function launchAsyncSideEffects(
     input: safeText.slice(0, 500),
     output: response.slice(0, 500),
   }).catch(err => log.warn('audit record failed', { userId, err }))
+
+  // Stage 9 extension: Intent prediction → pre-fetch (fire-and-forget)
+  void intentPredictor.predict(userId, safeText)
+    .then(prediction => {
+      if (prediction?.preloadHint) {
+        preFetcher.prefetch(userId, prediction.preloadHint)
+      }
+    })
+    .catch(err => log.warn('intent prediction side effect failed', { userId, err }))
 }
 
 function computeProvisionalReward(retrievedMemoryIds: string[]): number {
