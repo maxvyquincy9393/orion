@@ -410,4 +410,18 @@ export const edithMetrics = {
     "Total messages dropped by the per-channel rate limiter.",
     ["channel"],
   ),
+
+  /** Total number of times a channel circuit breaker transitioned to open state. */
+  circuitBreakerOpenTotal: registry.counter(
+    "edith_circuit_breaker_open_total",
+    "Total times a channel circuit breaker opened.",
+    ["channel"],
+  ),
+
+  /** Total circuit breaker state transitions by channel, from-state, and to-state. */
+  circuitBreakerTransitions: registry.counter(
+    "edith_circuit_breaker_transitions_total",
+    "Total circuit breaker state transitions.",
+    ["channel", "from", "to"],
+  ),
 }

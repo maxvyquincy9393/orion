@@ -12,6 +12,7 @@
  */
 
 import { createLogger } from "../logger.js"
+import { edithMetrics } from "../observability/metrics.js"
 
 const log = createLogger("channels.circuit-breaker")
 
@@ -104,12 +105,16 @@ export class ChannelCircuitBreaker {
   }
 
   private onSuccess(channelId: string, circuit: ChannelCircuit): void {
-    if (circuit.state === "half-open") {
+    const prevState = circuit.state
+    if (prevState === "half-open") {
       log.info("circuit closed after successful probe", { channelId })
     }
     circuit.state = "closed"
     circuit.consecutiveFailures = 0
     circuit.openedAt = null
+    if (prevState === "half-open" || prevState === "open") {
+      edithMetrics.circuitBreakerTransitions.inc({ channel: channelId, from: prevState, to: "closed" })
+    }
   }
 
   private onFailure(channelId: string, circuit: ChannelCircuit): void {
@@ -117,13 +122,17 @@ export class ChannelCircuitBreaker {
     circuit.lastFailureAt = Date.now()
 
     if (circuit.state === "half-open") {
+      const prevState = circuit.state
       circuit.state = "open"
       circuit.openedAt = Date.now()
       log.warn("circuit re-opened after half-open probe failure", { channelId })
+      edithMetrics.circuitBreakerOpenTotal.inc({ channel: channelId })
+      edithMetrics.circuitBreakerTransitions.inc({ channel: channelId, from: prevState, to: "open" })
       return
     }
 
     if (circuit.consecutiveFailures >= this.thresholds.failures) {
+      const prevState = circuit.state
       circuit.state = "open"
       circuit.openedAt = Date.now()
       log.warn("circuit opened", {
@@ -131,6 +140,8 @@ export class ChannelCircuitBreaker {
         failures: circuit.consecutiveFailures,
         cooldownMs: this.thresholds.cooldownMs,
       })
+      edithMetrics.circuitBreakerOpenTotal.inc({ channel: channelId })
+      edithMetrics.circuitBreakerTransitions.inc({ channel: channelId, from: prevState, to: "open" })
     }
   }
 }
