@@ -83,6 +83,48 @@ const ComputerUseSchema = z.object({
   },
 })
 
+// App behavior configuration
+const AppConfigSchema = z.object({
+  minimizeToTray: z.boolean().default(true),
+  autoLaunch: z.boolean().default(false),
+  showTrayNotifications: z.boolean().default(true),
+  startMinimized: z.boolean().default(false),
+}).default({ minimizeToTray: true, autoLaunch: false, showTrayNotifications: true, startMinimized: false })
+
+// Telemetry (OFF by default — privacy first)
+const TelemetrySchema = z.object({
+  enabled: z.boolean().default(false),
+  crashReporting: z.boolean().default(false),
+  endpoint: z.string().default(""),
+}).default({ enabled: false, crashReporting: false, endpoint: "" })
+
+// Auto-updater configuration
+const UpdateSchema = z.object({
+  autoCheck: z.boolean().default(true),
+  autoDownload: z.boolean().default(true),
+  provider: z.enum(["github", "generic"]).default("github"),
+  url: z.string().default(""),
+}).default({ autoCheck: true, autoDownload: true, provider: "github", url: "" })
+
+// Knowledge base sources configuration (Phase 13 integration)
+const KnowledgeBaseSchema = z.object({
+  enabled: z.boolean().default(false),
+  obsidian: z.object({
+    enabled: z.boolean().default(false),
+    vaultPath: z.string().default(""),
+    syncIntervalMs: z.number().default(300_000),
+  }).default({ enabled: false, vaultPath: "", syncIntervalMs: 300_000 }),
+  notion: z.object({
+    enabled: z.boolean().default(false),
+    syncIntervalMs: z.number().default(3_600_000),
+    databaseIds: z.array(z.string()).default([]),
+  }).default({ enabled: false, syncIntervalMs: 3_600_000, databaseIds: [] }),
+  bookmarks: z.object({
+    enabled: z.boolean().default(false),
+    jsonPath: z.string().default(""),
+  }).default({ enabled: false, jsonPath: "" }),
+}).default({ enabled: false, obsidian: { enabled: false, vaultPath: "", syncIntervalMs: 300_000 }, notion: { enabled: false, syncIntervalMs: 3_600_000, databaseIds: [] }, bookmarks: { enabled: false, jsonPath: "" } })
+
 const EDITHConfigSchema = z.object({
   identity: AgentIdentitySchema.default({
     name: "EDITH",
@@ -168,6 +210,10 @@ const EDITHConfigSchema = z.object({
       entries: {},
     }),
   computerUse: ComputerUseSchema,
+  app: AppConfigSchema,
+  telemetry: TelemetrySchema,
+  update: UpdateSchema,
+  knowledgeBase: KnowledgeBaseSchema,
 })
 
 export type EDITHConfig = z.infer<typeof EDITHConfigSchema>
@@ -204,4 +250,11 @@ export function getEDITHConfig(): EDITHConfig {
   }
 
   return cachedConfig
+}
+
+/**
+ * Reset the cached config — used in tests to ensure a fresh parse on each test.
+ */
+export function resetEDITHConfigCache(): void {
+  cachedConfig = null
 }

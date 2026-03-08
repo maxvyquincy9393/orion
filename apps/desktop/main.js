@@ -1,6 +1,8 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require("electron")
 const { spawn } = require("child_process")
 const path = require("path")
+const fs = require("fs")
+const os = require("os")
 const WebSocket = require("ws")
 
 let mainWindow = null
@@ -8,6 +10,76 @@ let tray = null
 let edithProcess = null
 let ws = null
 let gatewayReady = false
+
+function log(...args) {
+  console.log("[edith:main]", ...args)
+}
+
+/**
+ * Send a payload to the EDITH gateway WebSocket if connected.
+ * @param {object} payload - JSON-serializable payload
+ */
+function sendToGateway(payload) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload))
+  }
+}
+
+/**
+ * Merge new env key=value lines into existing .env content without duplication.
+ * Existing keys are updated; new keys are appended.
+ * @param {string} existing - Existing .env file content
+ * @param {string} updates - New key=value lines to merge
+ * @returns {string} Merged content
+ */
+function mergeEnvContent(existing, updates) {
+  const lines = existing.split('\n').filter(l => l.trim())
+  const updateMap = {}
+  updates.split('\n').filter(l => l.trim() && l.includes('=')).forEach(l => {
+    const [k] = l.split('=')
+    updateMap[k.trim()] = l
+  })
+  const merged = lines.map(l => {
+    const [k] = l.split('=')
+    return updateMap[k.trim()] ? updateMap[k.trim()] : l
+  })
+  Object.entries(updateMap).forEach(([k, v]) => {
+    if (!lines.some(l => l.startsWith(k + '='))) merged.push(v)
+  })
+  return merged.join('\n') + '\n'
+}
+
+/**
+ * Initialize the auto-updater using electron-updater (optional dep).
+ * Gracefully degrades if electron-updater is not installed.
+ */
+function initAutoUpdater() {
+  let autoUpdater
+  try { ({ autoUpdater } = require("electron-updater")) } catch { return }
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.logger = null // use our own logging
+
+  autoUpdater.on("checking-for-update", () => log("checking for update..."))
+  autoUpdater.on("update-available", (info) => {
+    tray?.setToolTip(`EDITH — Update v${info.version} available`)
+    mainWindow?.webContents.send("updater:available", info)
+    sendToGateway({ type: "tts", text: `EDITH version ${info.version} is available. Downloading in the background.` })
+  })
+  autoUpdater.on("update-downloaded", (info) => {
+    tray?.setToolTip(`EDITH — Restart to apply v${info.version}`)
+    mainWindow?.webContents.send("updater:downloaded", info)
+    sendToGateway({ type: "tts", text: "Update downloaded. Will install on next restart." })
+  })
+  autoUpdater.on("error", (err) => log("Updater error (non-fatal):", err.message))
+
+  // Delayed check so gateway is ready
+  setTimeout(() => { try { autoUpdater.checkForUpdatesAndNotify() } catch {} }, 10_000)
+
+  ipcMain.handle("updater:check", () => { try { return autoUpdater.checkForUpdatesAndNotify() } catch {} })
+  ipcMain.handle("updater:install", () => { try { autoUpdater.quitAndInstall() } catch {} })
+}
 
 function startGateway() {
   edithProcess = spawn("node", [
@@ -69,19 +141,33 @@ function createTray() {
   const icon = nativeImage.createEmpty()
   tray = new Tray(icon)
   tray.setToolTip("EDITH")
-  tray.setContextMenu(Menu.buildFromTemplate([
+
+  let voiceMuted = false
+
+  const buildMenu = () => Menu.buildFromTemplate([
     { label: "Open EDITH", click: () => mainWindow?.show() },
     { label: "Status", click: () => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "status" }))
       }
     }},
+    { label: voiceMuted ? "Voice: Unmute" : "Voice: Mute", click: () => {
+      voiceMuted = !voiceMuted
+      sendToGateway({ type: "voice:mute", muted: voiceMuted })
+      tray?.setContextMenu(buildMenu())
+    }},
+    { label: "Check for updates", click: () => {
+      ipcMain.emit("updater:check")
+      try { require("electron-updater").autoUpdater.checkForUpdatesAndNotify() } catch {}
+    }},
     { type: "separator" },
     { label: "Quit", click: () => {
       app.isQuitting = true
       app.quit()
     }}
-  ]))
+  ])
+
+  tray.setContextMenu(buildMenu())
 
   tray.on("click", () => {
     if (mainWindow?.isVisible()) {
@@ -121,6 +207,7 @@ app.whenReady().then(() => {
   createTray()
   createWindow()
   startGateway()
+  initAutoUpdater()
 })
 
 app.on("window-all-closed", () => {
@@ -162,4 +249,29 @@ ipcMain.handle("app:quit", async () => {
   app.isQuitting = true
   app.quit()
   return { ok: true }
+})
+
+ipcMain.handle("oobe:save-credentials", async (_, credentials) => {
+  try {
+    const envPath = path.join(__dirname, "../../.env")
+    let envContent = ""
+    if (credentials.GROQ_API_KEY) envContent += `GROQ_API_KEY=${credentials.GROQ_API_KEY}\n`
+    if (credentials.ANTHROPIC_API_KEY) envContent += `ANTHROPIC_API_KEY=${credentials.ANTHROPIC_API_KEY}\n`
+    if (credentials.OPENAI_API_KEY) envContent += `OPENAI_API_KEY=${credentials.OPENAI_API_KEY}\n`
+    if (credentials.GEMINI_API_KEY) envContent += `GEMINI_API_KEY=${credentials.GEMINI_API_KEY}\n`
+    if (credentials.TELEGRAM_BOT_TOKEN) envContent += `TELEGRAM_BOT_TOKEN=${credentials.TELEGRAM_BOT_TOKEN}\n`
+    const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : ""
+    fs.writeFileSync(envPath, mergeEnvContent(existing, envContent), "utf-8")
+    // Save titleWord/name to edith.json
+    if (credentials.titleWord || credentials.agentName) {
+      const cfgPath = path.join(__dirname, "../../edith.json")
+      let cfg = {}
+      try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) } catch {}
+      if (credentials.agentName) cfg.identity = { ...(cfg.identity || {}), name: credentials.agentName }
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8")
+    }
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
 })

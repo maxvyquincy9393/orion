@@ -59,7 +59,69 @@ model Document {
   source    String
   createdAt DateTime @default(now())
 
+  chunks DocumentChunk[]
+
   @@index([userId, createdAt])
+}
+
+/**
+ * Phase 13 — DocumentChunk with citation metadata.
+ * One chunk = one retrievable segment from a document.
+ */
+model DocumentChunk {
+  id            String   @id @default(cuid())
+  documentId    String
+  userId        String
+  content       String
+  contextPrefix String
+  chunkIndex    Int
+  page          Int?
+  section       String?
+  vectorId      String?
+  createdAt     DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+}
+
+/**
+ * Phase 13 — Knowledge graph entity (HippoRAG-inspired).
+ */
+model KnowledgeEntity {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  type      String
+  chunkIds  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fromEdges KnowledgeEdge[] @relation("fromEntity")
+  toEdges   KnowledgeEdge[] @relation("toEntity")
+
+  @@unique([userId, name])
+  @@index([userId, type])
+}
+
+/**
+ * Phase 13 — Knowledge graph edge (entity relationship).
+ */
+model KnowledgeEdge {
+  id            String @id @default(cuid())
+  userId        String
+  fromId        String
+  toId          String
+  relation      String
+  weight        Float  @default(0.5)
+  sourceChunkId String
+
+  from KnowledgeEntity @relation("fromEntity", fields: [fromId], references: [id], onDelete: Cascade)
+  to   KnowledgeEntity @relation("toEntity", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId, relation])
+  @@index([userId])
 }
 
 model PairingCode {

@@ -1,4 +1,5 @@
 version: "3.9"
+
 services:
   edith:
     build: .
@@ -12,6 +13,42 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:/data/edith.db
+      - OLLAMA_BASE_URL=http://ollama:11434
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:18789/health', r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Optional voice sidecar (uncomment to enable)
+  # voice-sidecar:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.voice
+  #   ports:
+  #     - "8765:8765"
+  #   volumes:
+  #     - voice_models:/app/models
+  #   restart: unless-stopped
 
 volumes:
   edith_data:
+  ollama_data:

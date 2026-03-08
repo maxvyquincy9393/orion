@@ -9,6 +9,10 @@ import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { memory } from "./store.js"
 import { detectQueryComplexity, temporalIndex } from "./temporal-index.js"
+import { parseFile } from "./knowledge/format-handlers.js"
+import { sectionChunker } from "./knowledge/section-chunker.js"
+import { knowledgeGraph } from "./knowledge/knowledge-graph.js"
+import { retrievalEngine } from "./knowledge/retrieval-engine.js"
 
 const log = createLogger("memory.rag")
 
@@ -102,6 +106,57 @@ export class RAGEngine {
       const ext = path.extname(filePath).toLowerCase()
       const title = path.basename(filePath)
 
+      // Phase 13: Try format-specific parsing first
+      const parsed = await parseFile(filePath)
+      if (parsed) {
+        const parentId = randomUUID()
+        const chunks = sectionChunker.chunk(parsed, parsed.title || title)
+
+        await prisma.document.create({
+          data: {
+            id: parentId,
+            userId,
+            title: parsed.title || title,
+            source: filePath,
+          },
+        })
+
+        for (const chunk of chunks) {
+          const metadata = {
+            parentId,
+            title: parsed.title || title,
+            source: filePath,
+            chunkIndex: chunk.chunkIndex,
+            contextPrefix: chunk.contextPrefix,
+            page: chunk.page,
+            section: chunk.section,
+          }
+
+          const vectorId = await memory.save(userId, chunk.content, metadata)
+
+          const dbChunk = await prisma.documentChunk.create({
+            data: {
+              documentId: parentId,
+              userId,
+              content: chunk.content,
+              contextPrefix: chunk.contextPrefix,
+              chunkIndex: chunk.chunkIndex,
+              page: chunk.page ?? null,
+              section: chunk.section ?? null,
+              vectorId: typeof vectorId === "string" ? vectorId : null,
+            },
+          })
+
+          // Fire-and-forget entity extraction
+          void knowledgeGraph.extractFromChunk(userId, chunk.content, dbChunk.id)
+            .catch((err) => log.warn("entity extraction failed", { chunkId: dbChunk.id, err }))
+        }
+
+        log.info("file ingested via format handler", { title, chunks: chunks.length, filePath })
+        return parentId
+      }
+
+      // Fallback: legacy plain-text path for .txt, .md, .json, .pdf
       let content = ""
       if (ext === ".txt" || ext === ".md" || ext === ".json") {
         content = await fs.readFile(filePath, "utf-8")
@@ -127,6 +182,25 @@ export class RAGEngine {
     } catch (error) {
       log.error("ingestFile failed", error)
       return null
+    }
+  }
+
+  /**
+   * Query the knowledge base using hybrid retrieval (vector + graph) and return
+   * a formatted context string ready for injection into the system prompt.
+   *
+   * @param userId - User identifier
+   * @param query  - Natural language query
+   * @param limit  - Maximum number of chunks to retrieve
+   * @returns Formatted context string or empty string if no results
+   */
+  async queryKnowledgeBase(userId: string, query: string, limit = 5): Promise<string> {
+    try {
+      const result = await retrievalEngine.retrieve(userId, query, limit)
+      return result.prompt
+    } catch (err) {
+      log.error("queryKnowledgeBase failed", { userId, err })
+      return ""
     }
   }
 

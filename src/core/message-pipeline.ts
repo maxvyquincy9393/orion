@@ -38,6 +38,9 @@ import { feedbackStore } from "../memory/feedback-store.js"
 import { habitModel } from "../background/habit-model.js"
 import { userPreferenceEngine } from "../memory/user-preference.js"
 import { personalityEngine } from "./personality-engine.js"
+import { queryClassifier } from "../memory/knowledge/query-classifier.js"
+import { retrievalEngine } from "../memory/knowledge/retrieval-engine.js"
+import { syncScheduler } from "../memory/knowledge/sync-scheduler.js"
 
 const log = createLogger("core.pipeline")
 
@@ -301,6 +304,12 @@ function launchAsyncSideEffects(
       memoryIds: retrievedMemoryIds,
     }).catch((err) => log.warn("feedback implicit capture failed", { userId, err }))
   }
+
+  // Phase 13: Knowledge base sync scheduler tick (fire-and-forget)
+  if (config.KNOWLEDGE_BASE_ENABLED) {
+    void syncScheduler.tick()
+      .catch((err) => log.warn("KB sync scheduler tick failed", { userId, err }))
+  }
 }
 
 function computeProvisionalReward(retrievedMemoryIds: string[]): number {
@@ -343,7 +352,26 @@ export async function processMessage(
   await maybeCompactSessionHistory(userId, channel)
 
   // Stage 3 + 4: Persona detection and system prompt assembly
-  const dynamicContext = await buildPersonaDynamicContext(userId, safeText)
+  let dynamicContext = await buildPersonaDynamicContext(userId, safeText)
+
+  // Phase 13: Knowledge base query classification + context injection
+  if (config.KNOWLEDGE_BASE_ENABLED) {
+    const classification = queryClassifier.classify(safeText)
+    if (classification.type === "knowledge") {
+      const kbContext = await retrievalEngine.retrieveContext(userId, safeText)
+        .catch((err) => {
+          log.warn("KB retrieval failed", { userId, err })
+          return ""
+        })
+      if (kbContext) {
+        dynamicContext = dynamicContext
+          ? `${dynamicContext}\n\n${kbContext}`
+          : kbContext
+        log.debug("KB context injected", { userId, confidence: classification.confidence })
+      }
+    }
+  }
+
   const systemPrompt = await buildSystemPrompt({
     sessionMode,
     includeSkills: true,

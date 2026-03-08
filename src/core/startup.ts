@@ -23,6 +23,8 @@ import { offlineCoordinator } from "../offline/coordinator.js"
 import { habitModel } from "../background/habit-model.js"
 import { localEmbedder } from "../memory/local-embedder.js"
 import { skillMarketplace } from "../skills/marketplace.js"
+import { syncScheduler } from "../memory/knowledge/sync-scheduler.js"
+import { loadEDITHConfig } from "../config/edith-config.js"
 import config from "../config.js"
 
 const log = createLogger("startup")
@@ -107,6 +109,15 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   // Phase 10: Start habit model background monitoring
   habitModel.startMonitoring()
 
+  // Phase 13: Knowledge base sync scheduler
+  if (config.KNOWLEDGE_BASE_ENABLED) {
+    void loadEDITHConfig()
+      .then((edithConfig) => {
+        syncScheduler.start(edithConfig.knowledgeBase, config.DEFAULT_USER_ID)
+      })
+      .catch((err) => log.warn("knowledge base sync scheduler init failed", { err }))
+  }
+
   // Initialize MCP Client with configuration from edith.json (T-2)
   try {
     const edithJsonPath = path.join(workspaceDir, "..", "edith.json")
@@ -137,6 +148,10 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
     offlineCoordinator.stopMonitoring()
     // Phase 10: Stop habit model monitoring
     habitModel.stopMonitoring()
+    // Phase 13: Stop knowledge base sync scheduler
+    if (config.KNOWLEDGE_BASE_ENABLED) {
+      syncScheduler.stop()
+    }
     // Shutdown MCP clients
     await mcpClient.shutdown().catch((err) => log.warn("MCP shutdown error", err))
     await prisma.$disconnect()

@@ -175,6 +175,12 @@ const ConfigSchema = z.object({
   // Phase 11: Multi-Agent Orchestration
   AGENT_MAX_CONCURRENT: intFromEnv.default(5),
   SKILL_MARKETPLACE_ENABLED: boolFromEnv.default(true),
+  // Phase 13: Knowledge Base
+  KNOWLEDGE_BASE_ENABLED: boolFromEnv.default(false),
+  NOTION_API_KEY: z.string().default(""),
+  NOTION_DATABASE_IDS: z.string().default(""),
+  OBSIDIAN_VAULT_PATH: z.string().default(""),
+  OCR_ENABLED: boolFromEnv.default(false),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
