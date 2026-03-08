@@ -199,6 +199,80 @@ const ConfigSchema = z.object({
   PUSH_QUIET_HOURS_END: z.string().default("07:00"),
   PUSH_MAX_DAILY_LOW_PRIORITY: intFromEnv.default(10),
   PUSH_DRY_RUN: boolFromEnv.default(false),
+  // Phase 17: Privacy Vault & Security Layer
+  VAULT_ENABLED: boolFromEnv.default(true),
+  VAULT_PATH: z.string().default(".edith/vault.enc"),
+  VAULT_AUTO_LOCK_MS: intFromEnv.default(30 * 60 * 1000), // 30 min
+  VAULT_AUDIT_LOG_PATH: z.string().default(".edith/audit.jsonl"),
+  // Phase 18: Social & Relationship Memory
+  PEOPLE_GRAPH_ENABLED: boolFromEnv.default(true),
+  PEOPLE_EXTRACTION_ENABLED: boolFromEnv.default(true),
+  DORMANT_CONTACT_DAYS: intFromEnv.default(90),
+  // Phase 19: Dev & Code Assistant
+  DEV_MODE_ENABLED: boolFromEnv.default(false),
+  GIT_COMMIT_AUTO_STAGE: boolFromEnv.default(false),
+  // Phase 20: HUD Overlay
+  HUD_ENABLED: boolFromEnv.default(false),
+  HUD_POSITION: z.enum(["top-right", "top-left", "bottom-right", "bottom-left"]).default("top-right"),
+  HUD_WIDTH: intFromEnv.default(360),
+  HUD_OPACITY: floatFromEnv.default(0.9),
+  HUD_CLICK_THROUGH: boolFromEnv.default(true),
+  HUD_HOTKEY: z.string().default("Ctrl+Shift+E"),
+  HUD_THEME: z.enum(["arc-reactor", "minimal", "stealth"]).default("arc-reactor"),
+  HUD_CARD_TTL_MS: intFromEnv.default(30_000),
+  HUD_MAX_NOTIFICATIONS: intFromEnv.default(5),
+  // Phase 21: Emotional Intelligence
+  EMOTION_ENABLED: boolFromEnv.default(true),
+  EMOTION_WINDOW_SIZE: intFromEnv.default(10),
+  EMOTION_SESSION_TTL_MS: intFromEnv.default(4 * 60 * 60 * 1000), // 4 hours
+  EMOTION_WELLNESS_ENABLED: boolFromEnv.default(true),
+  EMOTION_STRESS_THRESHOLD: floatFromEnv.default(0.65),
+  EMOTION_BURNOUT_HOURS: intFromEnv.default(4),
+  // Phase 22: Autonomous Mission
+  MISSION_ENABLED: boolFromEnv.default(true),
+  MISSION_TOKEN_BUDGET: intFromEnv.default(200_000),
+  MISSION_TIME_BUDGET_MS: intFromEnv.default(4 * 60 * 60 * 1000), // 4 hours
+  MISSION_API_CALL_BUDGET: intFromEnv.default(500),
+  MISSION_CHECKPOINT_INTERVAL_MS: intFromEnv.default(15 * 60 * 1000), // 15 min
+  MISSION_DEAD_MAN_SWITCH_MS: intFromEnv.default(30 * 60 * 1000), // 30 min
+  MISSION_MAX_RETRIES: intFromEnv.default(3),
+  MISSION_MAX_CONCURRENT: intFromEnv.default(2),
+  // Phase 23: Hardware Bridge
+  HARDWARE_ENABLED: boolFromEnv.default(false),
+  HARDWARE_SCAN_ON_STARTUP: boolFromEnv.default(true),
+  HARDWARE_SERIAL_BAUD_RATE: intFromEnv.default(115200),
+  HARDWARE_MQTT_BROKER: z.string().default(""),
+  HARDWARE_MQTT_PORT: intFromEnv.default(1883),
+  HARDWARE_BLE_ENABLED: boolFromEnv.default(false),
+  HARDWARE_DDC_ENABLED: boolFromEnv.default(false),
+  HARDWARE_OCTOPRINT_URL: z.string().default(""),
+  HARDWARE_OCTOPRINT_API_KEY: z.string().default(""),
+  // Phase 24: Self-Improvement
+  SELF_IMPROVEMENT_ENABLED: boolFromEnv.default(true),
+  SELF_IMPROVEMENT_ANALYSIS_INTERVAL_MS: intFromEnv.default(7 * 24 * 60 * 60 * 1000), // weekly
+  SELF_IMPROVEMENT_AUTO_APPLY_THRESHOLD: floatFromEnv.default(0.8),
+  SELF_IMPROVEMENT_MAX_PROMPT_VERSIONS: intFromEnv.default(30),
+  SELF_IMPROVEMENT_SKILL_UNUSED_DAYS: intFromEnv.default(60),
+  // Phase 25: Digital Twin / Simulation
+  SIMULATION_ENABLED: boolFromEnv.default(true),
+  SIMULATION_SNAPSHOT_MAX: intFromEnv.default(50),
+  SIMULATION_SNAPSHOT_TTL_DAYS: intFromEnv.default(7),
+  SIMULATION_AUTO_PREVIEW_DESTRUCTIVE: boolFromEnv.default(true),
+  SIMULATION_SANDBOX_ENABLED: boolFromEnv.default(false),
+  // Phase 26: Iron Legion (Multi-Instance)
+  LEGION_ENABLED: boolFromEnv.default(false),
+  LEGION_ROLE: z.enum(["primary", "research", "code", "comm", "custom"]).default("primary"),
+  LEGION_INSTANCE_ID: z.string().default("edith-primary"),
+  LEGION_AUTH_SECRET: z.string().default(""),
+  LEGION_PEER_URLS: z.string().default(""),
+  LEGION_SYNC_INTERVAL_MS: intFromEnv.default(5_000),
+  // Phase 27: Cross-Device Mesh
+  CROSS_DEVICE_ENABLED: boolFromEnv.default(false),
+  CROSS_DEVICE_SYNC_URL: z.string().default(""),
+  CROSS_DEVICE_DEVICE_ID: z.string().default(""),
+  CROSS_DEVICE_SYNC_INTERVAL_MS: intFromEnv.default(3_000),
+  CROSS_DEVICE_PRESENCE_TTL_MS: intFromEnv.default(30_000),
+  CROSS_DEVICE_SYNC_ENCRYPTION_KEY: z.string().default(""),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)

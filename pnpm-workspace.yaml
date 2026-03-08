@@ -1,5 +1,6 @@
 packages:
-  - apps/*
+  - apps/desktop
+  # - apps/mobile  (excluded: expo-device version conflict)
 
 ignoredBuiltDependencies:
   - '@prisma/client'

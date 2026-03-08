@@ -32,8 +32,30 @@ export interface CamelCheckResult {
   reason?: string
 }
 
+/** Ephemeral secret generated at module load when EDITH_CAPABILITY_SECRET is not set. */
+const EPHEMERAL_SECRET = crypto.randomBytes(32).toString("hex")
+
+/** Whether this process has already warned about using the ephemeral secret. */
+let _warnedAboutEphemeral = false
+
+/**
+ * Returns the HMAC secret used to sign/verify capability tokens.
+ * Priority: env var → per-process random secret (with one-time warning).
+ * NEVER falls back to a known public default.
+ */
 function getCapabilitySecret(): string {
-  return process.env.EDITH_CAPABILITY_SECRET?.trim() || "edith-local-dev-capability-secret"
+  const envSecret = process.env.EDITH_CAPABILITY_SECRET?.trim()
+  if (envSecret) return envSecret
+
+  if (!_warnedAboutEphemeral) {
+    _warnedAboutEphemeral = true
+    log.warn(
+      "EDITH_CAPABILITY_SECRET is not set — using ephemeral random secret. " +
+      "Capability tokens will NOT survive process restarts. " +
+      "Set EDITH_CAPABILITY_SECRET in .env for persistent tokens.",
+    )
+  }
+  return EPHEMERAL_SECRET
 }
 
 function uniqueTaintSources(taintedSources: TaintSource[]): TaintSource[] {

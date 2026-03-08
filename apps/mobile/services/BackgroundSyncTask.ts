@@ -36,6 +36,7 @@ import * as TaskManager from "expo-task-manager"
 import * as SecureStore from "expo-secure-store"
 import NetInfo from "@react-native-community/netinfo"
 import AsyncStorage from "@react-native-async-storage/async-storage"
+import { offlineQueue } from "./OfflineQueue"
 
 /** Identifier unik untuk background task — harus konsisten */
 export const BACKGROUND_SYNC_TASK_ID = "com.edith.background-sync"
@@ -80,9 +81,10 @@ async function performSync(): Promise<BackgroundTask.BackgroundTaskResult> {
   }
 
   // 2. Get credentials dari secure store
-  const [authToken, rawGatewayUrl] = await Promise.all([
+  const [authToken, rawGatewayUrl, userId] = await Promise.all([
     SecureStore.getItemAsync("edith_auth_token"),
     SecureStore.getItemAsync("edith_gateway_url"),
+    SecureStore.getItemAsync("edith_user_id"),
   ])
 
   if (!authToken || !rawGatewayUrl) {
@@ -96,13 +98,35 @@ async function performSync(): Promise<BackgroundTask.BackgroundTaskResult> {
     .replace("wss://", "https://")
     .replace("/ws", "")
 
-  // 4. Get lastSyncAt
+  // 4. Flush any queued offline messages via HTTP POST (no active WebSocket in background)
+  if (userId) {
+    const httpSend = (msg: string): void => {
+      // Fire-and-forget HTTP delivery — errors are non-fatal for the sync task
+      void fetch(`${httpUrl}/api/message`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+        },
+        body: msg,
+        signal: AbortSignal.timeout(15_000),
+      }).catch((err: unknown) => {
+        console.warn("[BackgroundSync] Offline queue HTTP delivery failed:", err)
+      })
+    }
+
+    await offlineQueue.flush(httpSend, userId).catch((err: unknown) => {
+      console.warn("[BackgroundSync] Offline queue flush failed:", err)
+    })
+  }
+
+  // 5. Get lastSyncAt
   const lastSyncAt = await AsyncStorage.getItem(LAST_SYNC_KEY)
   const since =
     lastSyncAt ??
     new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
 
-  // 5. Fetch delta dari gateway
+  // 6. Fetch delta dari gateway
   let response: Response
   try {
     response = await fetch(
@@ -128,7 +152,7 @@ async function performSync(): Promise<BackgroundTask.BackgroundTaskResult> {
     syncedAt: string
   }
 
-  // 6. Cache synced data ke AsyncStorage
+  // 7. Cache synced data ke AsyncStorage
   await Promise.all([
     AsyncStorage.setItem(LAST_SYNC_KEY, data.syncedAt),
     AsyncStorage.setItem("edith_widget_data", JSON.stringify(data.widgetData)),

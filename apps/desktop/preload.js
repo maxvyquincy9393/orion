@@ -29,5 +29,17 @@ contextBridge.exposeInMainWorld("edith", {
   },
 
   removeAllListeners: (channel) =>
-    ipcRenderer.removeAllListeners(channel)
+    ipcRenderer.removeAllListeners(channel),
+
+  saveCredentials: (data) =>
+    ipcRenderer.invoke("oobe:save-credentials", data),
+
+  loadCredentials: () =>
+    ipcRenderer.invoke("oobe:load-credentials"),
+
+  saveSettings: (settings) =>
+    ipcRenderer.invoke("settings:save", settings),
+
+  loadSettings: () =>
+    ipcRenderer.invoke("settings:load"),
 })

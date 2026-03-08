@@ -18,7 +18,28 @@
       "Bash(pnpm approve-builds:*)",
       "Read(//c/Users/test/OneDrive/Desktop/EDITH/src/config//**)",
       "Read(//c/Users/test/OneDrive/Desktop/EDITH/src//**)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(grep:*)",
+      "Bash(npx tsc:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if k in [''plugins'',''mcpServers'',''installedPlugins'']}, indent=2\\)\\)\")",
+      "Bash(npm install:*)",
+      "Bash(python3:*)",
+      "Bash(npm:*)",
+      "Bash(pnpm install:*)",
+      "Bash(claude mcp:*)",
+      "Bash(npx electron:*)",
+      "Bash(npx prisma:*)",
+      "Bash(npx vitest:*)",
+      "Bash(echo \"Done: $?\")",
+      "Read(//tmp/**)",
+      "Bash(wc:*)",
+      "Bash(do:*)",
+      "Read(//c/Users/test/OneDrive/Desktop/EDITH/**)",
+      "Bash(fi)",
+      "Bash(done)",
+      "Bash(ls -lh src/memory/knowledge/connectors/*.ts)",
+      "Bash(ls -lh src/calendar/*.ts)",
+      "Bash(ls -lh src/memory/people/*.ts)"
     ]
   }
 }

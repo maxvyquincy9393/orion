@@ -59,6 +59,19 @@ export type EDITHEvent =
     type: "system.heartbeat"
     timestamp: number
   }
+  | {
+    type: "email.draft.created"
+    draftId: string
+    to: string[]
+    subject: string
+    bodyPreview: string
+  }
+  | {
+    type: "email.high_importance"
+    emailId: string
+    from: string
+    subject: string
+  }
 
 class EDITHEventBus extends EventEmitter {
   constructor() {

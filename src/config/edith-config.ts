@@ -1,3 +1,14 @@
+/**
+ * @file edith-config.ts
+ * @description Loads, validates, and saves edith.json — the single source of truth for EDITH
+ * configuration including credentials, features, channels, and identity.
+ *
+ * ARCHITECTURE / INTEGRATION:
+ *   - Read at startup via loadEDITHConfig() before service init
+ *   - mergeEdithJsonCredentials() in src/config.ts overlays credentials onto env-parsed config
+ *   - Electron OOBE wizard writes to edith.json via IPC → main.js → saveEDITHConfig()
+ *   - Desktop users never need .env; server/Docker users keep using .env normally (backward-compat)
+ */
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -6,6 +17,49 @@ import { z } from "zod"
 import { createLogger } from "../logger.js"
 
 const log = createLogger("config.edith-config")
+
+/** All API keys and secret tokens — written by OOBE wizard, read at startup. */
+const CredentialsSchema = z.object({
+  GROQ_API_KEY: z.string().default(""),
+  ANTHROPIC_API_KEY: z.string().default(""),
+  OPENAI_API_KEY: z.string().default(""),
+  GEMINI_API_KEY: z.string().default(""),
+  OPENROUTER_API_KEY: z.string().default(""),
+  OLLAMA_BASE_URL: z.string().default(""),
+  TELEGRAM_BOT_TOKEN: z.string().default(""),
+  TELEGRAM_CHAT_ID: z.string().default(""),
+  DISCORD_BOT_TOKEN: z.string().default(""),
+  DISCORD_CHANNEL_ID: z.string().default(""),
+  WHATSAPP_CLOUD_ACCESS_TOKEN: z.string().default(""),
+  WHATSAPP_CLOUD_PHONE_NUMBER_ID: z.string().default(""),
+  WHATSAPP_CLOUD_VERIFY_TOKEN: z.string().default(""),
+  GMAIL_CLIENT_ID: z.string().default(""),
+  GMAIL_CLIENT_SECRET: z.string().default(""),
+  GMAIL_REFRESH_TOKEN: z.string().default(""),
+  GMAIL_USER_EMAIL: z.string().default(""),
+  NOTION_API_KEY: z.string().default(""),
+}).default({
+  GROQ_API_KEY: "", ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "", GEMINI_API_KEY: "",
+  OPENROUTER_API_KEY: "", OLLAMA_BASE_URL: "", TELEGRAM_BOT_TOKEN: "", TELEGRAM_CHAT_ID: "",
+  DISCORD_BOT_TOKEN: "", DISCORD_CHANNEL_ID: "", WHATSAPP_CLOUD_ACCESS_TOKEN: "",
+  WHATSAPP_CLOUD_PHONE_NUMBER_ID: "", WHATSAPP_CLOUD_VERIFY_TOKEN: "",
+  GMAIL_CLIENT_ID: "", GMAIL_CLIENT_SECRET: "", GMAIL_REFRESH_TOKEN: "",
+  GMAIL_USER_EMAIL: "", NOTION_API_KEY: "",
+})
+
+export type CredentialsConfig = z.infer<typeof CredentialsSchema>
+
+/** Feature flags — toggled in OOBE wizard and Settings page. */
+const FeaturesSchema = z.object({
+  voice: z.boolean().default(false),
+  knowledgeBase: z.boolean().default(false),
+  computerUse: z.boolean().default(true),
+  email: z.boolean().default(false),
+  calendar: z.boolean().default(false),
+  sms: z.boolean().default(false),
+}).default({ voice: false, knowledgeBase: false, computerUse: true, email: false, calendar: false, sms: false })
+
+export type FeaturesConfig = z.infer<typeof FeaturesSchema>
 
 const ChannelPolicySchema = z.enum(["pairing", "allowlist", "open"])
 
@@ -214,6 +268,8 @@ const EDITHConfigSchema = z.object({
   telemetry: TelemetrySchema,
   update: UpdateSchema,
   knowledgeBase: KnowledgeBaseSchema,
+  credentials: CredentialsSchema,
+  features: FeaturesSchema,
 })
 
 export type EDITHConfig = z.infer<typeof EDITHConfigSchema>
@@ -257,4 +313,44 @@ export function getEDITHConfig(): EDITHConfig {
  */
 export function resetEDITHConfigCache(): void {
   cachedConfig = null
+}
+
+/**
+ * Persist a partial update to edith.json and invalidate the cache.
+ * Merges deeply into the existing file so unrelated sections are preserved.
+ * @param partial - Partial EDITHConfig fields to merge into edith.json
+ */
+export async function saveEDITHConfig(partial: Partial<EDITHConfig>): Promise<void> {
+  const configPath = path.resolve(process.cwd(), "edith.json")
+  let existing: Record<string, unknown> = {}
+  try {
+    const raw = await fs.readFile(configPath, "utf-8")
+    existing = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    // File doesn't exist yet — start fresh
+  }
+
+  // Deep merge: for each top-level key in partial, merge objects; overwrite primitives
+  for (const [key, value] of Object.entries(partial)) {
+    if (value !== null && typeof value === "object" && !Array.isArray(value) && typeof existing[key] === "object" && existing[key] !== null) {
+      existing[key] = { ...(existing[key] as Record<string, unknown>), ...(value as Record<string, unknown>) }
+    } else {
+      existing[key] = value
+    }
+  }
+
+  await fs.writeFile(configPath, JSON.stringify(existing, null, 2), "utf-8")
+  // Invalidate cache so next loadEDITHConfig() re-reads the file
+  cachedConfig = null
+  log.info("edith.json saved")
+}
+
+/**
+ * Get a single credential value from the loaded edith.json config.
+ * Falls back to empty string if config not yet loaded or key is absent.
+ * @param key - Key from CredentialsConfig
+ * @returns Credential string value, or empty string
+ */
+export function getCredential(key: keyof CredentialsConfig): string {
+  return cachedConfig?.credentials?.[key] ?? ""
 }

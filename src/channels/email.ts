@@ -34,6 +34,7 @@ import { emailContentFilter, type RawEmail } from "./email-filter.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
 import config from "../config.js"
+import { eventBus } from "../core/event-bus.js"
 
 const log = createLogger("channels.email")
 
@@ -107,16 +108,11 @@ export class EmailChannel implements BaseChannel {
   private pendingDrafts = new Map<string, EmailDraft>()
 
   /**
-   * TODO: Implement incremental polling
-   *
-   * Currently polls all unread emails on each cycle.
-   * For production: track lastCheckedAt and only fetch emails newer than that.
-   *
-   * Implementation:
-   *   - Add: private lastCheckedAt = new Date(0)
-   *   - Gmail: Use query `after:${lastCheckedAt.getTime() / 1000}`
-   *   - Outlook: Use filter `receivedDateTime gt ${lastCheckedAt.toISOString()}`
+   * Timestamp of the last successful inbox poll.
+   * Used for incremental polling — only emails received after this time are fetched.
+   * Initialized to epoch so the first poll fetches recent emails up to MAX_EMAILS_PER_POLL.
    */
+  private lastCheckedAt = new Date(0)
 
   /**
    * Polling interval for checking new emails (milliseconds).
@@ -258,9 +254,13 @@ export class EmailChannel implements BaseChannel {
 
     log.info("draft created, awaiting user confirmation", { draftId, to: draft.to })
 
-    // TODO: Send preview to user via ChannelManager
-    // This requires integration with ChannelManager.sendWithConfirm()
-    // For now, log the draft (will be completed in ChannelManager integration)
+    // Emit draft preview via event bus so ChannelManager can pick it up
+    eventBus.dispatch("email.draft.created", {
+      draftId,
+      to: draft.to,
+      subject: draft.subject,
+      bodyPreview: draft.body.slice(0, 200),
+    })
 
     return true
   }
@@ -315,6 +315,7 @@ export class EmailChannel implements BaseChannel {
    */
   private async pollInbox(): Promise<void> {
     try {
+      const pollStart = new Date()
       const emails = await this.fetchUnread()
 
       log.debug("inbox poll completed", { count: emails.length })
@@ -322,6 +323,9 @@ export class EmailChannel implements BaseChannel {
       for (const email of emails) {
         await this.processEmail(email)
       }
+
+      // Advance the cursor only after successful processing
+      this.lastCheckedAt = pollStart
     } catch (error) {
       log.error("inbox polling error", { error })
     }
@@ -360,8 +364,12 @@ export class EmailChannel implements BaseChannel {
       // Only notify user for high-importance emails
       if (importance === "high") {
         log.info("high-importance email received", { emailId: email.id, from: email.from })
-        // TODO: Send notification via ChannelManager
-        // await channelManager.send(userId, `New email from ${email.from}: ${email.subject}`)
+        // Emit high-importance email event for channel notification
+        eventBus.dispatch("email.high_importance", {
+          emailId: email.id,
+          from: email.from,
+          subject: email.subject,
+        })
       }
     } catch (error) {
       log.error("email processing failed", { emailId: email.id, error })
@@ -380,9 +388,12 @@ export class EmailChannel implements BaseChannel {
   private async classifyImportance(email: EmailMessage): Promise<"high" | "medium" | "low" | "spam"> {
     try {
       const prompt = `Classify this email's importance for the user:
+
+[UNTRUSTED CONTENT START]
 From: ${email.from}
 Subject: ${email.subject}
 Body: ${email.body.slice(0, 500)}
+[UNTRUSTED CONTENT END]
 
 Return ONLY one word: high, medium, low, or spam`
 
@@ -466,9 +477,11 @@ Return ONLY one word: high, medium, low, or spam`
       return []
     }
 
+    // Incremental fetch: only emails after the last poll (epoch on first run = all recent)
+    const afterUnixSec = Math.floor(this.lastCheckedAt.getTime() / 1000)
     const response = await this.gmailClient.users.messages.list({
       userId: "me",
-      q: "is:unread",
+      q: afterUnixSec > 0 ? `is:unread after:${afterUnixSec}` : "is:unread",
       maxResults: EmailChannel.MAX_EMAILS_PER_POLL,
     })
 
@@ -519,7 +532,8 @@ Return ONLY one word: high, medium, low, or spam`
    * Fetches unread emails from Outlook.
    */
   private async fetchUnreadOutlook(): Promise<EmailMessage[]> {
-    // TODO: Implement Outlook email fetching
+    // Outlook is not yet implemented — initOutlook() throws before this is reachable.
+    // Returns empty array as a safe fallback.
     return []
   }
 

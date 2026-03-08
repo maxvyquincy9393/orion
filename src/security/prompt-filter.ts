@@ -7,6 +7,42 @@ const SANITIZED_PREFIX = "[CONTENT SANITIZED] "
 const MAX_LOG_LENGTH = 50
 const AFFORDANCE_WARN_THRESHOLD = 0.55
 
+/**
+ * Maps Unicode homoglyphs (Cyrillic, Greek, zero-width chars, leetspeak digits)
+ * to their ASCII equivalents. Applied during DETECTION ONLY — the original text
+ * is preserved for output so legitimate content (e.g. math) is never corrupted.
+ *
+ * PAPER BASIS: Boucher et al. "Bad Characters: Imperceptible NLP Attacks"
+ *   arXiv:2106.09898 — homoglyph and invisible-char injection vectors
+ */
+const HOMOGLYPH_MAP: ReadonlyArray<[RegExp, string]> = [
+  [/[іΙ\u0456]/gu, "i"],   // Cyrillic і, Greek Ι
+  [/[оΟ\u043E]/gu, "o"],   // Cyrillic о, Greek Ο
+  [/[аΑ\u0430]/gu, "a"],   // Cyrillic а, Greek Α
+  [/[еΕ\u0435]/gu, "e"],   // Cyrillic е, Greek Ε
+  [/[\u0455]/gu, "s"],      // Cyrillic ѕ
+  [/[рΡ\u0440]/gu, "p"],   // Cyrillic р, Greek Ρ
+  [/[сС\u0441\u0421]/gu, "c"], // Cyrillic с, С
+  [/[уΥ\u0443]/gu, "y"],   // Cyrillic у, Greek Υ
+  [/[\u200b\u200c\u200d\ufeff]/gu, ""], // zero-width chars
+]
+
+/**
+ * Normalizes text for injection detection only.
+ * Applies NFKC normalization + homoglyph substitution to catch Unicode bypass
+ * attempts. The original text is NEVER modified by this function.
+ *
+ * @param text - Raw input text
+ * @returns Normalized lowercase text suitable for pattern matching
+ */
+function normalizeForDetection(text: string): string {
+  let normalized = text.normalize("NFKC")
+  for (const [pattern, replacement] of HOMOGLYPH_MAP) {
+    normalized = normalized.replace(pattern, replacement)
+  }
+  return normalized
+}
+
 interface RegexReplaceRule {
   pattern: RegExp
   replacement: string
@@ -105,8 +141,11 @@ function matchesAnyPattern(content: string, patterns: readonly RegExp[]): boolea
 }
 
 function detectInjection(content: string): DetectionResult {
+  // Normalize Unicode + substitute homoglyphs to defeat Cyrillic/Greek bypass attempts
+  const normalizedText = normalizeForDetection(content)
+
   for (const group of DETECTION_RULE_GROUPS) {
-    if (matchesAnyPattern(content, group.patterns)) {
+    if (matchesAnyPattern(normalizedText, group.patterns)) {
       return { detected: true, reason: group.reason }
     }
   }
@@ -123,7 +162,9 @@ function applyReplaceRules(content: string, rules: readonly RegexReplaceRule[]):
 }
 
 function sanitizeContent(content: string): string {
-  const structuredSanitized = applyReplaceRules(content, SANITIZE_STRUCTURE_RULES)
+  // Normalize Unicode (NFKC) before sanitization to match detection normalization
+  const normalized = content.normalize("NFKC")
+  const structuredSanitized = applyReplaceRules(normalized, SANITIZE_STRUCTURE_RULES)
   return applyReplaceRules(structuredSanitized, SANITIZE_DIRECT_INJECTION_RULES)
 }
 

@@ -475,3 +475,332 @@ model PushToken {
 
   @@index([userId])
 }
+
+/**
+ * Phase 18 — People graph: named individuals a user mentions or interacts with.
+ *
+ * Each Person is scoped to a userId (multi-tenant safe).
+ * communicationStyle is a JSON StyleProfile built by StyleLearner.
+ * embedding is an optional vector for similarity search.
+ */
+model Person {
+  id                 String              @id @default(cuid())
+  userId             String
+  name               String
+  aliases            Json                // string[] — alternate names / nicknames
+  relationship       String              @default("contact") // "manager" | "friend" | "family" | "colleague" | "contact"
+  context            String              @default("other")   // "work" | "personal" | "family" | "other"
+  birthday           DateTime?
+  notes              String              @default("")
+  communicationStyle Json?               // StyleProfile (see people-schema.ts)
+  firstSeen          DateTime            @default(now())
+  lastSeen           DateTime            @default(now())
+  interactionCount   Int                 @default(0)
+  embedding          Bytes?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  interactions       PersonInteraction[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([userId, lastSeen])
+}
+
+/**
+ * Phase 18 — A single recorded interaction with a Person.
+ *
+ * Interactions are either parsed from messages (type="mention")
+ * or explicitly logged by the user ("meeting", "call", etc.).
+ */
+model PersonInteraction {
+  id              String   @id @default(cuid())
+  personId        String
+  userId          String
+  date            DateTime @default(now())
+  type            String                          // "mention" | "meeting" | "call" | "email" | "plan"
+  topic           String   @default("")
+  sentiment       String   @default("neutral")    // "positive" | "neutral" | "negative"
+  channel         String   @default("chat")
+  summary         String   @default("")
+  sourceMessageId String?
+  createdAt       DateTime @default(now())
+  person          Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([personId])
+  @@index([userId, date])
+}
+
+// ─────────────────────────────────────────
+// Phase 20: HUD Overlay & Ambient Display
+// ─────────────────────────────────────────
+
+model HudCard {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String    // "calendar"|"weather"|"task"|"notification"|"status"
+  title     String
+  body      String?
+  priority  Int       @default(0)
+  dismissed Boolean   @default(false)
+  expiresAt DateTime?
+  metadata  Json?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, dismissed, expiresAt])
+}
+
+// ─────────────────────────────────────────
+// Phase 21: Emotional Intelligence & Adaptive Tone
+// ─────────────────────────────────────────
+
+/// Aggregated session-level emotion scores (raw per-turn scores are NOT persisted).
+model EmotionSession {
+  id           String   @id @default(cuid())
+  userId       String
+  joy          Float    @default(0)
+  sadness      Float    @default(0)
+  anger        Float    @default(0)
+  fear         Float    @default(0)
+  surprise     Float    @default(0)
+  disgust      Float    @default(0)
+  neutral      Float    @default(1)
+  dominant     String   @default("neutral")
+  sampleCount  Int      @default(0)
+  sessionStart DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+// ─────────────────────────────────────────
+// Phase 22: Autonomous Mission Mode
+// ─────────────────────────────────────────
+
+model Mission {
+  id            String    @id @default(cuid())
+  userId        String
+  title         String
+  goal          String
+  status        String    // planning|reviewing|executing|checkpointing|recovering|winding_down|reporting|delivered|cancelled
+  dag           Json      // array of MissionTask
+  progress      Json?
+  tokensBudget  Int
+  tokensUsed    Int       @default(0)
+  apiCallBudget Int
+  apiCallsUsed  Int       @default(0)
+  timeBudgetMs  Int
+  createdAt     DateTime  @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  checkpoints MissionCheckpoint[]
+  approvals   MissionApproval[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+model MissionCheckpoint {
+  id        String   @id @default(cuid())
+  missionId String
+  progress  Json
+  createdAt DateTime @default(now())
+
+  mission Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@index([missionId])
+}
+
+model MissionApproval {
+  id         String    @id @default(cuid())
+  missionId  String
+  taskId     String
+  action     String
+  reason     String
+  status     String    @default("pending") // pending|approved|rejected
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  mission Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@index([missionId, status])
+}
+
+// ─────────────────────────────────────────
+// Phase 23: Hardware & Physical World Bridge
+// ─────────────────────────────────────────
+
+model HardwareDevice {
+  id           String    @id @default(cuid())
+  userId       String
+  name         String
+  type         String    // "arduino"|"esp32"|"monitor"|"led"|"printer3d"|"sensor"|"relay"|"ble"
+  protocol     String    // "serial"|"mqtt"|"ble"|"ddc"|"http"|"gpio"
+  address      String    // COM port, MQTT topic, BLE UUID, IP, etc.
+  capabilities Json?
+  status       String    @default("unknown") // online|offline|unknown
+  confirmed    Boolean   @default(false)     // user confirmed first-use for physical safety
+  lastSeen     DateTime?
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, address])
+  @@index([userId, status])
+}
+
+model HardwareEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  deviceId  String
+  type      String   // "command"|"response"|"error"|"discovery"
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, createdAt])
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────────────────────────
+// Phase 24: Self-Improvement & Meta-Learning
+// ─────────────────────────────────────────
+
+model ImprovementSignal {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // "implicit_negative"|"explicit_negative"|"explicit_positive"|"skill_candidate"|"knowledge_gap"
+  messageId String?
+  topic     String?
+  evidence  String
+  processed Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, processed])
+  @@index([userId, type])
+}
+
+model PromptVersion {
+  id           String    @id @default(cuid())
+  userId       String
+  zone         String    // "behavior"|"style" (identity zone is frozen — never modified)
+  content      String
+  sha          String
+  changeReason String?
+  evidence     String?
+  active       Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, zone, active])
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────────────────────────
+// Phase 25: Digital Twin & Simulation Mode
+// ─────────────────────────────────────────
+
+model ActionSnapshot {
+  id           String    @id @default(cuid())
+  userId       String
+  actionType   String    // "file_write"|"git_push"|"email_send"|etc.
+  actionData   Json
+  snapshotData Json?     // captured state BEFORE the action
+  status       String    @default("pending") // pending|approved|executed|rolled_back
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  executedAt   DateTime?
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
+
+model ActionLogEntry {
+  id         String   @id @default(cuid())
+  userId     String
+  actionType String
+  actionData Json
+  snapshotId String?
+  undone     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────────────────────────
+// Phase 26: Collaborative EDITH (Iron Legion)
+// ─────────────────────────────────────────
+
+model LegionPeer {
+  id           String    @id @default(cuid())
+  instanceId   String    @unique
+  role         String    // primary|research|code|comm|custom
+  url          String
+  status       String    @default("unknown") // online|offline|unknown
+  capabilities Json?
+  lastPing     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model LegionTask {
+  id          String    @id @default(cuid())
+  originId    String    // instanceId of primary that created task
+  assignedTo  String    // instanceId of specialist
+  userId      String
+  taskType    String
+  payload     Json
+  status      String    @default("pending") // pending|running|completed|failed
+  result      Json?
+  error       String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([assignedTo, status])
+  @@index([userId, createdAt])
+}
+
+model SharedKnowledge {
+  id          String   @id @default(cuid())
+  publishedBy String   // instanceId of publishing peer
+  userId      String
+  title       String
+  content     String
+  tags        Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────
+// Phase 27: Cross-Device Mesh & Unified Gateway
+// ─────────────────────────────────────────
+
+model DevicePresence {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceId    String
+  deviceName  String?
+  platform    String?  // "desktop"|"mobile"|"tablet"|"watch"|"web"
+  gatewayId   String
+  isActive    Boolean  @default(false)
+  lastSeenAt  DateTime @default(now())
+  vectorClock Json?
+
+  @@unique([userId, deviceId])
+  @@index([userId, isActive])
+}
+
+model SyncEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceId    String
+  syncType    String   // "message"|"memory"|"hud_state"|"preferences"|"mood"|"mission"
+  payload     Json
+  vectorClock Json
+  applied     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([userId, applied])
+  @@index([userId, syncType, createdAt])
+}

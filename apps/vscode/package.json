@@ -1,0 +1,118 @@
+{
+  "name": "edith-vscode",
+  "displayName": "EDITH — AI Companion",
+  "description": "VS Code extension for EDITH: AI code assistant, PR review, doc generation, and test scaffolding.",
+  "version": "0.1.0",
+  "publisher": "edith-ai",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["AI", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "edith.reviewCode",
+        "title": "EDITH: Review Selected Code"
+      },
+      {
+        "command": "edith.generateDocs",
+        "title": "EDITH: Generate Documentation"
+      },
+      {
+        "command": "edith.generateTests",
+        "title": "EDITH: Generate Tests"
+      },
+      {
+        "command": "edith.explainCode",
+        "title": "EDITH: Explain Code"
+      },
+      {
+        "command": "edith.reviewPR",
+        "title": "EDITH: Review Current PR (Git)"
+      },
+      {
+        "command": "edith.suggestCommitMessage",
+        "title": "EDITH: Suggest Commit Message"
+      },
+      {
+        "command": "edith.chat",
+        "title": "EDITH: Open Chat Panel"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "edith-sidebar",
+          "title": "EDITH",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "edith-sidebar": [
+        {
+          "type": "webview",
+          "id": "edith.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "EDITH",
+      "properties": {
+        "edith.serverPort": {
+          "type": "number",
+          "default": 18789,
+          "description": "Port of the EDITH gateway server."
+        },
+        "edith.serverHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "Hostname of the EDITH gateway server."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "edith.reviewCode",
+          "when": "editorHasSelection",
+          "group": "edith"
+        },
+        {
+          "command": "edith.generateDocs",
+          "when": "editorHasSelection",
+          "group": "edith"
+        },
+        {
+          "command": "edith.generateTests",
+          "when": "editorHasSelection",
+          "group": "edith"
+        },
+        {
+          "command": "edith.explainCode",
+          "when": "editorHasSelection",
+          "group": "edith"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "watch": "tsc -watch -p tsconfig.json",
+    "package": "vsce package",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

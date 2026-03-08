@@ -29,6 +29,8 @@ import { causalGraph } from "../memory/causal-graph.js"
 import { sessionSummarizer } from "../memory/session-summarizer.js"
 import { filterPromptWithAffordance, type PromptSafetyResult } from "../security/prompt-filter.js"
 import { outputScanner, type OutputScanResult } from "../security/output-scanner.js"
+import { escalationTracker } from "../security/escalation-tracker.js"
+import { auditLog } from "../security/audit-log.js"
 import { sessionStore } from "../sessions/session-store.js"
 import { createLogger } from "../logger.js"
 import { responseCritic } from "./critic.js"
@@ -332,11 +334,51 @@ export async function processMessage(
   const { channel, sessionMode = "dm" } = options
 
   // Stage 1: Input safety
+
+  // Check multi-turn escalation state BEFORE running the filter so that a
+  // previously-blocked conversation is rejected immediately without wasting
+  // LLM credits or leaking information via error messages.
+  const escalationStatus = escalationTracker.check(userId)
+  if (escalationStatus.blocked) {
+    log.warn("message blocked by escalation tracker", {
+      userId,
+      channel,
+      score: escalationStatus.score.toFixed(3),
+    })
+    void auditLog.append({
+      tool: "prompt_filter",
+      argsHash: "",
+      userId,
+      channel,
+      result: "denied",
+      durationMs: 0,
+      reason: escalationStatus.reason,
+    }).catch((err) => log.warn("audit log append failed", { userId, err }))
+    return blockedResult()
+  }
+
   const inputSafety = await filterPromptWithAffordance(rawText, userId)
   if (!inputSafety.safe && inputSafety.affordance?.shouldBlock) {
     log.warn("message blocked by affordance checker", { userId, channel })
+    escalationTracker.record(userId, "injection_blocked")
+    void auditLog.append({
+      tool: "prompt_filter",
+      argsHash: "",
+      userId,
+      channel,
+      result: "denied",
+      durationMs: 0,
+      reason: inputSafety.reason,
+    }).catch((err) => log.warn("audit log append failed", { userId, err }))
     return blockedResult()
   }
+
+  // If the filter sanitized the input (partial match) without fully blocking it,
+  // accumulate a lower-weight escalation signal so repeated probes are caught.
+  if (!inputSafety.safe) {
+    escalationTracker.record(userId, "injection_sanitized")
+  }
+
   const safeText = inputSafety.sanitized
 
   // Stage 2: Persist user input and build retrieval context

@@ -6,6 +6,7 @@
 
 import fs from "node:fs/promises"
 import path from "node:path"
+import { existsSync } from "node:fs"
 
 import { prisma } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
@@ -25,7 +26,9 @@ import { localEmbedder } from "../memory/local-embedder.js"
 import { skillMarketplace } from "../skills/marketplace.js"
 import { syncScheduler } from "../memory/knowledge/sync-scheduler.js"
 import { loadEDITHConfig } from "../config/edith-config.js"
-import config from "../config.js"
+import config, { mergeEdithJsonCredentials } from "../config.js"
+import { vault } from "../security/vault.js"
+import { auditLog } from "../security/audit-log.js"
 
 const log = createLogger("startup")
 
@@ -63,6 +66,33 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   log.info("starting EDITH")
 
   await ensureWorkspaceStructure(workspaceDir)
+
+  // Overlay edith.json credentials onto runtime config before any service reads them
+  await mergeEdithJsonCredentials()
+
+  // Phase 17: Initialize vault (load from disk, unlock with stored passphrase if available)
+  try {
+    const vaultMetaPath = `${config.VAULT_PATH}.meta`
+    if (existsSync(vaultMetaPath)) {
+      const passphrase = process.env.EDITH_VAULT_PASSPHRASE?.trim()
+      if (passphrase) {
+        await vault.unlock(passphrase)
+        log.info("vault loaded and unlocked")
+        // Wire vault HMAC key to audit log for tamper-evident chaining
+        const hmacKey = await vault.get("__audit_hmac_key__").catch(() => undefined)
+        if (hmacKey) {
+          auditLog.setHmacKey(hmacKey)
+          log.debug("audit log HMAC key loaded from vault")
+        }
+      } else {
+        log.info("vault not yet unlocked — no EDITH_VAULT_PASSPHRASE in env")
+      }
+    } else {
+      log.info("vault not yet created — skipping load")
+    }
+  } catch (vaultError) {
+    log.warn("vault load failed — secrets will not be resolved", { error: String(vaultError) })
+  }
 
   await prisma
     .$connect()
@@ -152,6 +182,8 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
     if (config.KNOWLEDGE_BASE_ENABLED) {
       syncScheduler.stop()
     }
+    // Phase 17: Lock vault on shutdown
+    vault.lock()
     // Shutdown MCP clients
     await mcpClient.shutdown().catch((err) => log.warn("MCP shutdown error", err))
     await prisma.$disconnect()

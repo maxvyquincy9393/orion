@@ -32,6 +32,34 @@ const log = createLogger("browser.recipe-engine")
 
 const RECIPES_DIR = ".edith/recipes"
 
+/** Maximum wall-clock time allowed for a single recipe execution before aborting. */
+const RECIPE_EXECUTION_TIMEOUT_MS = 60_000
+
+/**
+ * Lowercase substrings that indicate a CAPTCHA or bot-challenge page.
+ * Checked against page title + body text returned by the browser tool.
+ */
+const CAPTCHA_INDICATORS = [
+  "captcha",
+  "i am not a robot",
+  "i'm not a robot",
+  "verify you are human",
+  "cloudflare",
+  "just a moment",
+  "access denied",
+  "challenge",
+  "bot detection",
+]
+
+/**
+ * Returns true when the page content string contains a known CAPTCHA / bot-challenge signal.
+ * @param pageContent - Raw text or JSON string returned by the browser tool after navigation.
+ */
+function detectCaptcha(pageContent: string): boolean {
+  const lower = pageContent.toLowerCase()
+  return CAPTCHA_INDICATORS.some((indicator) => lower.includes(indicator))
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** A single step in an automation recipe */
@@ -200,10 +228,43 @@ export class RecipeEngine {
   async execute(recipe: Recipe, inputs: Record<string, string>): Promise<string> {
     log.info("recipe execution started", { id: recipe.id, name: recipe.name })
 
+    const abortController = new AbortController()
+    const timeoutHandle = setTimeout(() => {
+      abortController.abort(new Error("Recipe execution timed out"))
+    }, RECIPE_EXECUTION_TIMEOUT_MS)
+
+    try {
+      return await this.runSteps(recipe, inputs, abortController.signal)
+    } finally {
+      clearTimeout(timeoutHandle)
+    }
+  }
+
+  /**
+   * Internal step runner, separated so the AbortController timeout wrapper in
+   * `execute()` stays clean.
+   *
+   * @param recipe - Recipe being executed
+   * @param inputs - User-supplied substitution values
+   * @param signal - AbortSignal from the circuit-breaker timeout
+   * @returns Formatted execution summary
+   */
+  private async runSteps(
+    recipe: Recipe,
+    inputs: Record<string, string>,
+    signal: AbortSignal,
+  ): Promise<string> {
     const results: string[] = []
     results.push(`🍳 Running recipe: **${recipe.name}**`)
 
     for (const step of recipe.steps) {
+      // Circuit breaker: abort if timeout fired between steps
+      if (signal.aborted) {
+        log.warn("recipe aborted by circuit breaker", { id: recipe.id, step: step.action })
+        results.push(`  ⏱️ Recipe timed out (>${RECIPE_EXECUTION_TIMEOUT_MS / 1000}s). Stopping.`)
+        break
+      }
+
       // Substitute placeholders in params
       const resolvedParams = this.resolveParams(step.params, inputs)
       results.push(`  ⏳ ${step.description}`)
@@ -223,6 +284,17 @@ export class RecipeEngine {
         const result = await (executeFn as (args: Record<string, unknown>) => Promise<string>)(
           resolvedParams,
         )
+
+        // CAPTCHA / bot-challenge detection — bail out early rather than hanging
+        if (step.action === "navigate" && detectCaptcha(result as string)) {
+          log.warn("CAPTCHA detected after navigation, aborting recipe", {
+            id: recipe.id,
+            url: resolvedParams["url"],
+          })
+          results.push(`  🚫 CAPTCHA or bot-challenge detected. Recipe aborted to avoid hanging.`)
+          break
+        }
+
         // Try to parse JSON result and extract summary
         const summary = this.summarizeResult(result as string, step.action)
         results.push(`  ✅ ${summary}`)

@@ -5,11 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EDITH Setup</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -20,247 +16,98 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 40px;
+      padding: 32px 24px;
+      overflow-y: auto;
     }
 
-    .container {
-      max-width: 480px;
-      width: 100%;
-      text-align: center;
+    .container { max-width: 480px; width: 100%; text-align: center; }
+
+    .logo { font-size: 40px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .subtitle { font-size: 14px; color: #555; margin-bottom: 28px; }
+
+    .progress-dots { display: flex; justify-content: center; gap: 8px; margin-bottom: 28px; }
+    .progress-dot { width: 8px; height: 8px; border-radius: 50%; background: #282828; transition: background 0.2s; }
+    .progress-dot.active { background: #1d4ed8; }
+    .progress-dot.complete { background: #22c55e; }
+
+    .step { display: none; }
+    .step.active { display: block; }
+
+    .step-title { font-size: 22px; font-weight: 600; margin-bottom: 10px; }
+    .step-desc { font-size: 13px; color: #777; margin-bottom: 24px; line-height: 1.6; }
+
+    /* Card grids */
+    .card-grid { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; text-align: left; }
+    .card {
+      padding: 14px 16px; background: #141414; border: 2px solid #222;
+      border-radius: 10px; cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    }
+    .card:hover { border-color: #333; background: #1a1a1a; }
+    .card.selected { border-color: #1d4ed8; background: #0d1a3a; }
+    .card.toggle-card { cursor: pointer; user-select: none; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; }
+    .card-name { font-weight: 600; font-size: 14px; }
+    .card-desc { font-size: 12px; color: #666; margin-top: 3px; }
+    .badge {
+      display: inline-block; background: #22c55e; color: #000;
+      font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 8px;
     }
 
-    .logo {
-      font-size: 48px;
-      font-weight: 700;
-      color: #fff;
-      margin-bottom: 8px;
+    /* Toggle switch */
+    .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0; background: #333; border-radius: 20px;
+      cursor: pointer; transition: background 0.2s;
     }
-
-    .subtitle {
-      font-size: 16px;
-      color: #666;
-      margin-bottom: 40px;
+    .toggle-slider::before {
+      content: ""; position: absolute; width: 14px; height: 14px;
+      left: 3px; bottom: 3px; background: #aaa; border-radius: 50%; transition: transform 0.2s;
     }
+    .toggle input:checked + .toggle-slider { background: #1d4ed8; }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: #fff; }
 
-    .step {
-      display: none;
-    }
-
-    .step.active {
-      display: block;
-    }
-
-    .step-title {
-      font-size: 24px;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-
-    .step-desc {
-      font-size: 14px;
-      color: #888;
-      margin-bottom: 32px;
-      line-height: 1.6;
-    }
-
-    .provider-options {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-bottom: 32px;
-      text-align: left;
-    }
-
-    .provider-option {
-      padding: 16px;
-      background: #141414;
-      border: 2px solid #222;
-      border-radius: 12px;
-      cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-    }
-
-    .provider-option:hover {
-      border-color: #333;
-      background: #1a1a1a;
-    }
-
-    .provider-option.selected {
-      border-color: #1d4ed8;
-      background: #1a1a2e;
-    }
-
-    .provider-option input {
-      display: none;
-    }
-
-    .provider-name {
-      font-weight: 600;
-      font-size: 15px;
-      margin-bottom: 4px;
-    }
-
-    .provider-desc {
-      font-size: 12px;
-      color: #666;
-    }
-
-    .provider-badge {
-      display: inline-block;
-      background: #22c55e;
-      color: #000;
-      font-size: 10px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      margin-left: 8px;
-    }
-
-    .input-group {
-      margin-bottom: 20px;
-      text-align: left;
-    }
-
-    .input-label {
-      display: block;
-      font-size: 13px;
-      color: #888;
-      margin-bottom: 8px;
-    }
-
+    /* Inputs */
+    .input-group { margin-bottom: 16px; text-align: left; }
+    .input-label { display: block; font-size: 12px; color: #777; margin-bottom: 6px; }
     .input-field {
-      width: 100%;
-      padding: 12px 16px;
-      background: #141414;
-      border: 2px solid #222;
-      border-radius: 8px;
-      color: #e5e5e5;
-      font-size: 14px;
-      outline: none;
-      transition: border-color 0.15s;
+      width: 100%; padding: 11px 14px; background: #141414; border: 2px solid #222;
+      border-radius: 8px; color: #e5e5e5; font-size: 14px; outline: none; transition: border-color 0.15s;
     }
+    .input-field:focus { border-color: #1d4ed8; }
+    .input-link { display: block; font-size: 11px; color: #2563eb; margin-top: 6px; }
+    .input-hint { font-size: 11px; color: #555; margin-top: 4px; display: block; }
 
-    .input-field:focus {
-      border-color: #1d4ed8;
-    }
+    /* Collapsible credential area inside cards */
+    .card-creds { margin-top: 12px; display: none; }
+    .card.selected .card-creds { display: block; }
 
-    .input-link {
-      display: block;
-      font-size: 12px;
-      color: #1d4ed8;
-      margin-top: 8px;
-    }
-
-    .checkbox-group {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-
-    .checkbox-group input {
-      width: 18px;
-      height: 18px;
-      accent-color: #1d4ed8;
-    }
-
-    .checkbox-label {
-      font-size: 14px;
-    }
-
+    /* Buttons */
     .btn {
-      padding: 12px 32px;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s, opacity 0.15s;
+      padding: 11px 28px; border: none; border-radius: 8px; font-size: 14px;
+      font-weight: 600; cursor: pointer; transition: background 0.15s, opacity 0.15s;
     }
+    .btn-primary { background: #1d4ed8; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-secondary { background: #1e1e1e; color: #888; }
+    .btn-secondary:hover { background: #2a2a2a; color: #e5e5e5; }
+    .btn-group { display: flex; gap: 10px; justify-content: center; margin-top: 4px; }
 
-    .btn-primary {
-      background: #1d4ed8;
-      color: #fff;
-    }
+    .test-status { margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: 13px; display: none; }
+    .test-status.success { background: #0a2e0a; color: #22c55e; }
+    .test-status.error { background: #2e0a0a; color: #ef4444; }
 
-    .btn-primary:hover {
-      background: #2563eb;
+    /* Step 6 summary */
+    .summary-box {
+      background: #141414; border: 1px solid #222; border-radius: 10px;
+      padding: 16px; text-align: left; margin-bottom: 24px;
     }
-
-    .btn-primary:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .btn-secondary {
-      background: #222;
-      color: #888;
-    }
-
-    .btn-secondary:hover {
-      background: #333;
-      color: #e5e5e5;
-    }
-
-    .btn-group {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-    }
-
-    .test-status {
-      margin-top: 16px;
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 13px;
-    }
-
-    .test-status.success {
-      background: #0a2e0a;
-      color: #22c55e;
-    }
-
-    .test-status.error {
-      background: #2e0a0a;
-      color: #ef4444;
-    }
-
-    .progress-dots {
-      display: flex;
-      justify-content: center;
-      gap: 8px;
-      margin-bottom: 32px;
-    }
-
-    .progress-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #333;
-    }
-
-    .progress-dot.active {
-      background: #1d4ed8;
-    }
-
-    .progress-dot.complete {
-      background: #22c55e;
-    }
-
-    .install-btn {
-      display: inline-block;
-      background: #222;
-      color: #1d4ed8;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
-      margin-top: 12px;
-    }
-
-    .install-btn:hover {
-      background: #333;
-    }
+    .summary-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
+    .summary-row .label { color: #666; }
+    .summary-row .value { color: #e5e5e5; font-weight: 500; }
+    .summary-row .on { color: #22c55e; }
+    .summary-row .off { color: #555; }
   </style>
 </head>
 <body>
@@ -273,238 +120,471 @@
       <div class="progress-dot" id="dot-2"></div>
       <div class="progress-dot" id="dot-3"></div>
       <div class="progress-dot" id="dot-4"></div>
+      <div class="progress-dot" id="dot-5"></div>
+      <div class="progress-dot" id="dot-6"></div>
     </div>
 
+    <!-- Step 1: Welcome -->
     <div class="step active" id="step-1">
       <div class="step-title">Welcome to EDITH</div>
       <div class="step-desc">
         EDITH is a persistent AI companion that learns from your conversations,
-        proactively reaches out, and helps you stay on top of your tasks.
-        Let's get you set up.
+        proactively reaches out, and helps you stay on top of your tasks.<br><br>
+        Let's get you set up in about 2 minutes.
       </div>
       <button class="btn btn-primary" id="step1-next">Get Started</button>
     </div>
 
+    <!-- Step 2: LLM Provider -->
     <div class="step" id="step-2">
       <div class="step-title">Choose AI Provider</div>
-      <div class="step-desc">Select the AI engine you want to use.</div>
-      <div class="provider-options">
-        <label class="provider-option" data-provider="groq">
-          <input type="radio" name="provider" value="groq" />
-          <div class="provider-name">Groq <span class="provider-badge">Recommended</span></div>
-          <div class="provider-desc">Free, fast inference with Llama models</div>
-        </label>
-        <label class="provider-option" data-provider="ollama">
-          <input type="radio" name="provider" value="ollama" />
-          <div class="provider-name">Ollama</div>
-          <div class="provider-desc">Local, private, free - runs on your machine</div>
-        </label>
-        <label class="provider-option" data-provider="anthropic">
-          <input type="radio" name="provider" value="anthropic" />
-          <div class="provider-name">Anthropic</div>
-          <div class="provider-desc">Claude - best quality reasoning</div>
-        </label>
-        <label class="provider-option" data-provider="openai">
-          <input type="radio" name="provider" value="openai" />
-          <div class="provider-name">OpenAI</div>
-          <div class="provider-desc">GPT-4 - excellent for code and tasks</div>
-        </label>
+      <div class="step-desc">Select the brain for EDITH. You can change this later in Settings.</div>
+      <div class="card-grid" id="provider-grid">
+        <div class="card" data-provider="groq">
+          <div class="card-head">
+            <span class="card-name">Groq <span class="badge">Free & Fast</span></span>
+          </div>
+          <div class="card-desc">Lightning-fast Llama inference. Free API key available.</div>
+          <div class="card-creds">
+            <div class="input-group">
+              <label class="input-label">GROQ_API_KEY</label>
+              <input type="password" class="input-field" id="groq-key" placeholder="gsk_..." />
+              <a href="https://console.groq.com/keys" class="input-link" target="_blank">Get free key at console.groq.com</a>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="anthropic">
+          <div class="card-head">
+            <span class="card-name">Anthropic</span>
+          </div>
+          <div class="card-desc">Claude — best quality for complex reasoning and long context.</div>
+          <div class="card-creds">
+            <div class="input-group">
+              <label class="input-label">ANTHROPIC_API_KEY</label>
+              <input type="password" class="input-field" id="anthropic-key" placeholder="sk-ant-..." />
+              <a href="https://console.anthropic.com" class="input-link" target="_blank">Get key at console.anthropic.com</a>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="openai">
+          <div class="card-head">
+            <span class="card-name">OpenAI</span>
+          </div>
+          <div class="card-desc">GPT-4 — excellent for code, tasks, and tool use.</div>
+          <div class="card-creds">
+            <div class="input-group">
+              <label class="input-label">OPENAI_API_KEY</label>
+              <input type="password" class="input-field" id="openai-key" placeholder="sk-..." />
+              <a href="https://platform.openai.com/api-keys" class="input-link" target="_blank">Get key at platform.openai.com</a>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="gemini">
+          <div class="card-head">
+            <span class="card-name">Gemini</span>
+          </div>
+          <div class="card-desc">Google Gemini — great for multimodal and code.</div>
+          <div class="card-creds">
+            <div class="input-group">
+              <label class="input-label">GEMINI_API_KEY</label>
+              <input type="password" class="input-field" id="gemini-key" placeholder="AIza..." />
+              <a href="https://aistudio.google.com/app/apikey" class="input-link" target="_blank">Get key at aistudio.google.com</a>
+            </div>
+          </div>
+        </div>
+        <div class="card" data-provider="ollama">
+          <div class="card-head">
+            <span class="card-name">Ollama <span class="badge" style="background:#1d4ed8;color:#fff;">Local</span></span>
+          </div>
+          <div class="card-desc">100% private, runs on your machine. Requires Ollama installed.</div>
+          <div class="card-creds">
+            <div class="input-group">
+              <label class="input-label">Ollama URL</label>
+              <input type="text" class="input-field" id="ollama-url" placeholder="http://localhost:11434" value="http://localhost:11434" />
+              <a href="https://ollama.ai" class="input-link" target="_blank">Download Ollama at ollama.ai</a>
+            </div>
+          </div>
+        </div>
       </div>
+      <div id="test-status-2" class="test-status"></div>
       <div class="btn-group">
         <button class="btn btn-secondary" id="step2-back">Back</button>
-        <button class="btn btn-primary" id="step2-next" disabled>Continue</button>
+        <button class="btn btn-primary" id="step2-test" disabled>Test &amp; Continue</button>
       </div>
     </div>
 
+    <!-- Step 3: Channels -->
     <div class="step" id="step-3">
-      <div class="step-title" id="credentials-title">Enter Credentials</div>
-      <div class="step-desc" id="credentials-desc">Configure your AI provider.</div>
-      <div id="credentials-form"></div>
+      <div class="step-title">Choose Channels</div>
+      <div class="step-desc">How do you want to talk to EDITH? You can enable multiple channels.</div>
+      <div class="card-grid">
+        <div class="card toggle-card" id="ch-telegram">
+          <div class="card-head">
+            <span class="card-name">Telegram <span class="badge">Recommended</span></span>
+            <label class="toggle"><input type="checkbox" id="ch-telegram-toggle" /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">Fast, free, works on all devices.</div>
+          <div class="card-creds" id="ch-telegram-creds" style="display:none;">
+            <div class="input-group">
+              <label class="input-label">Bot Token</label>
+              <input type="password" class="input-field" id="telegram-token" placeholder="123456:ABC..." />
+              <a href="https://t.me/BotFather" class="input-link" target="_blank">Create bot at @BotFather</a>
+            </div>
+            <div class="input-group">
+              <label class="input-label">Chat ID (your Telegram user ID)</label>
+              <input type="text" class="input-field" id="telegram-chatid" placeholder="123456789" />
+              <span class="input-hint">Send /start to @userinfobot to get your ID</span>
+            </div>
+          </div>
+        </div>
+        <div class="card toggle-card" id="ch-discord">
+          <div class="card-head">
+            <span class="card-name">Discord</span>
+            <label class="toggle"><input type="checkbox" id="ch-discord-toggle" /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">Use EDITH in a private Discord server.</div>
+          <div class="card-creds" id="ch-discord-creds" style="display:none;">
+            <div class="input-group">
+              <label class="input-label">Bot Token</label>
+              <input type="password" class="input-field" id="discord-token" placeholder="MTI..." />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Channel ID</label>
+              <input type="text" class="input-field" id="discord-channel" placeholder="123456789012345678" />
+            </div>
+          </div>
+        </div>
+        <div class="card toggle-card" id="ch-whatsapp">
+          <div class="card-head">
+            <span class="card-name">WhatsApp</span>
+            <label class="toggle"><input type="checkbox" id="ch-whatsapp-toggle" /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">WhatsApp Cloud API (requires Meta Business account).</div>
+          <div class="card-creds" id="ch-whatsapp-creds" style="display:none;">
+            <div class="input-group">
+              <label class="input-label">Access Token</label>
+              <input type="password" class="input-field" id="wa-token" placeholder="EAAx..." />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Phone Number ID</label>
+              <input type="text" class="input-field" id="wa-phone-id" placeholder="123..." />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Webhook Verify Token</label>
+              <input type="text" class="input-field" id="wa-verify" placeholder="my_verify_token" />
+            </div>
+          </div>
+        </div>
+        <div class="card toggle-card" id="ch-web">
+          <div class="card-head">
+            <span class="card-name">Web Chat only</span>
+            <label class="toggle"><input type="checkbox" id="ch-web-toggle" checked /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">Use this desktop app only — no external channels needed.</div>
+        </div>
+      </div>
       <div class="btn-group">
         <button class="btn btn-secondary" id="step3-back">Back</button>
-        <button class="btn btn-primary" id="step3-test">Test Connection</button>
+        <button class="btn btn-primary" id="step3-next">Continue</button>
       </div>
-      <div class="test-status" id="test-status" style="display: none;"></div>
     </div>
 
+    <!-- Step 4: Features -->
     <div class="step" id="step-4">
-      <div class="step-title">All Set!</div>
-      <div class="step-desc">
-        EDITH is ready to go. You can start chatting now.
-        The app will run in the system tray.
+      <div class="step-title">Features</div>
+      <div class="step-desc">Choose what EDITH can do. These can be toggled later in Settings.</div>
+      <div class="card-grid">
+        <div class="card toggle-card">
+          <div class="card-head">
+            <span class="card-name">Computer Use <span class="badge">Recommended</span></span>
+            <label class="toggle"><input type="checkbox" id="feat-computer" checked /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">Browse the web, open files, run scripts.</div>
+        </div>
+        <div class="card toggle-card">
+          <div class="card-head">
+            <span class="card-name">Voice (TTS/STT)</span>
+            <label class="toggle"><input type="checkbox" id="feat-voice" /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">Talk to EDITH with your microphone. Requires ~80MB model download on first use.</div>
+        </div>
+        <div class="card toggle-card" id="feat-kb-card">
+          <div class="card-head">
+            <span class="card-name">Knowledge Base</span>
+            <label class="toggle"><input type="checkbox" id="feat-kb" /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">Import Obsidian vault, Notion pages, or PDFs so EDITH can reference them.</div>
+          <div class="card-creds" id="feat-kb-creds" style="display:none;">
+            <div class="input-group">
+              <label class="input-label">Obsidian Vault Path (optional)</label>
+              <input type="text" class="input-field" id="kb-vault" placeholder="C:\Users\you\Documents\Obsidian" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Notion API Key (optional)</label>
+              <input type="password" class="input-field" id="kb-notion" placeholder="secret_..." />
+            </div>
+          </div>
+        </div>
+        <div class="card toggle-card">
+          <div class="card-head">
+            <span class="card-name">Email Integration</span>
+            <label class="toggle"><input type="checkbox" id="feat-email" /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">Read and send emails via Gmail (OAuth2 required).</div>
+        </div>
+        <div class="card toggle-card">
+          <div class="card-head">
+            <span class="card-name">Calendar Integration</span>
+            <label class="toggle"><input type="checkbox" id="feat-calendar" /><span class="toggle-slider"></span></label>
+          </div>
+          <div class="card-desc">See upcoming events and get proactive reminders.</div>
+        </div>
       </div>
-      <button class="btn btn-primary" id="step4-done">Start Chatting</button>
+      <div class="btn-group">
+        <button class="btn btn-secondary" id="step4-back">Back</button>
+        <button class="btn btn-primary" id="step4-next">Continue</button>
+      </div>
+    </div>
+
+    <!-- Step 5: Personal -->
+    <div class="step" id="step-5">
+      <div class="step-title">Personalize</div>
+      <div class="step-desc">A few quick questions so EDITH can address you properly.</div>
+      <div class="input-group" style="text-align:left;">
+        <label class="input-label">Your name (how EDITH calls you)</label>
+        <input type="text" class="input-field" id="title-word" placeholder="Sir" value="Sir" />
+        <span class="input-hint">Examples: Sir, Bro, Boss, Tuan — or your actual name</span>
+      </div>
+      <div class="input-group" style="text-align:left;">
+        <label class="input-label">Agent name</label>
+        <input type="text" class="input-field" id="agent-name" placeholder="EDITH" value="EDITH" />
+        <span class="input-hint">Leave as EDITH or pick your own</span>
+      </div>
+      <div class="btn-group" style="margin-top:8px;">
+        <button class="btn btn-secondary" id="step5-back">Back</button>
+        <button class="btn btn-primary" id="step5-next">Continue</button>
+      </div>
+    </div>
+
+    <!-- Step 6: Done -->
+    <div class="step" id="step-6">
+      <div class="step-title">You're all set 🚀</div>
+      <div class="step-desc">Here's a summary of your configuration:</div>
+      <div class="summary-box" id="summary"></div>
+      <button class="btn btn-primary" id="step6-done" style="width:100%;">Start EDITH</button>
     </div>
   </div>
 
   <script>
     let currentStep = 1
-    let selectedProvider = null
-    let credentials = {}
+    const TOTAL_STEPS = 6
 
-    const dots = [
-      document.getElementById("dot-1"),
-      document.getElementById("dot-2"),
-      document.getElementById("dot-3"),
-      document.getElementById("dot-4")
-    ]
-
-    function updateDots() {
-      dots.forEach((dot, i) => {
-        dot.className = "progress-dot"
-        if (i + 1 < currentStep) dot.classList.add("complete")
-        else if (i + 1 === currentStep) dot.classList.add("active")
-      })
+    // Accumulated data across all steps
+    const allData = {
+      credentials: {},
+      features: { computerUse: true, voice: false, knowledgeBase: false, email: false, calendar: false },
+      identity: { name: "EDITH", titleWord: "Sir" },
+      channels: {}
     }
 
-    function showStep(step) {
+    // ── Progress dots ──────────────────────────────────────────────
+    function updateDots() {
+      for (let i = 1; i <= TOTAL_STEPS; i++) {
+        const dot = document.getElementById(`dot-${i}`)
+        dot.className = "progress-dot"
+        if (i < currentStep) dot.classList.add("complete")
+        else if (i === currentStep) dot.classList.add("active")
+      }
+    }
+
+    function showStep(n) {
       document.querySelectorAll(".step").forEach(s => s.classList.remove("active"))
-      document.getElementById(`step-${step}`).classList.add("active")
-      currentStep = step
+      document.getElementById(`step-${n}`).classList.add("active")
+      currentStep = n
       updateDots()
     }
 
-    document.querySelectorAll(".provider-option").forEach(opt => {
-      opt.addEventListener("click", () => {
-        document.querySelectorAll(".provider-option").forEach(o => o.classList.remove("selected"))
-        opt.classList.add("selected")
-        opt.querySelector("input").checked = true
-        selectedProvider = opt.dataset.provider
-        document.getElementById("step2-next").disabled = false
+    // ── Step 2: Provider selection ─────────────────────────────────
+    let selectedProvider = null
+
+    document.querySelectorAll("#provider-grid .card").forEach(card => {
+      card.addEventListener("click", (e) => {
+        // Don't toggle if clicking inside a credential input
+        if (e.target.tagName === "INPUT" || e.target.tagName === "A") return
+        document.querySelectorAll("#provider-grid .card").forEach(c => c.classList.remove("selected"))
+        card.classList.add("selected")
+        selectedProvider = card.dataset.provider
+        document.getElementById("step2-test").disabled = false
       })
     })
 
-    document.getElementById("step1-next").addEventListener("click", () => {
-      showStep(2)
-    })
-
-    document.getElementById("step2-back").addEventListener("click", () => {
-      showStep(1)
-    })
-
-    document.getElementById("step2-next").addEventListener("click", () => {
-      renderCredentialsForm()
-      showStep(3)
-    })
-
-    document.getElementById("step3-back").addEventListener("click", () => {
-      showStep(2)
-    })
-
-    document.getElementById("step3-test").addEventListener("click", async () => {
-      const status = document.getElementById("test-status")
-      const btn = document.getElementById("step3-test")
+    document.getElementById("step2-test").addEventListener("click", async () => {
+      const btn = document.getElementById("step2-test")
+      const status = document.getElementById("test-status-2")
       btn.disabled = true
       btn.textContent = "Testing..."
+      status.style.display = "none"
 
-      credentials = collectCredentials()
+      const ok = await testProviderConnection()
 
-      const success = await testConnection()
-
-      status.style.display = "block"
-      if (success) {
-        status.className = "test-status success"
-        status.textContent = "Connection successful!"
-        setTimeout(() => showStep(4), 1000)
+      if (ok) {
+        collectProviderCredentials()
+        showStep(3)
       } else {
+        status.style.display = "block"
         status.className = "test-status error"
-        status.textContent = "Connection failed. Please check your credentials."
+        status.textContent = "Connection failed — check your key and try again."
         btn.disabled = false
-        btn.textContent = "Test Connection"
+        btn.textContent = "Test & Continue"
       }
     })
 
-    document.getElementById("step4-done").addEventListener("click", () => {
-      saveCredentials()
+    async function testProviderConnection() {
+      // Simulate latency
+      await new Promise(r => setTimeout(r, 800))
+      if (selectedProvider === "ollama") {
+        const url = document.getElementById("ollama-url").value.trim() || "http://localhost:11434"
+        // Can't do real fetch from renderer without nodeIntegration; accept if URL is non-empty
+        return url.length > 0
+      }
+      const keyMap = { groq: "groq-key", anthropic: "anthropic-key", openai: "openai-key", gemini: "gemini-key" }
+      const inputId = keyMap[selectedProvider]
+      const key = document.getElementById(inputId)?.value?.trim() || ""
+      return key.length > 8
+    }
+
+    function collectProviderCredentials() {
+      switch (selectedProvider) {
+        case "groq":
+          allData.credentials.GROQ_API_KEY = document.getElementById("groq-key").value.trim()
+          break
+        case "anthropic":
+          allData.credentials.ANTHROPIC_API_KEY = document.getElementById("anthropic-key").value.trim()
+          break
+        case "openai":
+          allData.credentials.OPENAI_API_KEY = document.getElementById("openai-key").value.trim()
+          break
+        case "gemini":
+          allData.credentials.GEMINI_API_KEY = document.getElementById("gemini-key").value.trim()
+          break
+        case "ollama":
+          allData.credentials.OLLAMA_BASE_URL = document.getElementById("ollama-url").value.trim()
+          break
+      }
+    }
+
+    // ── Step 3: Channels ───────────────────────────────────────────
+    function wireChannelToggle(id, credsId) {
+      const toggle = document.getElementById(`${id}-toggle`)
+      const creds = document.getElementById(credsId)
+      if (!toggle || !creds) return
+      toggle.addEventListener("change", () => {
+        creds.style.display = toggle.checked ? "block" : "none"
+      })
+    }
+    wireChannelToggle("ch-telegram", "ch-telegram-creds")
+    wireChannelToggle("ch-discord", "ch-discord-creds")
+    wireChannelToggle("ch-whatsapp", "ch-whatsapp-creds")
+
+    function collectChannelCredentials() {
+      if (document.getElementById("ch-telegram-toggle").checked) {
+        allData.credentials.TELEGRAM_BOT_TOKEN = document.getElementById("telegram-token").value.trim()
+        allData.credentials.TELEGRAM_CHAT_ID = document.getElementById("telegram-chatid").value.trim()
+      }
+      if (document.getElementById("ch-discord-toggle").checked) {
+        allData.credentials.DISCORD_BOT_TOKEN = document.getElementById("discord-token").value.trim()
+        allData.credentials.DISCORD_CHANNEL_ID = document.getElementById("discord-channel").value.trim()
+      }
+      if (document.getElementById("ch-whatsapp-toggle").checked) {
+        allData.credentials.WHATSAPP_CLOUD_ACCESS_TOKEN = document.getElementById("wa-token").value.trim()
+        allData.credentials.WHATSAPP_CLOUD_PHONE_NUMBER_ID = document.getElementById("wa-phone-id").value.trim()
+        allData.credentials.WHATSAPP_CLOUD_VERIFY_TOKEN = document.getElementById("wa-verify").value.trim()
+      }
+    }
+
+    // ── Step 4: Features ───────────────────────────────────────────
+    document.getElementById("feat-kb").addEventListener("change", () => {
+      const credsEl = document.getElementById("feat-kb-creds")
+      credsEl.style.display = document.getElementById("feat-kb").checked ? "block" : "none"
+    })
+
+    function collectFeatures() {
+      allData.features.computerUse = document.getElementById("feat-computer").checked
+      allData.features.voice = document.getElementById("feat-voice").checked
+      allData.features.knowledgeBase = document.getElementById("feat-kb").checked
+      allData.features.email = document.getElementById("feat-email").checked
+      allData.features.calendar = document.getElementById("feat-calendar").checked
+      if (allData.features.knowledgeBase) {
+        const vaultPath = document.getElementById("kb-vault").value.trim()
+        const notionKey = document.getElementById("kb-notion").value.trim()
+        if (vaultPath) allData.credentials.OBSIDIAN_VAULT_PATH = vaultPath
+        if (notionKey) allData.credentials.NOTION_API_KEY = notionKey
+      }
+    }
+
+    // ── Step 5: Identity ───────────────────────────────────────────
+    function collectIdentity() {
+      allData.identity.titleWord = document.getElementById("title-word").value.trim() || "Sir"
+      allData.identity.name = document.getElementById("agent-name").value.trim() || "EDITH"
+    }
+
+    // ── Step 6: Summary ────────────────────────────────────────────
+    function buildSummary() {
+      const providerName = { groq: "Groq", anthropic: "Anthropic", openai: "OpenAI", gemini: "Gemini", ollama: "Ollama (local)" }
+      const channelList = []
+      if (allData.credentials.TELEGRAM_BOT_TOKEN) channelList.push("Telegram")
+      if (allData.credentials.DISCORD_BOT_TOKEN) channelList.push("Discord")
+      if (allData.credentials.WHATSAPP_CLOUD_ACCESS_TOKEN) channelList.push("WhatsApp")
+      if (!channelList.length) channelList.push("Web Chat")
+
+      const on = (v) => v ? '<span class="on">ON</span>' : '<span class="off">OFF</span>'
+
+      document.getElementById("summary").innerHTML = `
+        <div class="summary-row"><span class="label">AI Provider</span><span class="value">${providerName[selectedProvider] || "—"}</span></div>
+        <div class="summary-row"><span class="label">Channels</span><span class="value">${channelList.join(", ")}</span></div>
+        <div class="summary-row"><span class="label">Computer Use</span><span class="value">${on(allData.features.computerUse)}</span></div>
+        <div class="summary-row"><span class="label">Voice</span><span class="value">${on(allData.features.voice)}</span></div>
+        <div class="summary-row"><span class="label">Knowledge Base</span><span class="value">${on(allData.features.knowledgeBase)}</span></div>
+        <div class="summary-row"><span class="label">Email</span><span class="value">${on(allData.features.email)}</span></div>
+        <div class="summary-row"><span class="label">Title Word</span><span class="value">${allData.identity.titleWord}</span></div>
+        <div class="summary-row"><span class="label">Agent Name</span><span class="value">${allData.identity.name}</span></div>
+      `
+    }
+
+    // ── Navigation wiring ──────────────────────────────────────────
+    document.getElementById("step1-next").addEventListener("click", () => showStep(2))
+    document.getElementById("step2-back").addEventListener("click", () => showStep(1))
+
+    document.getElementById("step3-back").addEventListener("click", () => showStep(2))
+    document.getElementById("step3-next").addEventListener("click", () => {
+      collectChannelCredentials()
+      showStep(4)
+    })
+
+    document.getElementById("step4-back").addEventListener("click", () => showStep(3))
+    document.getElementById("step4-next").addEventListener("click", () => {
+      collectFeatures()
+      showStep(5)
+    })
+
+    document.getElementById("step5-back").addEventListener("click", () => showStep(4))
+    document.getElementById("step5-next").addEventListener("click", () => {
+      collectIdentity()
+      buildSummary()
+      showStep(6)
+    })
+
+    document.getElementById("step6-done").addEventListener("click", async () => {
+      const btn = document.getElementById("step6-done")
+      btn.disabled = true
+      btn.textContent = "Saving..."
+      try {
+        await window.edith.saveCredentials(allData)
+      } catch (e) {
+        console.error("saveCredentials failed:", e)
+      }
       window.location.href = "index.html"
     })
-
-    function renderCredentialsForm() {
-      const form = document.getElementById("credentials-form")
-      const title = document.getElementById("credentials-title")
-      const desc = document.getElementById("credentials-desc")
-
-      switch (selectedProvider) {
-        case "groq":
-          title.textContent = "Groq API Key"
-          desc.textContent = "Get your free API key from console.groq.com"
-          form.innerHTML = `
-            <div class="input-group">
-              <label class="input-label">GROQ_API_KEY</label>
-              <input type="password" class="input-field" id="groq-key" placeholder="gsk_..." />
-              <a href="https://console.groq.com" target="_blank" class="input-link">Get API key from console.groq.com</a>
-            </div>
-          `
-          break
-        case "ollama":
-          title.textContent = "Ollama Setup"
-          desc.textContent = "Make sure Ollama is installed and running."
-          form.innerHTML = `
-            <div class="checkbox-group">
-              <input type="checkbox" id="ollama-installed" />
-              <label class="checkbox-label" for="ollama-installed">I have Ollama installed and running</label>
-            </div>
-            <a href="https://ollama.ai" target="_blank" class="install-btn">Download Ollama</a>
-          `
-          break
-        case "anthropic":
-          title.textContent = "Anthropic API Key"
-          desc.textContent = "Get your API key from console.anthropic.com"
-          form.innerHTML = `
-            <div class="input-group">
-              <label class="input-label">ANTHROPIC_API_KEY</label>
-              <input type="password" class="input-field" id="anthropic-key" placeholder="sk-ant-..." />
-              <a href="https://console.anthropic.com" target="_blank" class="input-link">Get API key from console.anthropic.com</a>
-            </div>
-          `
-          break
-        case "openai":
-          title.textContent = "OpenAI API Key"
-          desc.textContent = "Get your API key from platform.openai.com"
-          form.innerHTML = `
-            <div class="input-group">
-              <label class="input-label">OPENAI_API_KEY</label>
-              <input type="password" class="input-field" id="openai-key" placeholder="sk-..." />
-              <a href="https://platform.openai.com/api-keys" target="_blank" class="input-link">Get API key from platform.openai.com</a>
-            </div>
-          `
-          break
-      }
-    }
-
-    function collectCredentials() {
-      const creds = { provider: selectedProvider }
-      switch (selectedProvider) {
-        case "groq":
-          creds.GROQ_API_KEY = document.getElementById("groq-key")?.value || ""
-          break
-        case "ollama":
-          creds.OLLAMA_INSTALLED = document.getElementById("ollama-installed")?.checked || false
-          break
-        case "anthropic":
-          creds.ANTHROPIC_API_KEY = document.getElementById("anthropic-key")?.value || ""
-          break
-        case "openai":
-          creds.OPENAI_API_KEY = document.getElementById("openai-key")?.value || ""
-          break
-      }
-      return creds
-    }
-
-    async function testConnection() {
-      await new Promise(r => setTimeout(r, 1500))
-
-      if (selectedProvider === "ollama") {
-        return credentials.OLLAMA_INSTALLED
-      }
-
-      const key = credentials.GROQ_API_KEY || credentials.ANTHROPIC_API_KEY || credentials.OPENAI_API_KEY
-      return key && key.length > 10
-    }
-
-    function saveCredentials() {
-      console.log("Saving credentials:", credentials)
-    }
 
     updateDots()
   </script>

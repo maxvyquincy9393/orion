@@ -492,43 +492,104 @@ export class MemRLUpdater {
   }
 
   /**
-   * Estimate implicit reward from user context
-   * 
-   * Uses heuristics based on:
-   * - Reply length (engagement indicator)
-   * - Question presence (information seeking)
-   * - Follow-up depth (conversation continuity)
-   * 
+   * Estimate implicit reward from user follow-up using multi-signal fusion.
+   *
+   * Signals evaluated in priority order:
+   *   1. Explicit correction  → 0.05  (strong override — user said EDITH was wrong)
+   *   2. Repeat question      → 0.15  (user re-asked same thing — response failed)
+   *   3. Clarification req    → 0.25  (user didn't understand — response unclear)
+   *   4. Explicit positive    → 0.90  (thanks / mantap / exactly)
+   *   5. Short dismissal      → 0.35  (ok / oke / k — not engaged)
+   *   6. Follow-up question   → 0.60  (continuing conversation, neutral-positive)
+   *   7. Natural continuation → 0.65  (normal reply, engagement confirmed)
+   *   8. Default              → 0.45
+   *
+   * IMPORTANT: reply length alone is NOT a reward signal.
+   * A long reply may mean the user is confused, not satisfied.
+   * A question may mean EDITH failed to answer completely.
+   *
    * @param userReply - User's follow-up message
-   * @param previousResponseLength - Length of assistant's previous response
-   * @returns Estimated reward value (0-1)
+   * @param _previousResponseLength - Unused (kept for API compatibility)
+   * @param context - Optional context for repeat-question detection
+   * @returns Estimated reward in [0, 1]
    */
   estimateRewardFromContext(
     userReply: string | null,
     _previousResponseLength: number,
+    context?: { previousQuery?: string },
   ): number {
-    if (!userReply || userReply.trim().length < 10) {
-      // Short reply = low engagement
-      return 0.2
+    if (!userReply || userReply.trim().length === 0) {
+      return 0.2  // No reply = session ended or ignored
     }
 
-    if (userReply.length > 100) {
-      // Long detailed reply = high engagement
-      return 0.8
+    const reply = userReply.trim().toLowerCase()
+
+    // ── Signal 1: Explicit correction ────────────────────────────────
+    // User is explicitly saying EDITH gave the wrong answer.
+    const correctionRe = /\b(bukan itu|bukan maksudnya|bukan begitu|salah|keliru|tidak betul|tidak benar)\b|not what i (asked|meant|wanted|said)|that'?s? (wrong|incorrect|not right|not it|not what)|you'?re? wrong|wrong answer|incorrect answer|bukan gitu/
+    if (correctionRe.test(reply)) {
+      return 0.05
     }
 
-    if (userReply.includes("?")) {
-      // Question = information need satisfied
-      return 0.7
+    // ── Signal 2: Repeat question ─────────────────────────────────────
+    // User re-asked essentially the same question → response didn't help.
+    // Detection: Jaccard word overlap > 0.55 with previous query + is a question.
+    if (context?.previousQuery && reply.includes("?")) {
+      const stopWords = new Set(["yang", "apa", "gimana", "bagaimana", "kenapa", "mengapa", "the", "is", "are", "what", "how", "why", "when", "can", "do", "di", "ke", "dan", "atau"])
+      const toWords = (s: string) =>
+        s.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w))
+
+      const prevWords = new Set(toWords(context.previousQuery))
+      const curWords = new Set(toWords(reply))
+
+      if (prevWords.size > 0 && curWords.size > 0) {
+        const intersection = [...prevWords].filter(w => curWords.has(w)).length
+        const union = new Set([...prevWords, ...curWords]).size
+        const jaccard = intersection / union
+
+        if (jaccard > 0.55) {
+          return 0.15
+        }
+      }
     }
 
-    if (userReply.match(/\b(thanks|thank you|helpful|great|awesome)\b/i)) {
-      // Explicit positive feedback
-      return 0.9
+    // ── Signal 3: Clarification request ──────────────────────────────
+    // User didn't understand — EDITH's response was unclear or incomplete.
+    const clarificationRe = /\b(what do you mean|could you explain|don'?t understand|gak ngerti|ga ngerti|kurang jelas|explain more|be more specific|more detail|could you clarify|maksudnya apa|apa maksudnya|hah\?|huh\?|elaborate|i'?m? confused)\b/
+    if (clarificationRe.test(reply)) {
+      return 0.25
     }
 
-    // Default moderate engagement
-    return 0.5
+    // ── Signal 4: Explicit positive ───────────────────────────────────
+    const positiveRe = /\b(thanks|thank you|thank u|thx|helpful|great|perfect|excellent|awesome|exactly|spot on|that'?s? (right|correct|it|perfect)|yes exactly|got it thanks|makasih|terima kasih|mantap|bagus|bener|tepat|pas banget|you'?re? right|that helps)\b/
+    if (positiveRe.test(reply)) {
+      return 0.90
+    }
+
+    // ── Signal 5: Short dismissal ─────────────────────────────────────
+    // Single-word acknowledgements with no engagement.
+    const dismissals = new Set(["ok", "okay", "oke", "k", "fine", "sure", "alright", "noted", "ya", "yep", "yup", "hmm", "oh"])
+    const replyTokens = reply.split(/\s+/)
+    if (replyTokens.length <= 2 && replyTokens.every(w => dismissals.has(w.replace(/[.,!]$/, "")))) {
+      return 0.35
+    }
+
+    // ── Signal 6: Follow-up question ─────────────────────────────────
+    // User is continuing — conversation is alive, reply was at least partially useful.
+    if (reply.includes("?") && reply.length > 15) {
+      return 0.60
+    }
+
+    // ── Signal 7: Natural continuation ───────────────────────────────
+    if (reply.length > 30) {
+      return 0.65
+    }
+
+    if (reply.length > 10) {
+      return 0.55
+    }
+
+    return 0.45
   }
 
   /**

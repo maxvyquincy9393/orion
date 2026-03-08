@@ -11,6 +11,7 @@ import { tool } from "ai"
 import { z } from "zod"
 import { calendarService } from "../../services/calendar.js"
 import type { CalendarEventDraft } from "../../services/calendar.js"
+import { nlDateTimeParser } from "../../calendar/nl-datetime-parser.js"
 import { createLogger } from "../../logger.js"
 
 const log = createLogger("tools.calendar")
@@ -79,14 +80,28 @@ export const calendarTool = tool({
         }
 
         case "create": {
-          if (!title || !start || !end) {
-            return { success: false, error: "title, start, end required for create" }
+          if (!title || !start) {
+            return { success: false, error: "title and start required for create" }
+          }
+
+          // Phase 14: Parse NL datetime if start is not a valid ISO timestamp
+          let startDate: Date
+          let endDate: Date | undefined
+
+          const isIso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(start)
+          if (isIso) {
+            startDate = new Date(start)
+            endDate = end ? new Date(end) : new Date(startDate.getTime() + 60 * 60_000)
+          } else {
+            const parsed = await nlDateTimeParser.parse(`${start}${end ? ` ${end}` : ""}`)
+            startDate = parsed.start
+            endDate = parsed.end ?? new Date(startDate.getTime() + 60 * 60_000)
           }
 
           const draft: CalendarEventDraft = {
             title,
-            start: new Date(start),
-            end: new Date(end),
+            start: startDate,
+            end: endDate,
             attendees,
             location,
             description,

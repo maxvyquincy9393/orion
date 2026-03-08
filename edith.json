@@ -1,4 +1,24 @@
 {
+  "credentials": {
+    "GROQ_API_KEY": "",
+    "ANTHROPIC_API_KEY": "",
+    "OPENAI_API_KEY": "",
+    "GEMINI_API_KEY": "",
+    "OPENROUTER_API_KEY": "",
+    "OLLAMA_BASE_URL": "",
+    "TELEGRAM_BOT_TOKEN": "",
+    "TELEGRAM_CHAT_ID": "",
+    "DISCORD_BOT_TOKEN": "",
+    "DISCORD_CHANNEL_ID": "",
+    "WHATSAPP_CLOUD_ACCESS_TOKEN": "",
+    "WHATSAPP_CLOUD_PHONE_NUMBER_ID": "",
+    "WHATSAPP_CLOUD_VERIFY_TOKEN": "",
+    "GMAIL_CLIENT_ID": "",
+    "GMAIL_CLIENT_SECRET": "",
+    "GMAIL_REFRESH_TOKEN": "",
+    "GMAIL_USER_EMAIL": "",
+    "NOTION_API_KEY": ""
+  },
   "agents": {
     "defaults": {
       "model": {

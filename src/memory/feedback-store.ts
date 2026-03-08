@@ -344,36 +344,78 @@ export class FeedbackStore {
   }
 
   /**
-   * Estimate implicit reward from user follow-up quality.
-   * Mirrors the heuristic in MemRLUpdater.estimateRewardFromContext().
+   * Estimate implicit reward from user follow-up using multi-signal fusion.
+   *
+   * Signals (in priority order):
+   *   1. Explicit correction → 0.05  (user said EDITH was wrong)
+   *   2. Repeat question     → 0.15  (user re-asked the same thing)
+   *   3. Clarification req   → 0.25  (user didn't understand)
+   *   4. Explicit positive   → 0.90  (thanks / mantap / exactly)
+   *   5. Short dismissal     → 0.35  (ok / oke — disengaged)
+   *   6. Follow-up question  → 0.60  (conversation continues)
+   *   7. Natural continuation→ 0.55–0.65
+   *   8. Default             → 0.45
+   *
+   * NOTE: reply length is NOT used as a positive signal. A long reply can mean
+   * confusion; a follow-up question can mean the response was incomplete.
+   *
+   * @param userReply - User's follow-up message
+   * @param _previousResponseLength - Kept for API compatibility
+   * @param previousQuery - Prior user query (enables repeat-question detection)
    */
-  private estimateImplicitReward(userReply: string, previousResponseLength: number): number {
+  private estimateImplicitReward(
+    userReply: string,
+    _previousResponseLength: number,
+    previousQuery?: string,
+  ): number {
     const trimmed = userReply.trim()
-    if (trimmed.length < 5) {
-      return 0.2 // Very short / no reply = disengagement
+    if (trimmed.length === 0) return 0.2
+
+    const reply = trimmed.toLowerCase()
+
+    // Signal 1: Explicit correction
+    if (/\b(bukan itu|bukan maksudnya|bukan begitu|salah|keliru|tidak betul|tidak benar)\b|not what i (asked|meant|wanted)|that'?s? (wrong|incorrect|not right)|you'?re? wrong|wrong answer|bukan gitu/.test(reply)) {
+      return 0.05
     }
 
-    if (/\b(thanks|thank you|helpful|great|perfect|terima kasih|makasih|mantap|bagus)\b/i.test(trimmed)) {
-      return 0.9 // Explicit positive
+    // Signal 2: Repeat question (Jaccard overlap with previous query)
+    if (previousQuery && reply.includes("?")) {
+      const stopWords = new Set(["yang", "apa", "gimana", "bagaimana", "kenapa", "mengapa", "the", "is", "are", "what", "how", "why", "when", "can", "do", "di", "ke", "dan", "atau"])
+      const toWords = (s: string) => s.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w))
+      const prevWords = new Set(toWords(previousQuery))
+      const curWords = new Set(toWords(reply))
+      if (prevWords.size > 0 && curWords.size > 0) {
+        const intersection = [...prevWords].filter(w => curWords.has(w)).length
+        const union = new Set([...prevWords, ...curWords]).size
+        if (intersection / union > 0.55) return 0.15
+      }
     }
 
-    if (/\b(wrong|incorrect|that's not|bukan itu|salah|not what i asked)\b/i.test(trimmed)) {
-      return 0.1 // Explicit negative
+    // Signal 3: Clarification request
+    if (/\b(what do you mean|could you explain|don'?t understand|gak ngerti|ga ngerti|kurang jelas|explain more|be more specific|more detail|could you clarify|maksudnya apa|apa maksudnya|elaborate|i'?m? confused)\b/.test(reply)) {
+      return 0.25
     }
 
-    if (trimmed.includes("?")) {
-      return 0.7 // Follow-up question = engaged
+    // Signal 4: Explicit positive
+    if (/\b(thanks|thank you|thank u|thx|helpful|great|perfect|excellent|awesome|exactly|spot on|that'?s? (right|correct|it|perfect)|yes exactly|makasih|terima kasih|mantap|bagus|bener|tepat|pas banget|you'?re? right|that helps)\b/.test(reply)) {
+      return 0.90
     }
 
-    if (trimmed.length > 80) {
-      return 0.75 // Detailed follow-up = engaged
+    // Signal 5: Short dismissal
+    const dismissals = new Set(["ok", "okay", "oke", "k", "fine", "sure", "alright", "noted", "ya", "yep", "yup", "hmm", "oh"])
+    const tokens = reply.split(/\s+/)
+    if (tokens.length <= 2 && tokens.every(w => dismissals.has(w.replace(/[.,!]$/, "")))) {
+      return 0.35
     }
 
-    if (previousResponseLength > 1000 && trimmed.length < 20) {
-      return 0.35 // Long response, short reply = possibly too long
-    }
+    // Signal 6: Follow-up question (conversation alive)
+    if (reply.includes("?") && reply.length > 15) return 0.60
 
-    return 0.5
+    // Signal 7: Natural continuation
+    if (reply.length > 30) return 0.65
+    if (reply.length > 10) return 0.55
+
+    return 0.45
   }
 }
 

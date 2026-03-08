@@ -35,6 +35,8 @@ interface PendingMemRLFeedback {
   memoryIds: string[]
   previousResponseLength: number
   provisionalReward: number
+  /** The user's query that triggered this response — used to detect repeat questions. */
+  previousQuery: string
 }
 
 async function startCLI(processMessage: Function): Promise<void> {
@@ -73,7 +75,11 @@ async function startCLI(processMessage: Function): Promise<void> {
 
       // Process MemRL feedback from previous turn
       if (pendingFeedback && pendingFeedback.memoryIds.length > 0) {
-        const followupReward = memrlUpdater.estimateRewardFromContext(text, pendingFeedback.previousResponseLength)
+        const followupReward = memrlUpdater.estimateRewardFromContext(
+          text,
+          pendingFeedback.previousResponseLength,
+          { previousQuery: pendingFeedback.previousQuery },
+        )
         const reward = Math.max(pendingFeedback.provisionalReward, followupReward)
 
         void memory
@@ -102,6 +108,7 @@ async function startCLI(processMessage: Function): Promise<void> {
             memoryIds: result.retrievedMemoryIds,
             previousResponseLength: result.response.length,
             provisionalReward: result.provisionalReward,
+            previousQuery: text,
           }
         : null
     } catch (error) {

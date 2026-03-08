@@ -2,6 +2,7 @@ import config from "../config.js"
 import { handleIncomingUserMessage } from "../core/incoming-message-service.js"
 import { createLogger } from "../logger.js"
 import { markdownProcessor } from "../markdown/processor.js"
+import { channelRateLimiter } from "../security/channel-rate-limiter.js"
 import { multiUser } from "../multiuser/manager.js"
 import type { BaseChannel } from "./base.js"
 import { pollForConfirm, splitMessage } from "./base.js"
@@ -292,6 +293,12 @@ export class TelegramChannel implements BaseChannel {
       return
     }
 
+    const rlResult = channelRateLimiter.check("telegram", inbound.chatId)
+    if (!rlResult.allowed) {
+      log.warn("Telegram rate limit exceeded", { chatId: inbound.chatId, retryAfterSec: rlResult.retryAfterSec })
+      return
+    }
+
     this.enqueueReply(inbound.chatId, inbound.text)
 
     const command = normalizeTelegramCommand(inbound.text, this.botUsername)
@@ -308,11 +315,10 @@ export class TelegramChannel implements BaseChannel {
       return this.allowedChatIds.has(chatId)
     }
 
-    // Safer default for first-time bot testing: accept only private chats unless explicitly allowlisted.
-    if (chatType !== "private") {
-      return false
-    }
-    return true
+    // Default DENY: require explicit allowlist in TELEGRAM_CHAT_ID.
+    // This prevents the bot from accepting messages from arbitrary users.
+    log.debug("Telegram message denied — TELEGRAM_CHAT_ID not configured", { chatId, chatType })
+    return false
   }
 
   private async maybeNotifyDeniedChat(chatId: string): Promise<void> {
@@ -323,7 +329,7 @@ export class TelegramChannel implements BaseChannel {
 
     const allowlistHint = this.allowedChatIds.size > 0
       ? "This chat is not in TELEGRAM_CHAT_ID allowlist."
-      : "Only private chats are enabled by default. Add this chat id to TELEGRAM_CHAT_ID to allow groups."
+      : "TELEGRAM_CHAT_ID is not configured. Add this chat id to TELEGRAM_CHAT_ID to enable access."
 
     await this.apiCall("sendMessage", {
       chat_id: chatId,

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EDITH Settings</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0a0a0a; color: #e5e5e5;
+      height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    .titlebar {
+      height: 40px; background: #141414; display: flex;
+      align-items: center; justify-content: space-between;
+      padding: 0 12px; -webkit-app-region: drag; border-bottom: 1px solid #222;
+      flex-shrink: 0;
+    }
+    .titlebar-title { font-weight: 600; font-size: 14px; color: #fff; }
+    .titlebar-buttons { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+    .titlebar-btn {
+      width: 28px; height: 28px; border: none; background: #222;
+      color: #888; border-radius: 4px; cursor: pointer; font-size: 14px;
+      display: flex; align-items: center; justify-content: center; transition: background 0.15s;
+    }
+    .titlebar-btn:hover { background: #333; color: #fff; }
+    .back-btn { font-size: 12px; padding: 0 10px; width: auto; }
+
+    .tabs {
+      display: flex; background: #111; border-bottom: 1px solid #222;
+      overflow-x: auto; flex-shrink: 0;
+    }
+    .tab {
+      padding: 10px 16px; font-size: 13px; color: #666; cursor: pointer;
+      white-space: nowrap; border-bottom: 2px solid transparent; transition: color 0.15s;
+    }
+    .tab:hover { color: #aaa; }
+    .tab.active { color: #e5e5e5; border-bottom-color: #1d4ed8; }
+
+    .tab-content { flex: 1; overflow-y: auto; padding: 20px 20px; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .section-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+
+    .input-group { margin-bottom: 16px; }
+    .input-label { display: block; font-size: 12px; color: #666; margin-bottom: 6px; }
+    .input-field {
+      width: 100%; padding: 10px 12px; background: #141414;
+      border: 1px solid #222; border-radius: 8px; color: #e5e5e5;
+      font-size: 13px; outline: none; transition: border-color 0.15s;
+    }
+    .input-field:focus { border-color: #1d4ed8; }
+
+    /* Password field with toggle visibility */
+    .input-password-wrap { position: relative; }
+    .input-password-wrap .input-field { padding-right: 36px; }
+    .eye-btn {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: #555; cursor: pointer; font-size: 13px; padding: 4px;
+    }
+    .eye-btn:hover { color: #aaa; }
+
+    .row { display: flex; gap: 12px; }
+    .row .input-group { flex: 1; }
+
+    /* Toggle */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 0; border-bottom: 1px solid #1a1a1a;
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-info .toggle-name { font-size: 14px; font-weight: 500; }
+    .toggle-info .toggle-desc { font-size: 12px; color: #555; margin-top: 2px; }
+    .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0; background: #333; border-radius: 20px; cursor: pointer; transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: ""; position: absolute; width: 14px; height: 14px;
+      left: 3px; bottom: 3px; background: #aaa; border-radius: 50%; transition: transform 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: #1d4ed8; }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: #fff; }
+
+    /* Buttons */
+    .btn {
+      padding: 9px 20px; border: none; border-radius: 7px; font-size: 13px;
+      font-weight: 600; cursor: pointer; transition: background 0.15s, opacity 0.15s;
+    }
+    .btn-primary { background: #1d4ed8; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-secondary { background: #1e1e1e; color: #888; }
+    .btn-secondary:hover { background: #2a2a2a; color: #e5e5e5; }
+    .btn-danger { background: #2e0a0a; color: #ef4444; }
+    .btn-danger:hover { background: #3d1010; }
+
+    .save-row { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
+    .save-status { font-size: 12px; color: #22c55e; display: none; }
+    .save-status.error { color: #ef4444; }
+
+    .divider { border: none; border-top: 1px solid #1a1a1a; margin: 20px 0; }
+
+    .about-grid { display: flex; flex-direction: column; gap: 8px; }
+    .about-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #141414; }
+    .about-row .label { color: #555; }
+    .about-row .value { color: #e5e5e5; }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div style="display:flex;align-items:center;gap:10px;-webkit-app-region:no-drag;">
+      <button class="titlebar-btn back-btn" id="back-btn">← Back</button>
+      <span class="titlebar-title">Settings</span>
+    </div>
+    <div class="titlebar-buttons">
+      <button class="titlebar-btn" id="close-btn">x</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="ai">🤖 AI Provider</div>
+    <div class="tab" data-tab="channels">📡 Channels</div>
+    <div class="tab" data-tab="features">⚙️ Features</div>
+    <div class="tab" data-tab="connections">🔗 Connections</div>
+    <div class="tab" data-tab="about">ℹ️ About</div>
+  </div>
+
+  <div class="tab-content">
+
+    <!-- AI Provider tab -->
+    <div class="tab-panel active" id="panel-ai">
+      <div class="section-title">AI Provider</div>
+      <div class="input-group">
+        <label class="input-label">Groq API Key</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-groq-key" placeholder="gsk_..." />
+          <button class="eye-btn" data-target="s-groq-key">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Anthropic API Key</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-anthropic-key" placeholder="sk-ant-..." />
+          <button class="eye-btn" data-target="s-anthropic-key">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">OpenAI API Key</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-openai-key" placeholder="sk-..." />
+          <button class="eye-btn" data-target="s-openai-key">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Gemini API Key</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-gemini-key" placeholder="AIza..." />
+          <button class="eye-btn" data-target="s-gemini-key">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">OpenRouter API Key</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-openrouter-key" placeholder="sk-or-..." />
+          <button class="eye-btn" data-target="s-openrouter-key">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Ollama URL</label>
+        <input type="text" class="input-field" id="s-ollama-url" placeholder="http://localhost:11434" />
+      </div>
+      <div class="save-row">
+        <button class="btn btn-primary" id="save-ai">Save AI Settings</button>
+        <span class="save-status" id="save-ai-status"></span>
+      </div>
+    </div>
+
+    <!-- Channels tab -->
+    <div class="tab-panel" id="panel-channels">
+      <div class="section-title">Telegram</div>
+      <div class="input-group">
+        <label class="input-label">Bot Token</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-telegram-token" placeholder="123456:ABC..." />
+          <button class="eye-btn" data-target="s-telegram-token">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Chat ID</label>
+        <input type="text" class="input-field" id="s-telegram-chatid" placeholder="123456789" />
+      </div>
+
+      <hr class="divider">
+      <div class="section-title">Discord</div>
+      <div class="input-group">
+        <label class="input-label">Bot Token</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-discord-token" placeholder="MTI..." />
+          <button class="eye-btn" data-target="s-discord-token">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Channel ID</label>
+        <input type="text" class="input-field" id="s-discord-channel" placeholder="123456789012345678" />
+      </div>
+
+      <hr class="divider">
+      <div class="section-title">WhatsApp Cloud</div>
+      <div class="input-group">
+        <label class="input-label">Access Token</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-wa-token" placeholder="EAAx..." />
+          <button class="eye-btn" data-target="s-wa-token">👁</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="input-group">
+          <label class="input-label">Phone Number ID</label>
+          <input type="text" class="input-field" id="s-wa-phone-id" placeholder="123..." />
+        </div>
+        <div class="input-group">
+          <label class="input-label">Verify Token</label>
+          <input type="text" class="input-field" id="s-wa-verify" placeholder="my_verify_token" />
+        </div>
+      </div>
+
+      <div class="save-row">
+        <button class="btn btn-primary" id="save-channels">Save Channel Settings</button>
+        <span class="save-status" id="save-channels-status"></span>
+      </div>
+    </div>
+
+    <!-- Features tab -->
+    <div class="tab-panel" id="panel-features">
+      <div class="section-title">Feature Toggles</div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <div class="toggle-name">Computer Use</div>
+          <div class="toggle-desc">Browse the web, open files, run scripts</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-computer" /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <div class="toggle-name">Voice (TTS/STT)</div>
+          <div class="toggle-desc">Talk with your microphone (~80MB model on first use)</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-voice" /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <div class="toggle-name">Knowledge Base</div>
+          <div class="toggle-desc">Import Obsidian, Notion, PDFs for reference</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-kb" /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <div class="toggle-name">Email Integration</div>
+          <div class="toggle-desc">Read and send emails via Gmail</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-email" /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <div class="toggle-name">Calendar Integration</div>
+          <div class="toggle-desc">Upcoming events and proactive reminders</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-calendar" /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="save-row">
+        <button class="btn btn-primary" id="save-features">Save Feature Settings</button>
+        <span class="save-status" id="save-features-status"></span>
+      </div>
+    </div>
+
+    <!-- Connections tab -->
+    <div class="tab-panel" id="panel-connections">
+      <div class="section-title">Gmail OAuth2</div>
+      <div class="input-group">
+        <label class="input-label">Client ID</label>
+        <input type="text" class="input-field" id="s-gmail-client-id" placeholder="xxx.apps.googleusercontent.com" />
+      </div>
+      <div class="input-group">
+        <label class="input-label">Client Secret</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-gmail-secret" placeholder="GOCSPX-..." />
+          <button class="eye-btn" data-target="s-gmail-secret">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Refresh Token</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-gmail-refresh" placeholder="1//..." />
+          <button class="eye-btn" data-target="s-gmail-refresh">👁</button>
+        </div>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Gmail Address</label>
+        <input type="text" class="input-field" id="s-gmail-email" placeholder="you@gmail.com" />
+      </div>
+
+      <hr class="divider">
+      <div class="section-title">Notion</div>
+      <div class="input-group">
+        <label class="input-label">Notion API Key</label>
+        <div class="input-password-wrap">
+          <input type="password" class="input-field" id="s-notion-key" placeholder="secret_..." />
+          <button class="eye-btn" data-target="s-notion-key">👁</button>
+        </div>
+      </div>
+
+      <div class="save-row">
+        <button class="btn btn-primary" id="save-connections">Save Connection Settings</button>
+        <span class="save-status" id="save-connections-status"></span>
+      </div>
+    </div>
+
+    <!-- About tab -->
+    <div class="tab-panel" id="panel-about">
+      <div class="section-title">About EDITH</div>
+      <div class="about-grid">
+        <div class="about-row"><span class="label">Version</span><span class="value" id="about-version">—</span></div>
+        <div class="about-row"><span class="label">Agent Name</span><span class="value" id="about-name">EDITH</span></div>
+        <div class="about-row"><span class="label">Title Word</span><span class="value" id="about-title">Sir</span></div>
+        <div class="about-row"><span class="label">Update Status</span><span class="value" id="about-update">Up to date</span></div>
+      </div>
+      <div style="margin-top:20px;display:flex;gap:10px;">
+        <button class="btn btn-secondary" id="check-updates-btn">Check for Updates</button>
+        <button class="btn btn-danger" id="reset-oobe-btn">Re-run Setup Wizard</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ── Tab switching ──────────────────────────────────────────────
+    document.querySelectorAll(".tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"))
+        document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"))
+        tab.classList.add("active")
+        document.getElementById(`panel-${tab.dataset.tab}`).classList.add("active")
+      })
+    })
+
+    // ── Password visibility toggles ────────────────────────────────
+    document.querySelectorAll(".eye-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const input = document.getElementById(btn.dataset.target)
+        if (!input) return
+        input.type = input.type === "password" ? "text" : "password"
+      })
+    })
+
+    // ── Save status helper ─────────────────────────────────────────
+    function showStatus(id, success, msg) {
+      const el = document.getElementById(id)
+      if (!el) return
+      el.style.display = "block"
+      el.className = success ? "save-status" : "save-status error"
+      el.textContent = msg
+      setTimeout(() => { el.style.display = "none" }, 3000)
+    }
+
+    // ── Load settings ──────────────────────────────────────────────
+    async function loadAllSettings() {
+      try {
+        const result = await window.edith.loadSettings()
+        if (!result.success) return
+        const cfg = result.config || {}
+        const creds = cfg.credentials || {}
+        const feats = cfg.features || {}
+        const identity = cfg.identity || {}
+
+        // AI Provider
+        if (creds.GROQ_API_KEY) document.getElementById("s-groq-key").value = creds.GROQ_API_KEY
+        if (creds.ANTHROPIC_API_KEY) document.getElementById("s-anthropic-key").value = creds.ANTHROPIC_API_KEY
+        if (creds.OPENAI_API_KEY) document.getElementById("s-openai-key").value = creds.OPENAI_API_KEY
+        if (creds.GEMINI_API_KEY) document.getElementById("s-gemini-key").value = creds.GEMINI_API_KEY
+        if (creds.OPENROUTER_API_KEY) document.getElementById("s-openrouter-key").value = creds.OPENROUTER_API_KEY
+        if (creds.OLLAMA_BASE_URL) document.getElementById("s-ollama-url").value = creds.OLLAMA_BASE_URL
+
+        // Channels
+        if (creds.TELEGRAM_BOT_TOKEN) document.getElementById("s-telegram-token").value = creds.TELEGRAM_BOT_TOKEN
+        if (creds.TELEGRAM_CHAT_ID) document.getElementById("s-telegram-chatid").value = creds.TELEGRAM_CHAT_ID
+        if (creds.DISCORD_BOT_TOKEN) document.getElementById("s-discord-token").value = creds.DISCORD_BOT_TOKEN
+        if (creds.DISCORD_CHANNEL_ID) document.getElementById("s-discord-channel").value = creds.DISCORD_CHANNEL_ID
+        if (creds.WHATSAPP_CLOUD_ACCESS_TOKEN) document.getElementById("s-wa-token").value = creds.WHATSAPP_CLOUD_ACCESS_TOKEN
+        if (creds.WHATSAPP_CLOUD_PHONE_NUMBER_ID) document.getElementById("s-wa-phone-id").value = creds.WHATSAPP_CLOUD_PHONE_NUMBER_ID
+        if (creds.WHATSAPP_CLOUD_VERIFY_TOKEN) document.getElementById("s-wa-verify").value = creds.WHATSAPP_CLOUD_VERIFY_TOKEN
+
+        // Features
+        if (feats.computerUse !== undefined) document.getElementById("f-computer").checked = feats.computerUse
+        if (feats.voice !== undefined) document.getElementById("f-voice").checked = feats.voice
+        if (feats.knowledgeBase !== undefined) document.getElementById("f-kb").checked = feats.knowledgeBase
+        if (feats.email !== undefined) document.getElementById("f-email").checked = feats.email
+        if (feats.calendar !== undefined) document.getElementById("f-calendar").checked = feats.calendar
+
+        // Connections
+        if (creds.GMAIL_CLIENT_ID) document.getElementById("s-gmail-client-id").value = creds.GMAIL_CLIENT_ID
+        if (creds.GMAIL_CLIENT_SECRET) document.getElementById("s-gmail-secret").value = creds.GMAIL_CLIENT_SECRET
+        if (creds.GMAIL_REFRESH_TOKEN) document.getElementById("s-gmail-refresh").value = creds.GMAIL_REFRESH_TOKEN
+        if (creds.GMAIL_USER_EMAIL) document.getElementById("s-gmail-email").value = creds.GMAIL_USER_EMAIL
+        if (creds.NOTION_API_KEY) document.getElementById("s-notion-key").value = creds.NOTION_API_KEY
+
+        // About
+        document.getElementById("about-name").textContent = identity.name || "EDITH"
+        document.getElementById("about-title").textContent = identity.titleWord || "Sir"
+        try {
+          const pkg = await fetch("../package.json").then(r => r.json()).catch(() => null)
+          if (pkg) document.getElementById("about-version").textContent = pkg.version || "—"
+        } catch {}
+      } catch (e) {
+        console.error("loadAllSettings error:", e)
+      }
+    }
+
+    // ── Save handlers ──────────────────────────────────────────────
+    document.getElementById("save-ai").addEventListener("click", async () => {
+      const data = {
+        credentials: {
+          GROQ_API_KEY: document.getElementById("s-groq-key").value.trim(),
+          ANTHROPIC_API_KEY: document.getElementById("s-anthropic-key").value.trim(),
+          OPENAI_API_KEY: document.getElementById("s-openai-key").value.trim(),
+          GEMINI_API_KEY: document.getElementById("s-gemini-key").value.trim(),
+          OPENROUTER_API_KEY: document.getElementById("s-openrouter-key").value.trim(),
+          OLLAMA_BASE_URL: document.getElementById("s-ollama-url").value.trim(),
+        }
+      }
+      const res = await window.edith.saveSettings(data)
+      showStatus("save-ai-status", res.success, res.success ? "Saved!" : res.error || "Error")
+    })
+
+    document.getElementById("save-channels").addEventListener("click", async () => {
+      const data = {
+        credentials: {
+          TELEGRAM_BOT_TOKEN: document.getElementById("s-telegram-token").value.trim(),
+          TELEGRAM_CHAT_ID: document.getElementById("s-telegram-chatid").value.trim(),
+          DISCORD_BOT_TOKEN: document.getElementById("s-discord-token").value.trim(),
+          DISCORD_CHANNEL_ID: document.getElementById("s-discord-channel").value.trim(),
+          WHATSAPP_CLOUD_ACCESS_TOKEN: document.getElementById("s-wa-token").value.trim(),
+          WHATSAPP_CLOUD_PHONE_NUMBER_ID: document.getElementById("s-wa-phone-id").value.trim(),
+          WHATSAPP_CLOUD_VERIFY_TOKEN: document.getElementById("s-wa-verify").value.trim(),
+        }
+      }
+      const res = await window.edith.saveSettings(data)
+      showStatus("save-channels-status", res.success, res.success ? "Saved!" : res.error || "Error")
+    })
+
+    document.getElementById("save-features").addEventListener("click", async () => {
+      const data = {
+        features: {
+          computerUse: document.getElementById("f-computer").checked,
+          voice: document.getElementById("f-voice").checked,
+          knowledgeBase: document.getElementById("f-kb").checked,
+          email: document.getElementById("f-email").checked,
+          calendar: document.getElementById("f-calendar").checked,
+        }
+      }
+      const res = await window.edith.saveSettings(data)
+      showStatus("save-features-status", res.success, res.success ? "Saved!" : res.error || "Error")
+    })
+
+    document.getElementById("save-connections").addEventListener("click", async () => {
+      const data = {
+        credentials: {
+          GMAIL_CLIENT_ID: document.getElementById("s-gmail-client-id").value.trim(),
+          GMAIL_CLIENT_SECRET: document.getElementById("s-gmail-secret").value.trim(),
+          GMAIL_REFRESH_TOKEN: document.getElementById("s-gmail-refresh").value.trim(),
+          GMAIL_USER_EMAIL: document.getElementById("s-gmail-email").value.trim(),
+          NOTION_API_KEY: document.getElementById("s-notion-key").value.trim(),
+        }
+      }
+      const res = await window.edith.saveSettings(data)
+      showStatus("save-connections-status", res.success, res.success ? "Saved!" : res.error || "Error")
+    })
+
+    // ── About actions ──────────────────────────────────────────────
+    document.getElementById("check-updates-btn").addEventListener("click", () => {
+      window.edith.getStatus()
+      document.getElementById("about-update").textContent = "Checking..."
+    })
+
+    document.getElementById("reset-oobe-btn").addEventListener("click", () => {
+      window.location.href = "onboarding.html"
+    })
+
+    // ── Navigation ─────────────────────────────────────────────────
+    document.getElementById("back-btn").addEventListener("click", () => {
+      window.location.href = "index.html"
+    })
+
+    document.getElementById("close-btn").addEventListener("click", () => {
+      window.edith.closeWindow()
+    })
+
+    // ── Init ───────────────────────────────────────────────────────
+    loadAllSettings()
+  </script>
+</body>
+</html>

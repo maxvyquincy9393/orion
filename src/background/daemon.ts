@@ -16,6 +16,8 @@ import { eventBus } from "../core/event-bus.js"
 import { heartbeat } from "./heartbeat.js"
 import { isWithinHardQuietHours } from "./quiet-hours.js"
 import { calendarService } from "../services/calendar.js"
+import { proactiveScheduler } from "../calendar/proactive-scheduler.js"
+import { meetingPrep } from "../calendar/meeting-prep.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
@@ -28,6 +30,8 @@ export class EDITHDaemon {
   private cycleInProgress = false
   private eventSubscriptionsInitialized = false
   private lastTemporalMaintenanceAt = new Map<string, number>()
+  /** Date string (YYYY-MM-DD) of last proactive schedule run, per userId. */
+  private lastProactiveScheduleDate = new Map<string, string>()
   private readonly credential: AgentCredential
 
   constructor() {
@@ -151,6 +155,25 @@ export class EDITHDaemon {
           const sent = await channelManager.send(userId, message)
           if (sent) {
             logger.info("Calendar alert sent", { userId, eventId: alert.id, title: alert.title })
+
+            // Phase 14: Schedule meeting prep brief 5 minutes before meeting start
+            const msUntilMeeting = alert.start.getTime() - Date.now()
+            const prepDelayMs = Math.max(0, msUntilMeeting - 5 * 60_000)
+
+            setTimeout(() => {
+              void meetingPrep.prepareFor(
+                { ...alert, attendees: [], calendarId: "primary", status: "confirmed" },
+                userId,
+              )
+                .then(async (brief) => {
+                  const briefText = meetingPrep.formatBrief(brief)
+                  const allowed = await sandbox.check(PermissionAction.PROACTIVE_MESSAGE, userId)
+                  if (allowed) {
+                    await channelManager.send(userId, briefText)
+                  }
+                })
+                .catch((err) => logger.warn("meeting prep failed", { err }))
+            }, prepDelayMs)
           }
         } else {
           logger.debug("Calendar alert blocked by permissions", { userId, eventId: alert.id })
@@ -170,6 +193,7 @@ export class EDITHDaemon {
 
       await this.checkForActivity(userId)
       await this.checkCalendarAlerts(userId) // Phase 8: Calendar proactive alerts
+      await this.checkProactiveSchedule(userId) // Phase 14: Evening proactive scheduling
       await this.maybeRunTemporalMaintenance(userId)
 
       const now = new Date()
@@ -231,6 +255,37 @@ export class EDITHDaemon {
       }
     } catch (error) {
       logger.error("Daemon cycle failed", error)
+    }
+  }
+
+  /**
+   * Phase 14: Run proactive schedule analysis once per evening (20:00–21:59).
+   * Sends actionable suggestions for tomorrow's schedule.
+   */
+  private async checkProactiveSchedule(userId: string): Promise<void> {
+    const now = new Date()
+    const hour = now.getHours()
+    // Only run in the 20:00–21:59 window
+    if (hour < 20 || hour >= 22) return
+
+    const today = now.toISOString().slice(0, 10)
+    if (this.lastProactiveScheduleDate.get(userId) === today) return
+
+    this.lastProactiveScheduleDate.set(userId, today)
+
+    try {
+      const actions = await proactiveScheduler.analyzeTomorrow(userId)
+      for (const action of actions) {
+        const allowed = await sandbox.check(PermissionAction.PROACTIVE_MESSAGE, userId)
+        if (allowed) {
+          await channelManager.send(userId, action.message)
+        }
+      }
+      if (actions.length > 0) {
+        logger.info("Proactive schedule actions sent", { userId, count: actions.length })
+      }
+    } catch (error) {
+      logger.warn("Proactive schedule check failed", { error })
     }
   }
 

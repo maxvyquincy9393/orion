@@ -66,11 +66,10 @@ describe("SessionManager", () => {
     const shortSm = new SessionManager(TEST_DIR, 0)
     await shortSm.pruneExpired()
 
-    // After pruning with maxAge=0, the file created right now IS expired
+    // pruneExpired with maxAge=0 → maxMs=0 → any file ageMs > 0 → file deleted
     const fakeCtx = { addCookies: async (_c: unknown[]) => {} }
-    // With the original sm (7-day), it should still be there
     const ok = await sm.restore(fakeCtx as never, "https://oldsite.com")
-    expect(ok).toBe(true) // still valid for the 7-day manager
+    expect(ok).toBe(false) // file was pruned by the 0-day manager
   })
 
   it("save is idempotent — overwrite works", async () => {
@@ -127,7 +126,8 @@ describe("SessionManager", () => {
     // Simulate a manager with a different key by creating one with overridden internals
     // We can test that decrypt throws on bad data → mock: write garbage IV:tag:data
     await mkdir(TEST_DIR, { recursive: true })
-    await writeFile(join(TEST_DIR, "x_com.session"), "aabbccdd:eeff0011:1234567890abcdef", { mode: 0o600 })
+    // Overwrite the session file (sm1 created "x.com.session") with garbage to simulate wrong key/corruption
+    await writeFile(join(TEST_DIR, "x.com.session"), "aabbccdd:eeff0011:1234567890abcdef", { mode: 0o600 })
     const sm2 = new SessionManager(TEST_DIR)
     const fakeCtx = { addCookies: async (_c: unknown[]) => {} }
     const ok = await sm2.restore(fakeCtx as never, "https://x.com").catch(() => false)

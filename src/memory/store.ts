@@ -43,6 +43,8 @@ const EMBEDDING_REQUEST_TIMEOUT_MS = 8_000
 const PENDING_FEEDBACK_MAX_AGE_MS = 30 * 60 * 1000
 const EMBEDDING_CACHE_MAX_ENTRIES = 512
 const HASH_FALLBACK_ALERT_EVERY = 25
+/** Maximum allowed length for a single memory entry (prevents memory poisoning via oversized writes). */
+const MAX_MEMORY_CONTENT_LENGTH = 50_000
 
 interface MemoryRow extends Record<string, unknown> {
   id: string
@@ -414,13 +416,34 @@ export class MemoryStore {
       return null
     }
 
+    // Write-time content validation
+    const trimmedContent = content.trim()
+    if (!trimmedContent) {
+      log.warn("memory save rejected: empty content", { userId })
+      return null
+    }
+    if (trimmedContent.length > MAX_MEMORY_CONTENT_LENGTH) {
+      log.warn("memory save rejected: content too large", { userId, length: trimmedContent.length, max: MAX_MEMORY_CONTENT_LENGTH })
+      return null
+    }
+
+    const validated = validateMemoryEntries([{ content: trimmedContent, metadata }])
+    if (validated.flagged.length > 0) {
+      log.warn("memory save rejected: content flagged by security validator", {
+        userId,
+        reason: validated.flagged[0]?.reason,
+      })
+      return null
+    }
+    const safeContent = validated.clean[0]?.content ?? trimmedContent
+
     try {
       const id = randomUUID()
-      const vector = await this.embed(content)
+      const vector = await this.embed(safeContent)
       const row: MemoryRow = {
         id,
         userId: sanitizeUserId(userId),
-        content,
+        content: safeContent,
         vector,
         metadata: JSON.stringify(metadata),
         createdAt: Date.now(),
@@ -432,9 +455,9 @@ export class MemoryStore {
         const levelValue = Number(metadata.level)
         const level = levelValue === 1 || levelValue === 2 ? levelValue : 0
         const category = typeof metadata.category === "string" ? metadata.category : "fact"
-        void temporalIndex.store(userId, content, level, category, id)
+        void temporalIndex.store(userId, safeContent, level, category, id)
       }
-      log.debug("saved memory", { id, userId, contentLength: content.length })
+      log.debug("saved memory", { id, userId, contentLength: safeContent.length })
       return id
     } catch (error) {
       log.error("failed to save memory", error)

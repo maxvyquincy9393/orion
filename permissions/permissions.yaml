@@ -1,0 +1,66 @@
+# EDITH Permission Configuration
+# Controls what actions EDITH can take autonomously.
+# All sections default to disabled — set enabled: true to allow.
+
+# ── Messaging ─────────────────────────────────────────────────────
+messaging:
+  enabled: true
+  require_confirm: false
+
+# ── Proactive Messages (EDITH reaching out unprompted) ────────────
+proactive:
+  enabled: true
+  require_confirm: false
+  quiet_hours:
+    start: "23:00"
+    end: "07:00"
+
+# ── File System ───────────────────────────────────────────────────
+file_system:
+  enabled: true
+  read: true
+  write: true
+  allowed_paths:
+    - "./workspace"
+    - "./workbenches"
+    - "./logs"
+    - "./models"
+  blocked_paths:
+    - "./.env"
+    - "./prisma"
+    - "./node_modules"
+
+# ── Terminal ──────────────────────────────────────────────────────
+terminal:
+  enabled: true
+  require_confirm: false
+  blocked_commands:
+    - "rm -rf"
+    - "format"
+    - "del /f"
+    - "shutdown"
+    - "reboot"
+    - "mkfs"
+    - "dd if="
+    - ":(){:|:&};:"
+
+# ── Calendar ──────────────────────────────────────────────────────
+calendar:
+  enabled: true
+  read: true
+  write: true
+  require_confirm: false
+
+# ── Web Search ────────────────────────────────────────────────────
+search:
+  enabled: true
+  require_confirm: false
+  blocked_domains:
+    - "localhost"
+
+# ── Web Browsing ──────────────────────────────────────────────────
+browsing:
+  enabled: true
+  require_confirm: false
+  blocked_domains:
+    - "localhost"

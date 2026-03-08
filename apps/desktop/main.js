@@ -178,6 +178,22 @@ function createTray() {
   })
 }
 
+/**
+ * Check whether edith.json contains at least one non-empty credential.
+ * Used to decide whether to show the OOBE wizard on first launch.
+ * @returns {boolean} true if credentials exist
+ */
+function hasCredentials() {
+  try {
+    const cfgPath = path.join(__dirname, "../../edith.json")
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"))
+    const creds = cfg.credentials || {}
+    return Object.values(creds).some(v => typeof v === "string" && v.trim() !== "")
+  } catch {
+    return false
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 420,
@@ -193,7 +209,9 @@ function createWindow() {
     }
   })
 
-  mainWindow.loadFile(path.join(__dirname, "renderer/index.html"))
+  // Show OOBE wizard on first launch when no credentials are configured
+  const startPage = hasCredentials() ? "index.html" : "onboarding.html"
+  mainWindow.loadFile(path.join(__dirname, "renderer", startPage))
 
   mainWindow.on("close", (e) => {
     if (!app.isQuitting) {
@@ -251,26 +269,64 @@ ipcMain.handle("app:quit", async () => {
   return { ok: true }
 })
 
-ipcMain.handle("oobe:save-credentials", async (_, credentials) => {
-  try {
-    const envPath = path.join(__dirname, "../../.env")
-    let envContent = ""
-    if (credentials.GROQ_API_KEY) envContent += `GROQ_API_KEY=${credentials.GROQ_API_KEY}\n`
-    if (credentials.ANTHROPIC_API_KEY) envContent += `ANTHROPIC_API_KEY=${credentials.ANTHROPIC_API_KEY}\n`
-    if (credentials.OPENAI_API_KEY) envContent += `OPENAI_API_KEY=${credentials.OPENAI_API_KEY}\n`
-    if (credentials.GEMINI_API_KEY) envContent += `GEMINI_API_KEY=${credentials.GEMINI_API_KEY}\n`
-    if (credentials.TELEGRAM_BOT_TOKEN) envContent += `TELEGRAM_BOT_TOKEN=${credentials.TELEGRAM_BOT_TOKEN}\n`
-    const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : ""
-    fs.writeFileSync(envPath, mergeEnvContent(existing, envContent), "utf-8")
-    // Save titleWord/name to edith.json
-    if (credentials.titleWord || credentials.agentName) {
-      const cfgPath = path.join(__dirname, "../../edith.json")
-      let cfg = {}
-      try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) } catch {}
-      if (credentials.agentName) cfg.identity = { ...(cfg.identity || {}), name: credentials.agentName }
-      fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8")
+/**
+ * Read or initialize edith.json, merge data, and write back.
+ * @param {object} data - Object with optional credentials/features/identity/channels sections
+ * @returns {{ success: boolean, error?: string }}
+ */
+function writeEdithJson(data) {
+  const cfgPath = path.join(__dirname, "../../edith.json")
+  let cfg = {}
+  try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) } catch {}
+  if (data.credentials) cfg.credentials = { ...(cfg.credentials || {}), ...data.credentials }
+  if (data.features) cfg.features = { ...(cfg.features || {}), ...data.features }
+  if (data.identity) cfg.identity = { ...(cfg.identity || {}), ...data.identity }
+  if (data.channels) cfg.channels = { ...(cfg.channels || {}), ...data.channels }
+  // Allow arbitrary top-level merges for settings:save
+  for (const [key, value] of Object.entries(data)) {
+    if (!["credentials", "features", "identity", "channels"].includes(key)) {
+      cfg[key] = typeof value === "object" && value !== null && typeof cfg[key] === "object" && cfg[key] !== null
+        ? { ...cfg[key], ...value }
+        : value
     }
-    return { success: true }
+  }
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf-8")
+  return { success: true }
+}
+
+ipcMain.handle("oobe:save-credentials", async (_, data) => {
+  try {
+    return writeEdithJson(data)
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle("oobe:load-credentials", async () => {
+  try {
+    const cfgPath = path.join(__dirname, "../../edith.json")
+    let cfg = {}
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) } catch {}
+    return { success: true, credentials: cfg.credentials || {}, features: cfg.features || {}, identity: cfg.identity || {} }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle("settings:save", async (_, data) => {
+  try {
+    return writeEdithJson(data)
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle("settings:load", async () => {
+  try {
+    const cfgPath = path.join(__dirname, "../../edith.json")
+    let cfg = {}
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) } catch {}
+    return { success: true, config: cfg }
   } catch (err) {
     return { success: false, error: err.message }
   }

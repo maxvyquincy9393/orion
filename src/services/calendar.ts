@@ -27,6 +27,7 @@ import { google } from "googleapis"
 import type { calendar_v3 } from "googleapis"
 import { createLogger } from "../logger.js"
 import config from "../config.js"
+import { icalConnector } from "../calendar/ical-connector.js"
 
 const log = createLogger("services.calendar")
 
@@ -437,41 +438,44 @@ export class CalendarService {
     const now = new Date()
     const timeMax = new Date(now.getTime() + hours * 60 * 60 * 1000)
 
-    const response = await this.googleClient.events.list({
-      calendarId: "primary",
-      timeMin: now.toISOString(),
-      timeMax: timeMax.toISOString(),
-      maxResults: 50,
-      singleEvents: true,
-      orderBy: "startTime",
-    })
-
+    const calendarIds = config.GCAL_CALENDARS.split(",").map((s) => s.trim()).filter(Boolean)
     const events: CalendarEvent[] = []
 
-    for (const item of response.data.items || []) {
-      if (!item.id || !item.summary) {
-        continue
-      }
-
-      const start = item.start?.dateTime || item.start?.date
-      const end = item.end?.dateTime || item.end?.date
-
-      if (!start || !end) {
-        continue
-      }
-
-      events.push({
-        id: item.id,
-        title: item.summary,
-        start: new Date(start),
-        end: new Date(end),
-        attendees: (item.attendees || []).map((a) => a.email || ""),
-        location: item.location ?? undefined,
-        description: item.description ?? undefined,
-        meetingUrl: item.hangoutLink ?? undefined,
-        calendarId: "primary",
-        status: (item.status as CalendarEvent["status"]) || "confirmed",
+    for (const calendarId of calendarIds) {
+      const response = await this.googleClient.events.list({
+        calendarId,
+        timeMin: now.toISOString(),
+        timeMax: timeMax.toISOString(),
+        maxResults: 50,
+        singleEvents: true,
+        orderBy: "startTime",
       })
+
+      for (const item of response.data.items || []) {
+        if (!item.id || !item.summary) {
+          continue
+        }
+
+        const start = item.start?.dateTime || item.start?.date
+        const end = item.end?.dateTime || item.end?.date
+
+        if (!start || !end) {
+          continue
+        }
+
+        events.push({
+          id: item.id,
+          title: item.summary,
+          start: new Date(start),
+          end: new Date(end),
+          attendees: (item.attendees || []).map((a) => a.email || ""),
+          location: item.location ?? undefined,
+          description: item.description ?? undefined,
+          meetingUrl: item.hangoutLink ?? undefined,
+          calendarId,
+          status: (item.status as CalendarEvent["status"]) || "confirmed",
+        })
+      }
     }
 
     return events
@@ -489,47 +493,50 @@ export class CalendarService {
    * Gets events within a time range.
    */
   private async getEventsInRange(start: Date, end: Date): Promise<CalendarEvent[]> {
+    const allEvents: CalendarEvent[] = []
+
     if (this.provider === "google" && this.googleClient) {
-      const response = await this.googleClient.events.list({
-        calendarId: "primary",
-        timeMin: start.toISOString(),
-        timeMax: end.toISOString(),
-        singleEvents: true,
-        orderBy: "startTime",
-      })
+      const calendarIds = config.GCAL_CALENDARS.split(",").map((s) => s.trim()).filter(Boolean)
 
-      const events: CalendarEvent[] = []
-
-      for (const item of response.data.items || []) {
-        if (!item.id || !item.summary) {
-          continue
-        }
-
-        const eventStart = item.start?.dateTime || item.start?.date
-        const eventEnd = item.end?.dateTime || item.end?.date
-
-        if (!eventStart || !eventEnd) {
-          continue
-        }
-
-        events.push({
-          id: item.id,
-          title: item.summary,
-          start: new Date(eventStart),
-          end: new Date(eventEnd),
-          attendees: (item.attendees || []).map((a) => a.email || ""),
-          location: item.location ?? undefined,
-          description: item.description ?? undefined,
-          meetingUrl: item.hangoutLink ?? undefined,
-          calendarId: "primary",
-          status: (item.status as CalendarEvent["status"]) || "confirmed",
+      for (const calendarId of calendarIds) {
+        const response = await this.googleClient.events.list({
+          calendarId,
+          timeMin: start.toISOString(),
+          timeMax: end.toISOString(),
+          singleEvents: true,
+          orderBy: "startTime",
         })
-      }
 
-      return events
+        for (const item of response.data.items || []) {
+          if (!item.id || !item.summary) continue
+          const eventStart = item.start?.dateTime || item.start?.date
+          const eventEnd = item.end?.dateTime || item.end?.date
+          if (!eventStart || !eventEnd) continue
+
+          allEvents.push({
+            id: item.id,
+            title: item.summary,
+            start: new Date(eventStart),
+            end: new Date(eventEnd),
+            attendees: (item.attendees || []).map((a) => a.email || ""),
+            location: item.location ?? undefined,
+            description: item.description ?? undefined,
+            meetingUrl: item.hangoutLink ?? undefined,
+            calendarId,
+            status: (item.status as CalendarEvent["status"]) || "confirmed",
+          })
+        }
+      }
     }
 
-    return []
+    // Merge iCal feed events if configured (Phase 14)
+    if (config.ICAL_FEED_URLS) {
+      const icalEvents = await icalConnector.fetchAll(config.ICAL_FEED_URLS)
+        .catch((err) => { log.warn("ical fetch failed", { err }); return [] })
+      allEvents.push(...icalConnector.filterByRange(icalEvents, start, end))
+    }
+
+    return allEvents
   }
 
   /**
@@ -548,11 +555,11 @@ export class CalendarService {
         location: draft.location,
         start: {
           dateTime: draft.start.toISOString(),
-          timeZone: "UTC",
+          timeZone: config.GCAL_TIMEZONE,
         },
         end: {
           dateTime: draft.end.toISOString(),
-          timeZone: "UTC",
+          timeZone: config.GCAL_TIMEZONE,
         },
         attendees: (draft.attendees || []).map((email) => ({ email })),
       },
