@@ -18,6 +18,7 @@
  * @module core/shutdown
  */
 
+import path from "node:path"
 import { outbox } from "../channels/outbox.js"
 import { channelManager } from "../channels/manager.js"
 import { sidecarManager } from "./sidecar-manager.js"
@@ -25,6 +26,7 @@ import { prisma } from "../database/index.js"
 import { pipelineRateLimiter } from "../security/pipeline-rate-limiter.js"
 import { daemon } from "../background/daemon.js"
 import { createLogger } from "../logger.js"
+import { SessionPersistence } from "../sessions/session-persistence.js"
 
 const log = createLogger("core.shutdown")
 
@@ -71,6 +73,11 @@ export async function performShutdown(): Promise<void> {
   }, SHUTDOWN_TIMEOUT_MS)
 
   try {
+    // 0. Persist active sessions before shutdown
+    const sessionPersistence = new SessionPersistence(path.resolve(process.cwd(), ".edith"))
+    await sessionPersistence.save()
+      .catch((err) => log.warn("session persist failed", { err: String(err) }))
+
     // 1. Final outbox flush — best-effort delivery of any pending messages
     await outbox
       .flush((userId, message) => channelManager.send(userId, message))

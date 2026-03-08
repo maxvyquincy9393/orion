@@ -4,6 +4,7 @@
  * Separated from main.ts so startup can be tested and reused by gateway.
  */
 
+import { exec } from "node:child_process"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -34,10 +35,15 @@ import { deviceRegistry } from "../hardware/device-registry.js"
 import { gatewaySync } from "../gateway/gateway-sync.js"
 import { networkDiscovery } from "../gateway/network-discovery.js"
 import { sessionStore } from "../sessions/session-store.js"
+import { SessionPersistence } from "../sessions/session-persistence.js"
 import { outbox } from "../channels/outbox.js"
 import { sidecarManager } from "./sidecar-manager.js"
 import { performShutdown } from "./shutdown.js"
 import { registerErrorBoundaries } from "./error-boundaries.js"
+import { memoryGuard } from "./memory-guard.js"
+import { ambientScheduler } from "../ambient/ambient-scheduler.js"
+import { briefingScheduler } from "../protocols/briefing-scheduler.js"
+import { hookLoader } from "../hooks/loader.js"
 
 const log = createLogger("startup")
 
@@ -111,6 +117,26 @@ function validateRequiredEnv(): void {
   log.info("env validation passed")
 }
 
+/**
+ * Run `prisma migrate deploy` if RUN_MIGRATIONS_ON_STARTUP is enabled.
+ * Uses `pnpm exec prisma migrate deploy` to apply any pending migrations.
+ * Never throws — migration failures are logged as warnings (graceful degradation).
+ * Calling this at startup ensures the DB schema matches the Prisma schema.
+ */
+export async function runMigrationsIfEnabled(): Promise<void> {
+  if (!config.RUN_MIGRATIONS_ON_STARTUP) return
+  return new Promise((resolve) => {
+    exec("pnpm exec prisma migrate deploy", (err) => {
+      if (err) {
+        log.warn("migration failed — continuing with existing schema", { err: String(err) })
+      } else {
+        log.info("database migrations applied")
+      }
+      resolve()
+    })
+  })
+}
+
 export async function initialize(workspaceDir: string): Promise<StartupResult> {
   registerErrorBoundaries()
   validateRequiredEnv()
@@ -125,6 +151,9 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
 
   // Apply production-grade SQLite pragmas (WAL mode, busy timeout, etc.)
   await applyPragmas(prisma)
+
+  // Run pending DB migrations before any service initializes
+  await runMigrationsIfEnabled()
 
   await memory.init()
   await orchestrator.init()
@@ -184,6 +213,26 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   // Phase 24: Self-improvement engine (stateful singletons, no explicit init needed)
   log.info("self-improvement engine ready")
 
+  // Ambient intelligence — start ambient scheduler for weather/market cache warming
+  void Promise.resolve(ambientScheduler.start())
+    .catch((err) => log.warn("ambient scheduler start failed", { err }))
+
+  // Protocols — start morning briefing scheduler
+  void Promise.resolve(briefingScheduler.start())
+    .catch((err) => log.warn("briefing scheduler start failed", { err }))
+
+  // Hooks — load bundled hooks (gmail-watch, calendar-sync, github-events)
+  void hookLoader.loadAll()
+    .catch((err) => log.warn("hook loader failed", { err }))
+
+  // Voice — start wake word detector if enabled
+  if (config.WAKE_WORD_ENABLED === "true") {
+    const { wakeWordDetector } = await import("../voice/wake-word.js")
+    void wakeWordDetector.start()
+      .catch((err) => log.warn("wake word detector start failed", { err }))
+    log.info("wake word detection enabled")
+  }
+
   // Phase 27: Cross-device mesh — start peer discovery (fire-and-forget)
   void networkDiscovery.discover()
     .then((peers) => {
@@ -237,8 +286,15 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   }, SESSION_CLEANUP_INTERVAL_MS)
   sessionCleanupTimer.unref()
 
+  // Memory pressure guard — evicts sessions at warn threshold, graceful shutdown at critical
+  memoryGuard.start()
+
   // Outbox: persist to .edith/ dir + start retry flusher
   outbox.setPersistPath(path.join(workspaceDir, "..", ".edith"))
+
+  // Restore persisted sessions from previous run
+  const sessionPersistence = new SessionPersistence(path.join(workspaceDir, "..", ".edith"))
+  await sessionPersistence.load()
 
   // Python sidecar supervision
   const __filename = fileURLToPath(import.meta.url)
@@ -268,6 +324,7 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
 
   const shutdown = async (): Promise<void> => {
     log.info("shutting down via StartupResult.shutdown()")
+    memoryGuard.stop()
     clearInterval(sessionCleanupTimer)
     // Phase 9: Stop connectivity monitoring
     offlineCoordinator.stopMonitoring()

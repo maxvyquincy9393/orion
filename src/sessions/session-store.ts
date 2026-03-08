@@ -160,6 +160,26 @@ class SessionStore {
     edithMetrics.activeSessions.set(this.sessions.size)
   }
 
+  /** Return all active sessions (for persistence). */
+  getAllSessions(): Session[] {
+    return [...this.sessions.values()]
+  }
+
+  /** Return the in-memory message history for a session (for persistence). */
+  getHistory(userId: string, channel: string): Message[] {
+    return this.histories.get(makeSessionKey(userId, channel)) ?? []
+  }
+
+  /** Restore a previously-persisted session into the in-memory store. */
+  restoreSession(session: Session): void {
+    this.sessions.set(session.key, session)
+  }
+
+  /** Restore previously-persisted message history for a session. */
+  restoreHistory(userId: string, channel: string, history: Message[]): void {
+    this.histories.set(makeSessionKey(userId, channel), history)
+  }
+
   getActiveSessions(): Session[] {
     return [...this.sessions.values()]
   }
