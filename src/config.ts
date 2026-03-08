@@ -1,8 +1,8 @@
-﻿import dotenv from "dotenv"
+import dotenv from "dotenv"
 import { z } from "zod"
 
-const envFilePath = typeof process.env.ORION_ENV_FILE === "string" && process.env.ORION_ENV_FILE.trim().length > 0
-  ? process.env.ORION_ENV_FILE.trim()
+const envFilePath = typeof process.env.EDITH_ENV_FILE === "string" && process.env.EDITH_ENV_FILE.trim().length > 0
+  ? process.env.EDITH_ENV_FILE.trim()
   : ".env"
 
 dotenv.config({ path: envFilePath })
@@ -76,7 +76,7 @@ const ConfigSchema = z.object({
   BLUEBUBBLES_URL: z.string().default(""),
   BLUEBUBBLES_PASSWORD: z.string().default(""),
   WEBCHAT_PORT: intFromEnv.default(8080),
-  DATABASE_URL: z.string().default("file:./orion.db"),
+  DATABASE_URL: z.string().default("file:./edith.db"),
   DEFAULT_USER_ID: z.string().default("owner"),
   LOG_LEVEL: logLevelSchema.default("info"),
   PERSONA_ENABLED: boolFromEnv.default(true),
@@ -116,12 +116,39 @@ const ConfigSchema = z.object({
   SESSION_CONTEXT_WINDOW_TOKENS: intFromEnv.default(32_000),
   // Phase I-4: Engine Stats
   ENGINE_STATS_ENABLED: boolFromEnv.default(true),
+  // Phase 8: Email (Gmail + Outlook OAuth2)
+  GMAIL_CLIENT_ID: z.string().default(""),
+  GMAIL_CLIENT_SECRET: z.string().default(""),
+  GMAIL_REFRESH_TOKEN: z.string().default(""),
+  GMAIL_USER_EMAIL: z.string().default(""),
+  OUTLOOK_CLIENT_ID: z.string().default(""),
+  OUTLOOK_CLIENT_SECRET: z.string().default(""),
+  OUTLOOK_REFRESH_TOKEN: z.string().default(""),
+  // Phase 8: Calendar (Google + Outlook OAuth2)
+  GCAL_CLIENT_ID: z.string().default(""),
+  GCAL_CLIENT_SECRET: z.string().default(""),
+  GCAL_REFRESH_TOKEN: z.string().default(""),
+  OUTLOOK_CALENDAR_CLIENT_ID: z.string().default(""),
+  OUTLOOK_CALENDAR_CLIENT_SECRET: z.string().default(""),
+  OUTLOOK_CALENDAR_REFRESH_TOKEN: z.string().default(""),
+  // Phase 8: SMS (Twilio + Android ADB)
+  TWILIO_ACCOUNT_SID: z.string().default(""),
+  TWILIO_AUTH_TOKEN: z.string().default(""),
+  TWILIO_PHONE_NUMBER: z.string().default(""),
+  // Phase 8: Phone (Twilio Voice)
+  TWILIO_TWIML_APP_SID: z.string().default(""),
+  PHONE_WEBHOOK_URL: z.string().default(""),
+  // Phase 8: Android ADB (self-hosted SMS fallback)
+  ANDROID_ADB_HOST: z.string().default("127.0.0.1"),
+  ANDROID_ADB_PORT: intFromEnv.default(5037),
+  // Phase 8: Channel-specific security admin token (derived from ADMIN_TOKEN if exists)
+  ADMIN_TOKEN: z.string().default(""),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
 
 if (!parsed.success) {
-  console.error("[Orion Config Error] Invalid environment configuration.")
+  console.error("[EDITH Config Error] Invalid environment configuration.")
   for (const issue of parsed.error.issues) {
     const key = issue.path.join(".")
     console.error(`  - ${key}: ${issue.message}`)
@@ -141,7 +168,7 @@ export function validateRequired(keys: Array<keyof Config>): void {
 
   if (missing.length > 0) {
     console.error(
-      `[Orion Config Error] Missing required environment variables: ${missing.join(", ")}`,
+      `[EDITH Config Error] Missing required environment variables: ${missing.join(", ")}`,
     )
     process.exit(1)
   }
