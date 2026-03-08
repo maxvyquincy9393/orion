@@ -236,6 +236,8 @@ const ConfigSchema = z.object({
   OCTOPRINT_API_KEY: z.string().default(""),
   // Security: pipeline rate limiter
   PIPELINE_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(60),
+  /** Number of daily log files to retain before pruning. */
+  LOG_RETAIN_DAYS: z.coerce.number().int().positive().default(7),
 
   // Channel outbound rate limits (tokens per second, per channel API)
   CHANNEL_RATE_LIMIT_TELEGRAM_PER_S: z.coerce.number().positive().default(30),
@@ -286,6 +288,12 @@ const ConfigSchema = z.object({
   OPENAI_COMPAT_API_ENABLED: z.string().default('false'),
   // MCP server mode (Phase 43)
   MCP_SERVER_ENABLED: z.string().default('false'),
+  /** User ID to receive self-monitoring alerts (empty = alerts disabled). */
+  ALERT_USER_ID: z.string().default(""),
+  /** Outbox dead-letter count threshold that triggers an alert. */
+  ALERT_DEAD_LETTER_THRESHOLD: z.coerce.number().int().positive().default(5),
+  /** Error rate per minute threshold that triggers an alert. */
+  ALERT_ERROR_RATE_THRESHOLD: z.coerce.number().int().positive().default(10),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
