@@ -1,61 +1,90 @@
 /**
  * @file dm-policy.ts
- * @description Direct message permission policy — controls who can interact with EDITH.
+ * @description DM access control policy for the EDITH message pipeline.
  *
- * ARCHITECTURE:
- *   Enforced at channel layer before messages reach the pipeline.
- *   Modes: open (anyone), allowlist, blocklist, admin-only.
+ * ARCHITECTURE / INTEGRATION:
+ *   The singleton `dmPolicy` is checked at Stage 0 of message-pipeline.ts,
+ *   before rate-limiting. Blocked users receive BLOCKED_RESPONSE and the
+ *   message is not processed further.
+ *
+ *   Modes:
+ *     open       — all users allowed (default)
+ *     allowlist  — only users in ALLOWED_USER_IDS (comma-separated)
+ *     blocklist  — block users in BLOCKED_USER_IDS (comma-separated)
+ *     admin-only — only ADMIN_USER_ID
+ *
+ * @module security/dm-policy
  */
-import { createLogger } from '../logger.js'
+
 import { config } from '../config.js'
+import { createLogger } from '../logger.js'
 
 const log = createLogger('security.dm-policy')
 
-export type DmPolicyMode = 'open' | 'allowlist' | 'blocklist' | 'admin-only'
+/** Supported DM access policy modes. */
+export type PolicyMode = 'open' | 'allowlist' | 'blocklist' | 'admin-only'
 
-export interface DmPolicyResult {
-  allowed: boolean
-  reason: string
+/** @deprecated Use PolicyMode instead. */
+export type DmPolicyMode = PolicyMode
+
+/** Configuration for a DmPolicy instance. */
+interface DmPolicyConfig {
+  /** Access mode. */
+  mode: PolicyMode
+  /** Admin user ID — only checked in admin-only mode. */
+  adminUserId: string
+  /** User IDs to allow — only checked in allowlist mode. */
+  allowedIds: string[]
+  /** User IDs to block — only checked in blocklist mode. */
+  blockedIds: string[]
 }
 
-class DmPolicy {
-  private allowlist = new Set<string>()
-  private blocklist = new Set<string>()
+/**
+ * DM access policy — determines which userId values may interact with EDITH.
+ *
+ * Construct via the `dmPolicy` singleton which reads env config, or
+ * construct directly for testing with specific options.
+ */
+export class DmPolicy {
+  private readonly cfg: DmPolicyConfig
 
-  /** Get configured policy mode. Defaults to 'open'. */
-  private get mode(): DmPolicyMode {
-    return (config.DM_POLICY_MODE as DmPolicyMode) ?? 'open'
+  /** @param cfg - Policy configuration */
+  constructor(cfg: DmPolicyConfig) {
+    this.cfg = cfg
   }
 
   /**
-   * Check whether a userId is allowed to interact with EDITH.
-   * @param userId - User identifier to check
+   * Returns true if the user is permitted to send messages.
+   *
+   * @param userId - Inbound user identifier
    */
-  check(userId: string): DmPolicyResult {
-    if (this.blocklist.has(userId)) {
-      log.warn('blocked user attempted interaction', { userId })
-      return { allowed: false, reason: 'User is blocked' }
-    }
+  isAllowed(userId: string): boolean {
+    const { mode, adminUserId, allowedIds, blockedIds } = this.cfg
 
-    switch (this.mode) {
+    switch (mode) {
       case 'open':
-        return { allowed: true, reason: 'Open policy' }
-      case 'admin-only':
-        if (userId === config.ADMIN_USER_ID) return { allowed: true, reason: 'Admin user' }
-        return { allowed: false, reason: 'Admin-only policy' }
+        return true
       case 'allowlist':
-        if (this.allowlist.has(userId)) return { allowed: true, reason: 'On allowlist' }
-        return { allowed: false, reason: 'Not on allowlist' }
+        return allowedIds.includes(userId)
       case 'blocklist':
-        return { allowed: true, reason: 'Not on blocklist' }
+        return !blockedIds.includes(userId)
+      case 'admin-only':
+        return Boolean(adminUserId) && userId === adminUserId
     }
   }
-
-  /** Add user to allowlist. */
-  allow(userId: string): void { this.allowlist.add(userId) }
-
-  /** Add user to blocklist. */
-  block(userId: string): void { this.blocklist.add(userId) }
 }
 
-export const dmPolicy = new DmPolicy()
+/** Parse a comma-separated env var into a trimmed string array. */
+function parseIds(raw: string): string[] {
+  return raw.split(',').map((s) => s.trim()).filter(Boolean)
+}
+
+/** Singleton DM policy built from environment configuration. */
+export const dmPolicy = new DmPolicy({
+  mode: (config.DM_POLICY_MODE as PolicyMode) ?? 'open',
+  adminUserId: config.ADMIN_USER_ID ?? '',
+  allowedIds: parseIds(config.ALLOWED_USER_IDS ?? ''),
+  blockedIds: parseIds(config.BLOCKED_USER_IDS ?? ''),
+})
+
+log.info('DM policy active', { mode: config.DM_POLICY_MODE })

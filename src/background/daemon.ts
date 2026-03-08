@@ -32,6 +32,7 @@ import { calendarService } from "../services/calendar.js"
 import { wellnessDetector } from "../emotion/wellness-detector.js"
 import { missionManager } from "../mission/mission-manager.js"
 import { learningReport } from "../self-improve/learning-report.js"
+import { databaseBackup } from "../database/backup.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
@@ -63,6 +64,7 @@ export class EDITHDaemon {
     this.lastActivityTime = Date.now()
     heartbeat.recordActivity(this.lastActivityTime)
     this.initializeEventSubscriptions()
+    databaseBackup.start()
     logger.info("Daemon started (heartbeat mode)")
     await this.runCycle()
     heartbeat.start()
@@ -107,6 +109,7 @@ export class EDITHDaemon {
 
   stop(): void {
     heartbeat.stop()
+    databaseBackup.stop()
     this.cycleInProgress = false
     this.running = false
     logger.info("Daemon stopped")

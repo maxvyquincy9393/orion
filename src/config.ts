@@ -248,6 +248,10 @@ const ConfigSchema = z.object({
   // Phase 28: Security hardening
   DM_POLICY_MODE: z.enum(['open', 'allowlist', 'blocklist', 'admin-only']).default('open'),
   ADMIN_USER_ID: z.string().default(''),
+  /** Comma-separated list of allowed user IDs (used when DM_POLICY_MODE=allowlist). */
+  ALLOWED_USER_IDS: z.string().default(""),
+  /** Comma-separated list of blocked user IDs (used when DM_POLICY_MODE=blocklist). */
+  BLOCKED_USER_IDS: z.string().default(""),
   // Phase 30: Multi-account key rotation
   ANTHROPIC_API_KEYS: z.string().default(''),
   OPENAI_API_KEYS: z.string().default(''),
@@ -259,6 +263,29 @@ const ConfigSchema = z.object({
   TOGETHER_API_KEY: z.string().default(''),
   FIREWORKS_API_KEY: z.string().default(''),
   COHERE_API_KEY: z.string().default(''),
+  /** API token for authenticating REST requests when gateway is non-localhost. */
+  EDITH_API_TOKEN: z.string().default(""),
+  /** Directory where hourly SQLite backups are written. */
+  EDITH_BACKUP_DIR: z.string().default(".edith/backups"),
+  /** Interval between backups in hours. */
+  EDITH_BACKUP_INTERVAL_HOURS: z.coerce.number().int().positive().default(1),
+  /** Number of backup files to retain (oldest are pruned). */
+  EDITH_BACKUP_RETAIN_COUNT: z.coerce.number().int().positive().default(24),
+  // Protocol config (Phase 36)
+  MORNING_BRIEFING_ENABLED: z.string().default('true'),
+  MORNING_BRIEFING_TIME: z.string().default('07:00'),
+  // Ambient monitor (Phase 37)
+  USER_LATITUDE: z.string().default(''),
+  USER_LONGITUDE: z.string().default(''),
+  NEWS_ENABLED: z.string().default('false'),
+  NEWS_API_KEY: z.string().default(''),
+  // Voice wake word (Phase 40)
+  WAKE_WORD_ENABLED: z.string().default('false'),
+  WAKE_WORD_PHRASE: z.string().default('hey edith'),
+  // API compatibility (Phase 42)
+  OPENAI_COMPAT_API_ENABLED: z.string().default('false'),
+  // MCP server mode (Phase 43)
+  MCP_SERVER_ENABLED: z.string().default('false'),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)

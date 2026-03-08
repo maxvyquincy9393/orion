@@ -46,6 +46,7 @@ import { syncScheduler } from "../memory/knowledge/sync-scheduler.js"
 import { textSentiment } from "../emotion/text-sentiment.js"
 import { moodTracker } from "../emotion/mood-tracker.js"
 import { pipelineRateLimiter } from "../security/pipeline-rate-limiter.js"
+import { dmPolicy } from "../security/dm-policy.js"
 import { edithMetrics } from "../observability/metrics.js"
 import { auditEngine } from "../security/audit.js"
 
@@ -375,6 +376,12 @@ export async function processMessage(
   const pipelineStartMs = Date.now()
 
   log.info("pipeline start", { requestId, userId, channel })
+
+  // Stage 0a: DM access policy
+  if (!dmPolicy.check(userId).allowed) {
+    log.warn("message blocked by DM policy", { userId, requestId })
+    return blockedResult(requestId)
+  }
 
   // Stage 0: Pipeline rate limit (20 msg/min per user, independent of channel)
   if (!pipelineRateLimiter.check(userId)) {
