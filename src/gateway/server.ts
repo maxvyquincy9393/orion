@@ -38,6 +38,7 @@ import {
   type AuthContext,
 } from "./auth-middleware.js"
 import { channelHealthMonitor } from "./channel-health-monitor.js"
+import { buildHealthPayload } from "./health.js"
 import { createRateLimiter } from "./rate-limiter.js"
 import { registry, edithMetrics } from "../observability/metrics.js"
 
@@ -568,21 +569,10 @@ export class GatewayServer {
         await this.attachAuthenticatedClient(socket as unknown as SocketLike, auth)
       })
 
-      app.get("/health", async () => {
-        const engines = orchestrator.getAvailableEngines()
-        const channels = channelManager.getConnectedChannels()
-        const healthy = engines.length > 0 && channels.length > 0
-
-        return {
-          status: healthy ? "ok" : "degraded",
-          version: APP_VERSION,
-          uptime: Math.floor(process.uptime()),
-          engines,
-          channels,
-          users: multiUser.listUsers().length,
-          memory: { initialized: true },
-          daemon: daemon.isRunning(),
-        }
+      app.get("/health", async (_req, reply) => {
+        const payload = await buildHealthPayload(APP_VERSION)
+        const statusCode = payload.status === "ok" ? 200 : 503
+        return reply.status(statusCode).send(payload)
       })
 
       app.get("/api/channels/health", async (req, reply) => {
