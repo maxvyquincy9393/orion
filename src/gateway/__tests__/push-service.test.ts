@@ -10,7 +10,7 @@
  *   - Uses unique `userId` per test to prevent rate-limit counter bleed.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { PushToken } from "@prisma/client"
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
@@ -55,6 +55,8 @@ function deviceNotRegisteredTickets(): unknown {
 describe("PushService", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2024-06-15T12:00:00"))   // noon — outside all quiet windows
 
     const { prisma } = await import("../../database/index.js")
     const cfg = (await import("../../config.js")).default as Record<string, unknown>
@@ -76,6 +78,10 @@ describe("PushService", () => {
       ok: true,
       json: async () => successTickets(1),
     }) as unknown as typeof fetch
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("sends notification to Expo when DRY_RUN=false and tokens exist", async () => {
@@ -175,7 +181,6 @@ describe("PushService", () => {
   })
 
   it("suppresses non-critical notification during quiet hours", async () => {
-    vi.useFakeTimers()
     // Set system time to 2:00 AM — well within 23:00–07:00 quiet window
     vi.setSystemTime(new Date("2024-01-15T02:00:00"))
 
@@ -190,11 +195,9 @@ describe("PushService", () => {
     })
 
     expect(global.fetch).not.toHaveBeenCalled()
-    vi.useRealTimers()
   })
 
   it("sends critical notification even during quiet hours", async () => {
-    vi.useFakeTimers()
     vi.setSystemTime(new Date("2024-01-15T02:00:00"))
 
     const { pushService } = await import("../push-service.js")
@@ -208,7 +211,6 @@ describe("PushService", () => {
     })
 
     expect(global.fetch).toHaveBeenCalledOnce()
-    vi.useRealTimers()
   })
 
   it("logs error on non-OK Expo API response without throwing", async () => {
