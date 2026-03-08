@@ -12,7 +12,7 @@ Dia berjalan lokal, multi-channel, multi-modal, dan belajar dari setiap interaks
 
 - **Stack:** TypeScript (ESM) + Prisma (SQLite) + Python sidecar
 - **Package manager:** `pnpm` (JANGAN pakai npm/yarn)
-- **Branch aktif:** `design`
+- **Branch aktif:** `main`
 - **Test runner:** `vitest`
 
 ---
@@ -192,7 +192,7 @@ export const myService = new MyService()  // ← singleton di bottom of file
 
 ## 🔄 GIT WORKFLOW (WAJIB)
 
-**Branch aktif:** `design`
+**Branch aktif:** `main`
 
 Setiap file baru atau perubahan signifikan HARUS di-commit dengan Conventional Commits:
 
@@ -200,7 +200,7 @@ Setiap file baru atau perubahan signifikan HARUS di-commit dengan Conventional C
 # Format: type(scope): description
 git add src/memory/user-preference.ts
 git commit -m "feat(memory): add UserPreferenceEngine with CIPHER preference inference"
-git push origin design
+git push origin main
 
 # Types: feat | fix | docs | refactor | test | chore
 # Scope: memory | core | voice | channels | background | engines | security
