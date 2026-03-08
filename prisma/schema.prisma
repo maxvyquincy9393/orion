@@ -332,12 +332,12 @@ model UserPreference {
   titleWord           String   @default("Sir")
   // Tone preset
   tonePreset          String   @default("jarvis")
-  // CIPHER-inferred behavioral preferences (JSON array of BehavioralPref)
-  behavioralPrefs     Json     @default("[]")
-  // Custom personality traits (string[])
-  customTraits        Json     @default("[]")
-  // History of slider values for temporal evolution tracking (JSON array)
-  preferenceHistory   Json     @default("{}")
+  // CIPHER-inferred behavioral preferences (JSON array of BehavioralPref) — null means []
+  behavioralPrefs     Json?
+  // Custom personality traits (string[]) — null means []
+  customTraits        Json?
+  // History of slider values for temporal evolution tracking — null means {}
+  preferenceHistory   Json?
   // Inference metadata
   inferenceConfidence Float    @default(0)
   lastInferredAt      DateTime?

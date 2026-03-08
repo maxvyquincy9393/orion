@@ -218,9 +218,10 @@ export class AdaptiveQuietHours {
    * Import previously persisted records (call during startup).
    */
   importRecords(records: ActivityRecord[]): void {
+    // Note: typeof NaN === "number" in JS — must use Number.isFinite for safe timestamp check
     this.records = records.filter(
       (record) =>
-        typeof record.timestamp === "number"
+        Number.isFinite(record.timestamp)
         && typeof record.weight === "number"
         && record.weight > 0,
     )
