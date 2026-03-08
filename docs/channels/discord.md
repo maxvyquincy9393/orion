@@ -1,103 +1,120 @@
-# Discord Channel (HP Test MVP)
+# Discord Channel Setup
 
-Date: 2026-02-26
+## Requirements
 
-## Why Discord as the next test channel
+- A Discord bot token from the [Discord Developer Portal](https://discord.com/developers/applications)
+- A Discord server (guild) where you have admin rights, OR use DMs with the bot
+- EDITH running with gateway enabled
 
-Discord is practical for phone-based testing after Telegram because:
+---
 
-- mobile app is widely available
-- `discord.js` supports local development without a public webhook
-- good fit for both DMs and a single private test channel in a guild
+## Step 1 — Create a Discord Application and Bot
 
-## Research-informed defaults (same principles as Telegram)
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **New Application** and give it a name
+3. Go to the **Bot** section in the left sidebar
+4. Click **Add Bot**
+5. Under **Token**, click **Copy** (you'll need this for `.env`)
 
-### 1. Show progress, do not fake latency
+---
 
-Users generally prefer responsive systems; artificial delays hurt experienced users.
+## Step 2 — Enable Required Intents
 
-Implementation choice:
-- no artificial delay
-- immediate lightweight feedback (`typing…`) in-channel before EDITH response
+In the Bot section of the Developer Portal, scroll down to **Privileged Gateway Intents** and enable:
 
-### 2. Better repair messages beat vague failures
+- **Message Content Intent** — required to read message text
+- **Server Members Intent** — optional, only if you need member info
 
-Repair-focused dialog behavior improves recovery and trust.
+---
 
-Implementation choice:
-- clear command-based setup/debug path (`!help`, `!id`, `!ping`)
-- explicit error reply when processing fails
+## Step 3 — Invite the Bot to Your Server
 
-### 3. Safe default scope
+1. Go to **OAuth2 > URL Generator** in the Developer Portal
+2. Under **Scopes**, select `bot`
+3. Under **Bot Permissions**, select:
+   - `Read Messages/View Channels`
+   - `Send Messages`
+   - `Read Message History`
+4. Copy the generated URL and open it in a browser to invite the bot
 
-Bots should not answer across all guild channels by default.
+---
 
-Implementation choice:
-- if `DISCORD_CHANNEL_ID` is empty, only DMs are allowed
-- guild channels require explicit allowlist in `DISCORD_CHANNEL_ID`
+## Step 4 — Configure EDITH
 
-## Implemented behavior
-
-- `discord.js` channel adapter: `src/channels/discord.ts`
-- inbound message processing reuses shared runtime path (`hooks`, `usage`, `MemRL`) via:
-  - `src/core/incoming-message-service.ts`
-- supports both command styles:
-  - `!help` / `/help`
-  - `!id` / `/id`
-  - `!ping` / `/ping`
-- per-channel serialized processing to avoid overlapping replies
-- outbound sends chunked below Discord message limit
-
-## Environment variables
-
-Required:
-
-- `DISCORD_BOT_TOKEN`
-
-Optional (recommended):
-
-- `DISCORD_CHANNEL_ID`
-  - single id or comma/newline-separated ids
-  - if empty: adapter responds only in DMs
-
-Examples:
+Add to your `.env`:
 
 ```env
-DISCORD_BOT_TOKEN=YOUR_BOT_TOKEN
+DISCORD_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+```
+
+Optionally restrict to specific channel IDs (comma-separated). If empty, EDITH responds to DMs only:
+
+```env
 DISCORD_CHANNEL_ID=123456789012345678
 ```
 
-## Quick start (local)
+---
 
-1. Create a Discord bot in the Developer Portal.
-2. Enable intents for:
-   - `Server Members Intent` not required for this MVP
-   - `Message Content Intent` required for text content processing
-3. Invite the bot to your server (or just use DMs).
-4. Set `.env`:
-   - `DISCORD_BOT_TOKEN=...`
-   - optional `DISCORD_CHANNEL_ID=...`
-5. Run EDITH:
-   - `pnpm dev -- --mode all`
-6. In Discord mobile/desktop:
-   - DM the bot or use your allowlisted channel
-   - run `!help`, `!id`, `!ping`
-   - send a normal message
+## Step 5 — Start EDITH
+
+```bash
+pnpm dev -- --mode all
+```
+
+You should see:
+
+```
+[channels.discord] Discord bot connected as YourBotName#1234
+```
+
+---
+
+## Step 6 — Test the Connection
+
+In Discord (DM the bot or use your allowlisted channel):
+
+- `!help` or `/help` — lists available commands
+- `!id` or `/id` — returns the current channel/DM ID
+- `!ping` or `/ping` — round-trip health check
+- Any normal message — processed by the full EDITH pipeline
+
+---
+
+## Supported Features
+
+| Feature | Status |
+|---------|--------|
+| Text messages | Supported |
+| DMs | Supported — DM-only by default |
+| Guild channels | Supported — requires `DISCORD_CHANNEL_ID` |
+| Images | Supported — processed via vision pipeline |
+| Voice messages | Partial — STT if attachment type is audio |
+| Typing indicator | Supported — shown while processing |
+| Message chunking | Supported — splits responses at Discord's 2000-char limit |
+| Slash commands | Planned |
+
+---
 
 ## Troubleshooting
 
-- Bot is online but EDITH does not reply:
-  - verify `Message Content Intent` is enabled in Discord Developer Portal
-  - verify channel is DM or included in `DISCORD_CHANNEL_ID`
-- Guild channel ignored:
-  - expected when `DISCORD_CHANNEL_ID` is empty (DM-only default)
-- `channel_id` confusion:
-  - use `!id` in the exact Discord channel you want to allowlist
+**Bot is online but EDITH does not reply:**
+- Verify `Message Content Intent` is enabled in the Developer Portal
+- Verify the channel is a DM or is listed in `DISCORD_CHANNEL_ID`
+- Check `[channels.discord]` logs
 
-## References (docs + papers)
+**Guild channel ignored:**
+- This is the default when `DISCORD_CHANNEL_ID` is empty
+- Add the channel ID to `DISCORD_CHANNEL_ID`
+- Use `!id` in the exact channel to get the ID
 
-- Discord Developer Docs (official): https://discord.com/developers/docs/intro
-- discord.js Guide / docs (official project docs): https://discord.js.org/
-- Fuehrer & Bittner (2024), response timing and chatbot UX (BISE / Springer): https://link.springer.com/article/10.1007/s12599-024-00992-2
-- Galbraith et al. (2024), dialogue repair in popular virtual assistants (Frontiers / PubMed record): https://pubmed.ncbi.nlm.nih.gov/38693812/
-- Wang et al. (2024), collaborative repair strategies for conversational AI (IBM Research): https://research.ibm.com/publications/effectiveness-of-collaborative-repair-strategies-in-conversational-ai-communications
+**Invalid token error:**
+- Regenerate the token in the Developer Portal and update `.env`
+- Never commit your bot token — it is a secret
+
+---
+
+## References
+
+- [Discord Developer Portal](https://discord.com/developers/applications)
+- [discord.js Documentation](https://discord.js.org/)
+- [EDITH Channel Architecture](../architecture.md)
