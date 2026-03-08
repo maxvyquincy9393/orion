@@ -15,13 +15,14 @@ import { signMessage, type ACPMessage, type AgentCredential } from "../acp/proto
 import { eventBus } from "../core/event-bus.js"
 import { heartbeat } from "./heartbeat.js"
 import { isWithinHardQuietHours } from "./quiet-hours.js"
+import { calendarService } from "../services/calendar.js"
 
 const logger = createLogger("daemon")
 const TRIGGERS_FILE = "permissions/triggers.yaml"
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-export class OrionDaemon {
+export class EDITHDaemon {
   private running = false
   private lastActivityTime = Date.now()
   private cycleInProgress = false
@@ -123,6 +124,43 @@ export class OrionDaemon {
     }
   }
 
+  /**
+   * Checks for upcoming calendar events and sends proactive alerts.
+   *
+   * Phase 8 calendar integration: Sends alerts 15 minutes before meetings.
+   * Integrates with VoI calculator and respects quiet hours.
+   */
+  private async checkCalendarAlerts(userId: string): Promise<void> {
+    try {
+      // Initialize calendar service if not already done
+      await calendarService.init()
+
+      // Get events starting within 15 minutes
+      const alerts = await calendarService.getUpcomingAlerts(15)
+
+      for (const alert of alerts) {
+        const message =
+          `📅 Meeting in 15 minutes: ${alert.title}\n` +
+          `Time: ${alert.start.toLocaleTimeString()}\n` +
+          (alert.location ? `Location: ${alert.location}\n` : "") +
+          (alert.meetingUrl ? `Join: ${alert.meetingUrl}` : "")
+
+        // Check permissions before sending
+        const allowed = await sandbox.check(PermissionAction.PROACTIVE_MESSAGE, userId)
+        if (allowed) {
+          const sent = await channelManager.send(userId, message)
+          if (sent) {
+            logger.info("Calendar alert sent", { userId, eventId: alert.id, title: alert.title })
+          }
+        } else {
+          logger.debug("Calendar alert blocked by permissions", { userId, eventId: alert.id })
+        }
+      }
+    } catch (error) {
+      logger.error("Failed to check calendar alerts", { error })
+    }
+  }
+
   private async runCycle(): Promise<void> {
     try {
       await triggerEngine.load(TRIGGERS_FILE)
@@ -131,6 +169,7 @@ export class OrionDaemon {
       await pairingManager.cleanupExpired()
 
       await this.checkForActivity(userId)
+      await this.checkCalendarAlerts(userId) // Phase 8: Calendar proactive alerts
       await this.maybeRunTemporalMaintenance(userId)
 
       const now = new Date()
@@ -240,4 +279,4 @@ export class OrionDaemon {
   }
 }
 
-export const daemon = new OrionDaemon()
+export const daemon = new EDITHDaemon()

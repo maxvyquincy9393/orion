@@ -23,7 +23,6 @@
 
 import { execa } from "execa"
 import type { BaseChannel } from "./base.js"
-import { splitMessage, pollForConfirm } from "./base.js"
 import { createLogger } from "../logger.js"
 import config from "../config.js"
 

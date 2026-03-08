@@ -455,9 +455,9 @@ export class CalendarService {
         start: new Date(start),
         end: new Date(end),
         attendees: (item.attendees || []).map((a) => a.email || ""),
-        location: item.location,
-        description: item.description,
-        meetingUrl: item.hangoutLink || undefined,
+        location: item.location ?? undefined,
+        description: item.description ?? undefined,
+        meetingUrl: item.hangoutLink ?? undefined,
         calendarId: "primary",
         status: (item.status as CalendarEvent["status"]) || "confirmed",
       })
@@ -469,7 +469,7 @@ export class CalendarService {
   /**
    * Lists upcoming events from Outlook Calendar.
    */
-  private async listUpcomingOutlook(hours: number): Promise<CalendarEvent[]> {
+  private async listUpcomingOutlook(_hours: number): Promise<CalendarEvent[]> {
     // TODO: Implement Outlook Calendar
     return []
   }
@@ -507,9 +507,9 @@ export class CalendarService {
           start: new Date(eventStart),
           end: new Date(eventEnd),
           attendees: (item.attendees || []).map((a) => a.email || ""),
-          location: item.location,
-          description: item.description,
-          meetingUrl: item.hangoutLink || undefined,
+          location: item.location ?? undefined,
+          description: item.description ?? undefined,
+          meetingUrl: item.hangoutLink ?? undefined,
           calendarId: "primary",
           status: (item.status as CalendarEvent["status"]) || "confirmed",
         })
@@ -557,9 +557,9 @@ export class CalendarService {
       start: new Date(event.start!.dateTime!),
       end: new Date(event.end!.dateTime!),
       attendees: (event.attendees || []).map((a) => a.email || ""),
-      location: event.location,
-      description: event.description,
-      meetingUrl: event.hangoutLink || undefined,
+      location: event.location ?? undefined,
+      description: event.description ?? undefined,
+      meetingUrl: event.hangoutLink ?? undefined,
       calendarId: draft.calendarId || "primary",
       status: "confirmed",
     }
@@ -568,7 +568,7 @@ export class CalendarService {
   /**
    * Creates event in Outlook Calendar.
    */
-  private async createEventOutlook(draft: CalendarEventDraft): Promise<CalendarEvent | null> {
+  private async createEventOutlook(_draft: CalendarEventDraft): Promise<CalendarEvent | null> {
     // TODO: Implement Outlook Calendar
     return null
   }

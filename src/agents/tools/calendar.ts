@@ -7,7 +7,7 @@
  * @module agents/tools/calendar
  */
 
-import { tool } from "@modelcontextprotocol/sdk/tools.js"
+import { tool } from "ai"
 import { z } from "zod"
 import { calendarService } from "../../services/calendar.js"
 import type { CalendarEventDraft } from "../../services/calendar.js"
@@ -25,7 +25,6 @@ const log = createLogger("tools.calendar")
  * - delete: Delete existing event
  */
 export const calendarTool = tool({
-  name: "calendar",
   description: "Manage calendar events: list upcoming, find free slots, create/delete events",
   inputSchema: z.object({
     action: z.enum(["list", "findSlots", "create", "delete"]).describe("Calendar action to perform"),
@@ -40,7 +39,8 @@ export const calendarTool = tool({
     description: z.string().optional().describe("Event description (for create)"),
     eventId: z.string().optional().describe("Event ID (for delete)"),
   }),
-  execute: async ({ action, hours, date, duration, title, start, end, attendees, location, description, eventId }) => {
+  execute: async (input) => {
+    const { action, hours, date, duration, title, start, end, attendees, location, description, eventId } = input
     try {
       // Initialize calendar service if needed
       await calendarService.init()

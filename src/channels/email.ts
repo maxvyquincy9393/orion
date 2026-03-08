@@ -45,6 +45,7 @@ export interface EmailMessage extends RawEmail {
   isRead: boolean
   labels: string[]
   threadId: string
+  date: Date
 }
 
 /**
@@ -102,7 +103,8 @@ export class EmailChannel implements BaseChannel {
   private gmailClient: gmail_v1.Gmail | null = null
   private outlookClient: Client | null = null
   private pollTimer: NodeJS.Timeout | null = null
-  private lastCheckedAt = new Date(0) // epoch start
+  // TODO: Use for incremental polling in future
+  // private _lastCheckedAt = new Date(0) // epoch start
   private connected = false
   private pendingDrafts = new Map<string, EmailDraft>()
 
@@ -197,7 +199,7 @@ export class EmailChannel implements BaseChannel {
    * @param message Message content
    * @returns true if draft was created and sent to user for confirmation
    */
-  async send(userId: string, message: string): Promise<boolean> {
+  async send(_userId: string, message: string): Promise<boolean> {
     const recipientEmail = this.getUserEmail()
     if (!recipientEmail) {
       log.error("cannot send email: user email not configured")
@@ -307,7 +309,7 @@ export class EmailChannel implements BaseChannel {
         await this.processEmail(email)
       }
 
-      this.lastCheckedAt = new Date()
+      // this._lastCheckedAt = new Date()
     } catch (error) {
       log.error("inbox polling error", { error })
     }
@@ -484,7 +486,6 @@ Return ONLY one word: high, medium, low, or spam`
         id: msg.id,
         subject,
         from,
-        to: [config.GMAIL_USER_EMAIL],
         body,
         date: new Date(Number.parseInt(fullMessage.data.internalDate || "0", 10)),
         isRead: false,
@@ -534,7 +535,7 @@ Return ONLY one word: high, medium, low, or spam`
   /**
    * Sends email via Outlook API.
    */
-  private async sendViaOutlook(draft: EmailDraft): Promise<string> {
+  private async sendViaOutlook(_draft: EmailDraft): Promise<string> {
     // TODO: Implement Outlook sending
     throw new Error("Outlook sending not yet implemented")
   }

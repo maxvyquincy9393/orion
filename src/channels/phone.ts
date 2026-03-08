@@ -83,10 +83,10 @@ export class PhoneChannel implements BaseChannel {
   private allowedCallers = new Set<string>()
 
   /** Twilio mulaw audio sample rate */
-  private static readonly TWILIO_SAMPLE_RATE = 8000
+  // private static readonly TWILIO_SAMPLE_RATE = 8000
 
   /** Phase 1 STT expected sample rate */
-  private static readonly STT_SAMPLE_RATE = 16000
+  // private static readonly STT_SAMPLE_RATE = 16000
 
   /** Maximum concurrent calls */
   private static readonly MAX_CONCURRENT_CALLS = 5
@@ -238,7 +238,7 @@ export class PhoneChannel implements BaseChannel {
    *
    * Instructs Twilio to open WebSocket stream to EDITH.
    */
-  handleIncomingTwiML(from: string, to: string): string {
+  handleIncomingTwiML(from: string, _to: string): string {
     // Check allowlist if configured
     if (this.allowedCallers.size > 0 && !this.allowedCallers.has(from)) {
       return `<?xml version="1.0" encoding="UTF-8"?>
@@ -331,13 +331,12 @@ export class PhoneChannel implements BaseChannel {
    * NOTE: This is a placeholder. Full implementation requires
    * audio codec library or native Node.js audio processing.
    */
-  private mulawToPCM(mulawBuffer: Buffer): Buffer {
-    // TODO: Implement mulaw -> PCM conversion
-    // Requires audio codec library
-
-    log.warn("mulaw -> PCM conversion not implemented")
-    return mulawBuffer
-  }
+  // private mulawToPCM(mulawBuffer: Buffer): Buffer {
+  //   // TODO: Implement mulaw -> PCM conversion
+  //   // Requires audio codec library
+  //   log.warn("mulaw -> PCM conversion not implemented")
+  //   return mulawBuffer
+  // }
 
   /**
    * Converts PCM 16kHz TTS output back to mulaw 8kHz for Twilio.
@@ -347,13 +346,12 @@ export class PhoneChannel implements BaseChannel {
    * NOTE: This is a placeholder. Full implementation requires
    * audio codec library or native Node.js audio processing.
    */
-  private pcmToMulaw(pcmBuffer: Buffer): Buffer {
-    // TODO: Implement PCM -> mulaw conversion
-    // Requires audio codec library
-
-    log.warn("PCM -> mulaw conversion not implemented")
-    return pcmBuffer
-  }
+  // private pcmToMulaw(pcmBuffer: Buffer): Buffer {
+  //   // TODO: Implement PCM -> mulaw conversion
+  //   // Requires audio codec library
+  //   log.warn("PCM -> mulaw conversion not implemented")
+  //   return pcmBuffer
+  // }
 
   /**
    * Extracts phone number from userId.
