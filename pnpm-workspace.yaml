@@ -1,5 +1,7 @@
 packages:
   - apps/*
+  - extensions/*
+  - packages/*
 
 ignoredBuiltDependencies:
   - '@prisma/client'

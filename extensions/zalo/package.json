@@ -1,0 +1,1 @@
+{"name":"@edith/ext-zalo","version":"0.1.0","description":"Zalo channel extension for EDITH","type":"module","keywords":["edith-extension","channel","zalo"],"peerDependencies":{"edith":"*"}}

@@ -1,0 +1,1 @@
+{"name":"@edith/ext-home-assistant","version":"0.1.0","description":"Home Assistant integration for EDITH","type":"module","keywords":["edith-extension","tool","home-assistant"],"peerDependencies":{"edith":"*"}}

@@ -1,0 +1,9 @@
+{
+  "name": "@edith/plugin-sdk",
+  "version": "0.1.0",
+  "description": "EDITH extension SDK",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "keywords": ["edith", "sdk"]
+}

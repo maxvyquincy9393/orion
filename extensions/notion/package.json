@@ -1,0 +1,1 @@
+{"name":"@edith/ext-notion","version":"0.1.0","description":"Notion integration for EDITH","type":"module","keywords":["edith-extension","tool","notion"],"peerDependencies":{"edith":"*"}}
