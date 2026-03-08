@@ -665,3 +665,14 @@ model AuditRecord {
   @@index([risk])
   @@index([createdAt])
 }
+
+model PredictionCache {
+  id          String   @id @default(cuid())
+  userId      String
+  intent      String
+  confidence  Float
+  preloadHint String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
