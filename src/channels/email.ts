@@ -103,10 +103,20 @@ export class EmailChannel implements BaseChannel {
   private gmailClient: gmail_v1.Gmail | null = null
   private outlookClient: Client | null = null
   private pollTimer: NodeJS.Timeout | null = null
-  // TODO: Use for incremental polling in future
-  // private _lastCheckedAt = new Date(0) // epoch start
   private connected = false
   private pendingDrafts = new Map<string, EmailDraft>()
+
+  /**
+   * TODO: Implement incremental polling
+   *
+   * Currently polls all unread emails on each cycle.
+   * For production: track lastCheckedAt and only fetch emails newer than that.
+   *
+   * Implementation:
+   *   - Add: private lastCheckedAt = new Date(0)
+   *   - Gmail: Use query `after:${lastCheckedAt.getTime() / 1000}`
+   *   - Outlook: Use filter `receivedDateTime gt ${lastCheckedAt.toISOString()}`
+   */
 
   /**
    * Polling interval for checking new emails (milliseconds).
@@ -136,13 +146,17 @@ export class EmailChannel implements BaseChannel {
    * Polling interval: config.channels.email.checkIntervalMinutes (default: 15 min).
    * If OAuth2 credentials are missing or invalid, channel will not start.
    *
-   * @throws Error if OAuth2 initialization fails
+   * **IMPORTANT:** Only Gmail is currently supported. Outlook provider will
+   * throw "not yet implemented" error.
+   *
+   * @throws Error if OAuth2 initialization fails or if Outlook is selected
    */
   async start(): Promise<void> {
     try {
       if (this.provider === "gmail") {
         await this.initGmail()
       } else {
+        // Outlook not yet implemented - will throw error
         await this.initOutlook()
       }
 
@@ -308,8 +322,6 @@ export class EmailChannel implements BaseChannel {
       for (const email of emails) {
         await this.processEmail(email)
       }
-
-      // this._lastCheckedAt = new Date()
     } catch (error) {
       log.error("inbox polling error", { error })
     }
@@ -421,9 +433,15 @@ Return ONLY one word: high, medium, low, or spam`
    * Handles token refresh if access token is expired.
    */
   private async initOutlook(): Promise<void> {
-    // TODO: Implement Outlook OAuth2 initialization
-    // Requires Microsoft Graph token refresh flow
-    throw new Error("Outlook integration not yet implemented")
+    throw new Error(
+      "Outlook email integration not yet implemented.\n\n" +
+        "To use EDITH with email, please use Gmail (GMAIL_USER_EMAIL + GMAIL_CLIENT_ID).\n\n" +
+        "Outlook support requires:\n" +
+        "  - Microsoft Graph OAuth2 token flow\n" +
+        "  - Mail.Read and Mail.Send permissions\n" +
+        "  - Token refresh implementation\n\n" +
+        "See: src/channels/email.ts for Gmail implementation patterns",
+    )
   }
 
   /**
@@ -536,8 +554,7 @@ Return ONLY one word: high, medium, low, or spam`
    * Sends email via Outlook API.
    */
   private async sendViaOutlook(_draft: EmailDraft): Promise<string> {
-    // TODO: Implement Outlook sending
-    throw new Error("Outlook sending not yet implemented")
+    throw new Error("Outlook email sending not yet implemented. Please use Gmail provider.")
   }
 
   /**

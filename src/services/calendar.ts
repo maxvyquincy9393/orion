@@ -124,7 +124,10 @@ export class CalendarService {
   /**
    * Initializes the calendar service with OAuth2 credentials.
    *
-   * @throws Error if OAuth2 credentials are missing or invalid
+   * **IMPORTANT:** Only Google Calendar is currently supported.
+   * Outlook Calendar will throw "not yet implemented" error.
+   *
+   * @throws Error if OAuth2 credentials are missing or invalid, or if Outlook is selected
    */
   async init(): Promise<void> {
     if (this.initialized) {
@@ -135,6 +138,7 @@ export class CalendarService {
       if (this.provider === "google") {
         await this.initGoogle()
       } else {
+        // Outlook Calendar not yet implemented - will throw error
         await this.initOutlook()
       }
 
@@ -411,8 +415,15 @@ export class CalendarService {
    * Initializes Outlook Calendar API client.
    */
   private async initOutlook(): Promise<void> {
-    // TODO: Implement Outlook Calendar OAuth2
-    throw new Error("Outlook Calendar integration not yet implemented")
+    throw new Error(
+      "Outlook Calendar integration not yet implemented.\n\n" +
+        "To use calendar features, please use Google Calendar (GOOGLE_CALENDAR_CLIENT_ID).\n\n" +
+        "Outlook Calendar support requires:\n" +
+        "  - Microsoft Graph OAuth2 token flow\n" +
+        "  - Calendars.Read and Calendars.ReadWrite permissions\n" +
+        "  - Event creation/deletion via Graph API\n\n" +
+        "See: src/services/calendar.ts for Google Calendar implementation patterns",
+    )
   }
 
   /**

@@ -82,14 +82,21 @@ export class PhoneChannel implements BaseChannel {
   private activeCalls = new Map<string, ActiveCall>()
   private allowedCallers = new Set<string>()
 
-  /** Twilio mulaw audio sample rate */
-  // private static readonly TWILIO_SAMPLE_RATE = 8000
-
-  /** Phase 1 STT expected sample rate */
-  // private static readonly STT_SAMPLE_RATE = 16000
-
   /** Maximum concurrent calls */
   private static readonly MAX_CONCURRENT_CALLS = 5
+
+  /**
+   * AUDIO CONVERSION REQUIREMENTS (Not yet implemented):
+   *
+   * Twilio sends audio as G.711 μ-law at 8kHz mono
+   * Phase 1 STT expects PCM at 16kHz mono
+   *
+   * Required dependencies:
+   * - Audio codec library (e.g., node-g711, audio-decode)
+   * - Upsampling/downsampling (e.g., audio-resampler)
+   *
+   * Implementation: See Phase 1 voice/bridge.ts for PCM handling patterns
+   */
 
   /**
    * Starts the phone channel.
@@ -290,68 +297,51 @@ export class PhoneChannel implements BaseChannel {
   /**
    * Handles WebSocket connection for audio streaming.
    *
-   * NOTE: Full implementation requires:
-   *   - WebSocket event handlers (open, message, close)
-   *   - Audio codec conversion (mulaw <-> PCM)
-   *   - Integration with Phase 1 VoiceSessionManager
-   *   - Bidirectional audio streaming
+   * TODO: Implement full audio pipeline
    *
-   * This is a placeholder that logs the connection.
+   * Implementation steps:
+   *   1. Set up WebSocket server (ws library) on /voice/stream endpoint
+   *   2. On connection: create Phase 1 VoiceSession
+   *   3. On message: decode mulaw → PCM → send to VoiceSessionManager
+   *   4. On TTS response: encode PCM → mulaw → send to Twilio
+   *   5. On disconnect: cleanup session and remove from activeCalls
+   *
+   * Dependencies:
+   *   - ws (WebSocket library)
+   *   - Audio codec (see AUDIO CONVERSION REQUIREMENTS above)
+   *   - src/voice/bridge.ts (Phase 1 VoiceSessionManager)
    */
-  handleWebSocketConnect(callSid: string): void {
-    log.info("WebSocket connected for call", { callSid })
-
-    // TODO: Set up audio processing pipeline
-    // TODO: Create Phase 1 VoiceSession
-    // TODO: Handle incoming audio chunks
-    // TODO: Send outgoing TTS audio
+  handleWebSocketConnect(_callSid: string): void {
+    throw new Error("Phone channel WebSocket not yet implemented. See TODO comments in phone.ts")
   }
 
   /**
    * Handles WebSocket message (audio chunk from Twilio).
    *
-   * NOTE: Full implementation requires mulaw -> PCM conversion
-   * and Phase 1 VoiceSessionManager integration.
+   * TODO: Implement audio processing pipeline
    */
-  handleWebSocketMessage(callSid: string, audioChunk: Buffer): void {
-    log.debug("Audio chunk received", { callSid, size: audioChunk.length })
-
-    // TODO: Convert mulaw to PCM
-    // const pcm = this.mulawToPCM(audioChunk)
-    // TODO: Send to Phase 1 VoiceSessionManager
-    // await voice.processChunk(sessionId, pcm)
+  handleWebSocketMessage(_callSid: string, _audioChunk: Buffer): void {
+    throw new Error("Phone channel audio processing not yet implemented. See TODO comments in phone.ts")
   }
 
   /**
-   * Converts mulaw 8kHz buffer to PCM 16kHz.
+   * TODO: Implement audio codec conversion methods
    *
-   * Phase 1 VoiceSessionManager expects 16kHz PCM.
-   * Algorithm: G.711 μ-law decode → linear PCM → upsample 8kHz→16kHz
+   * Required methods:
+   *   - mulawToPCM(buffer: Buffer): Buffer
+   *     Converts G.711 μ-law 8kHz → PCM 16kHz for STT
    *
-   * NOTE: This is a placeholder. Full implementation requires
-   * audio codec library or native Node.js audio processing.
+   *   - pcmToMulaw(buffer: Buffer): Buffer
+   *     Converts PCM 16kHz TTS output → G.711 μ-law 8kHz for Twilio
+   *
+   * Implementation approach:
+   *   1. Install codec library: `pnpm add node-g711` or `pnpm add audio-decode`
+   *   2. Decode mulaw to linear PCM using G.711 tables
+   *   3. Upsample from 8kHz to 16kHz (linear interpolation or FFT)
+   *   4. Reverse process for TTS output
+   *
+   * See: src/voice/bridge.ts for Phase 1 audio processing patterns
    */
-  // private mulawToPCM(mulawBuffer: Buffer): Buffer {
-  //   // TODO: Implement mulaw -> PCM conversion
-  //   // Requires audio codec library
-  //   log.warn("mulaw -> PCM conversion not implemented")
-  //   return mulawBuffer
-  // }
-
-  /**
-   * Converts PCM 16kHz TTS output back to mulaw 8kHz for Twilio.
-   *
-   * Required for sending EDITH voice response back to caller.
-   *
-   * NOTE: This is a placeholder. Full implementation requires
-   * audio codec library or native Node.js audio processing.
-   */
-  // private pcmToMulaw(pcmBuffer: Buffer): Buffer {
-  //   // TODO: Implement PCM -> mulaw conversion
-  //   // Requires audio codec library
-  //   log.warn("PCM -> mulaw conversion not implemented")
-  //   return pcmBuffer
-  // }
 
   /**
    * Extracts phone number from userId.
