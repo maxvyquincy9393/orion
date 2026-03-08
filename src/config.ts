@@ -181,6 +181,24 @@ const ConfigSchema = z.object({
   NOTION_DATABASE_IDS: z.string().default(""),
   OBSIDIAN_VAULT_PATH: z.string().default(""),
   OCR_ENABLED: boolFromEnv.default(false),
+  // Phase 14: Calendar extended config
+  GCAL_TIMEZONE: z.string().default("Asia/Jakarta"),
+  GCAL_CALENDARS: z.string().default("primary"),
+  CALENDAR_ALERT_MINUTES: intFromEnv.default(15),
+  ICAL_FEED_URLS: z.string().default(""),
+  // Phase 15: Browser Agent config
+  BROWSER_SESSION_DIR: z.string().default(".edith/browser-sessions"),
+  BROWSER_MAX_TABS: intFromEnv.default(5),
+  BROWSER_HEADLESS: boolFromEnv.default(true),
+  // Phase 16: Mobile push notification config
+  EXPO_PUSH_ACCESS_TOKEN: z.string().default(""),
+  FCM_PROJECT_ID: z.string().default(""),
+  FCM_CLIENT_EMAIL: z.string().default(""),
+  FCM_PRIVATE_KEY: z.string().default(""),
+  PUSH_QUIET_HOURS_START: z.string().default("23:00"),
+  PUSH_QUIET_HOURS_END: z.string().default("07:00"),
+  PUSH_MAX_DAILY_LOW_PRIORITY: intFromEnv.default(10),
+  PUSH_DRY_RUN: boolFromEnv.default(false),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
@@ -209,6 +227,40 @@ export function validateRequired(keys: Array<keyof Config>): void {
       `[EDITH Config Error] Missing required environment variables: ${missing.join(", ")}`,
     )
     process.exit(1)
+  }
+}
+
+/**
+ * Merge credentials from edith.json into the runtime config object.
+ * Called once at startup (before orchestrator.init) so desktop users
+ * never need to touch .env.  Server/Docker users continue using .env as normal.
+ *
+ * Priority: edith.json credentials > .env / system env (already in `config`)
+ */
+export async function mergeEdithJsonCredentials(): Promise<void> {
+  try {
+    // Dynamic import avoids a potential circular dependency at module load time
+    const { loadEDITHConfig } = await import("./config/edith-config.js")
+    const edithConfig = await loadEDITHConfig()
+
+    const creds = edithConfig.credentials
+    const configAsMutable = config as Record<string, unknown>
+
+    // Override each credential only when edith.json provides a non-empty value
+    for (const [key, value] of Object.entries(creds)) {
+      if (typeof value === "string" && value.trim() !== "" && key in configAsMutable) {
+        configAsMutable[key] = value
+      }
+    }
+
+    // Override feature flags from edith.json features section
+    const features = edithConfig.features
+    if (features.voice !== undefined) config.VOICE_ENABLED = features.voice
+    if (features.knowledgeBase !== undefined) config.KNOWLEDGE_BASE_ENABLED = features.knowledgeBase
+    if (features.computerUse !== undefined) config.VISION_ENABLED = features.computerUse
+
+  } catch {
+    // Silent fallback — let .env values stand
   }
 }
 
