@@ -236,6 +236,29 @@ const ConfigSchema = z.object({
   OCTOPRINT_API_KEY: z.string().default(""),
   // Security: pipeline rate limiter
   PIPELINE_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(60),
+
+  // Channel outbound rate limits (tokens per second, per channel API)
+  CHANNEL_RATE_LIMIT_TELEGRAM_PER_S: z.coerce.number().positive().default(30),
+  CHANNEL_RATE_LIMIT_DISCORD_PER_S: z.coerce.number().positive().default(5),
+  CHANNEL_RATE_LIMIT_WHATSAPP_PER_S: z.coerce.number().positive().default(10),
+  CHANNEL_RATE_LIMIT_SMS_PER_S: z.coerce.number().positive().default(1),
+  CHANNEL_RATE_LIMIT_EMAIL_PER_S: z.coerce.number().positive().default(0.5),
+  /** Fallback rate for any channel not listed above (tokens/second). */
+  CHANNEL_RATE_LIMIT_DEFAULT_PER_S: z.coerce.number().positive().default(10),
+  // Phase 28: Security hardening
+  DM_POLICY_MODE: z.enum(['open', 'allowlist', 'blocklist', 'admin-only']).default('open'),
+  ADMIN_USER_ID: z.string().default(''),
+  // Phase 30: Multi-account key rotation
+  ANTHROPIC_API_KEYS: z.string().default(''),
+  OPENAI_API_KEYS: z.string().default(''),
+  GEMINI_API_KEYS: z.string().default(''),
+  // Phase 31: New LLM providers
+  GITHUB_TOKEN: z.string().default(''),
+  DEEPSEEK_API_KEY: z.string().default(''),
+  MISTRAL_API_KEY: z.string().default(''),
+  TOGETHER_API_KEY: z.string().default(''),
+  FIREWORKS_API_KEY: z.string().default(''),
+  COHERE_API_KEY: z.string().default(''),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)

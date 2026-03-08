@@ -411,6 +411,19 @@ model UserPreference {
 }
 
 /**
+ * Per-user channel delivery preferences.
+ *
+ * channelOrder is a JSON-encoded string[] of channel names in the user's
+ * preferred delivery order (e.g. ["whatsapp","telegram","discord"]).
+ * Channels not listed fall through to the global priority order.
+ */
+model UserChannelPreference {
+  userId       String   @id
+  channelOrder Json     @default("[]")
+  updatedAt    DateTime @updatedAt
+}
+
+/**
  * Phase 10C — Preference signals captured for feedback learning.
  *
  * Each row is one signal event (explicit, barge-in, edit, or implicit).
@@ -631,4 +644,24 @@ model AutoReplyTemplate {
   createdAt   DateTime @default(now())
 
   @@index([userId])
+}
+
+/**
+ * Phase 28 — Immutable audit trail for all significant actions.
+ */
+model AuditRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  channel   String?
+  input     String?
+  output    String?
+  risk      String   @default("low")
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([risk])
+  @@index([createdAt])
 }

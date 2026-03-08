@@ -47,6 +47,7 @@ import { textSentiment } from "../emotion/text-sentiment.js"
 import { moodTracker } from "../emotion/mood-tracker.js"
 import { pipelineRateLimiter } from "../security/pipeline-rate-limiter.js"
 import { edithMetrics } from "../observability/metrics.js"
+import { auditEngine } from "../security/audit.js"
 
 const log = createLogger("core.pipeline")
 
@@ -340,6 +341,14 @@ function launchAsyncSideEffects(
     void syncScheduler.tick()
       .catch((err) => log.warn("KB sync scheduler tick failed", { userId, err }))
   }
+
+  // Phase 28: Audit trail — record message action (fire-and-forget)
+  void auditEngine.record({
+    userId,
+    action: 'message',
+    input: safeText.slice(0, 500),
+    output: response.slice(0, 500),
+  }).catch(err => log.warn('audit record failed', { userId, err }))
 }
 
 function computeProvisionalReward(retrievedMemoryIds: string[]): number {
