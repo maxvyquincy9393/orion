@@ -1,5 +1,5 @@
 /**
- * Orion startup and dependency initialization.
+ * EDITH startup and dependency initialization.
  * Sets up all services and returns a configured MessagePipeline ready to use.
  * Separated from main.ts so startup can be tested and reused by gateway.
  */
@@ -7,7 +7,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import config from "../config.js"
 import { prisma } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
@@ -20,7 +19,10 @@ import { pluginLoader } from "../plugin-sdk/loader.js"
 import { eventBus } from "./event-bus.js"
 import { processMessage } from "./message-pipeline.js"
 import { mcpClient, type MCPServerConfig } from "../mcp/client.js"
-import { bootstrapLoader } from "./bootstrap.js"
+import { offlineCoordinator } from "../offline/coordinator.js"
+import { habitModel } from "../background/habit-model.js"
+import { localEmbedder } from "../memory/local-embedder.js"
+import config from "../config.js"
 
 const log = createLogger("startup")
 
@@ -55,7 +57,7 @@ async function ensureWorkspaceStructure(workspaceDir: string): Promise<void> {
 }
 
 export async function initialize(workspaceDir: string): Promise<StartupResult> {
-  log.info("starting orion-ts")
+  log.info("starting EDITH")
 
   await ensureWorkspaceStructure(workspaceDir)
 
@@ -72,12 +74,37 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
   void agentRunner
   initializeEventHandlers()
 
-  // Initialize MCP Client with configuration from orion.json (T-2)
+  // Phase 9: Initialize local embedder if enabled
+  if (config.LOCAL_EMBEDDER_ENABLED) {
+    void localEmbedder.init()
+      .then((ok) => {
+        if (ok) {
+          log.info("local embedder initialized")
+        } else {
+          log.warn("local embedder unavailable — cloud embedding will be used")
+        }
+      })
+      .catch((err) => log.warn("local embedder init error", { err }))
+  }
+
+  // Phase 9: Start connectivity monitoring
+  offlineCoordinator.startMonitoring()
+  offlineCoordinator.on("statechange", (state: string, previous: string) => {
+    log.info("connectivity state changed", { from: previous, to: state })
+    if (state === "offline") {
+      log.warn("EDITH is now in offline mode — all local providers active")
+    }
+  })
+
+  // Phase 10: Start habit model background monitoring
+  habitModel.startMonitoring()
+
+  // Initialize MCP Client with configuration from edith.json (T-2)
   try {
-    const orionJsonPath = path.join(workspaceDir, "..", "orion.json")
-    const orionJson = await fs.readFile(orionJsonPath, "utf-8").catch(() => "{}")
-    const orionConfig = JSON.parse(orionJson) as Record<string, unknown>
-    const mcpServers: MCPServerConfig[] = (orionConfig?.mcp as { servers?: MCPServerConfig[] })?.servers || []
+    const edithJsonPath = path.join(workspaceDir, "..", "edith.json")
+    const edithJson = await fs.readFile(edithJsonPath, "utf-8").catch(() => "{}")
+    const edithConfig = JSON.parse(edithJson) as Record<string, unknown>
+    const mcpServers: MCPServerConfig[] = (edithConfig?.mcp as { servers?: MCPServerConfig[] })?.servers || []
     if (mcpServers.length > 0) {
       await mcpClient.init(mcpServers)
       log.info("MCP client initialized", { servers: mcpServers.length })
@@ -98,6 +125,10 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
     if (daemon.isRunning()) {
       daemon.stop()
     }
+    // Phase 9: Stop connectivity monitoring
+    offlineCoordinator.stopMonitoring()
+    // Phase 10: Stop habit model monitoring
+    habitModel.stopMonitoring()
     // Shutdown MCP clients
     await mcpClient.shutdown().catch((err) => log.warn("MCP shutdown error", err))
     await prisma.$disconnect()

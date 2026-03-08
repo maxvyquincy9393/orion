@@ -1,5 +1,5 @@
 /**
- * MessagePipeline - The canonical Orion message processing pipeline.
+ * MessagePipeline - The canonical EDITH message processing pipeline.
  *
  * This module is the single source of truth for how a user message is
  * processed from raw input to final response. Both the CLI transport
@@ -34,6 +34,10 @@ import { createLogger } from "../logger.js"
 import { responseCritic } from "./critic.js"
 import { personaEngine } from "./persona.js"
 import { buildSystemPrompt } from "./system-prompt-builder.js"
+import { feedbackStore } from "../memory/feedback-store.js"
+import { habitModel } from "../background/habit-model.js"
+import { userPreferenceEngine } from "../memory/user-preference.js"
+import { personalityEngine } from "./personality-engine.js"
 
 const log = createLogger("core.pipeline")
 
@@ -258,7 +262,12 @@ async function persistAssistantResponse(
   addSessionMessage(userId, channel, "assistant", response)
 }
 
-function launchAsyncSideEffects(userId: string, safeText: string): void {
+function launchAsyncSideEffects(
+  userId: string,
+  safeText: string,
+  response: string,
+  retrievedMemoryIds: string[],
+): void {
   // These are deferred because they improve future context quality and should
   // never delay delivery of the current reply.
   void profiler.extractFromMessage(userId, safeText, "user")
@@ -267,6 +276,31 @@ function launchAsyncSideEffects(userId: string, safeText: string): void {
 
   void causalGraph.extractAndUpdate(userId, safeText)
     .catch((err) => log.warn("causal graph async update failed", { userId, err }))
+
+  // Phase 10: Capture explicit preference signals from user message
+  void feedbackStore.captureExplicit({ userId, message: safeText })
+    .catch((err) => log.warn("feedback explicit capture failed", { userId, err }))
+
+  // Phase 10: Record activity for HabitModel
+  void habitModel.record(userId)
+    .catch((err) => log.warn("habit model record failed", { userId, err }))
+
+  // Phase 10: Detect language preference from message
+  const detectedLang = personalityEngine.detectLanguageFromMessage(safeText)
+  if (detectedLang) {
+    void userPreferenceEngine.setLanguage(userId, detectedLang)
+      .catch((err) => log.warn("language preference update failed", { userId, err }))
+  }
+
+  // Phase 10: Implicit MemRL feedback from response length vs user engagement
+  if (retrievedMemoryIds.length > 0) {
+    void feedbackStore.captureImplicit({
+      userId,
+      userReply: safeText,
+      previousResponseLengthChars: response.length,
+      memoryIds: retrievedMemoryIds,
+    }).catch((err) => log.warn("feedback implicit capture failed", { userId, err }))
+  }
 }
 
 function computeProvisionalReward(retrievedMemoryIds: string[]): number {
@@ -274,7 +308,7 @@ function computeProvisionalReward(retrievedMemoryIds: string[]): number {
 }
 
 /**
- * Process a single user message through the full Orion pipeline.
+ * Process a single user message through the full EDITH pipeline.
  *
  * @param userId  - The authenticated user's ID
  * @param rawText - The raw, unfiltered message text from the user
@@ -315,6 +349,7 @@ export async function processMessage(
     includeSkills: true,
     includeSafety: true,
     extraContext: dynamicContext,
+    userId, // Phase 10: inject per-user personality fragment
   })
 
   // Stage 5: LLM generation
@@ -343,7 +378,7 @@ export async function processMessage(
   )
 
   // Stage 9: Async side effects (fire-and-forget)
-  launchAsyncSideEffects(userId, safeText)
+  launchAsyncSideEffects(userId, safeText, response, retrievedMemoryIds)
 
   return {
     response,

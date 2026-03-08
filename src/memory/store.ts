@@ -31,6 +31,7 @@ import { hiMeS } from "./himes.js"
 import { memrlUpdater, type TaskFeedback } from "./memrl.js"
 import { proMem } from "./promem.js"
 import { temporalIndex } from "./temporal-index.js"
+import { localEmbedder } from "./local-embedder.js"
 
 const log = createLogger("memory.store")
 
@@ -315,7 +316,7 @@ export class MemoryStore {
     }
 
     try {
-      const dbPath = path.resolve(process.cwd(), ".orion", "lancedb")
+      const dbPath = path.resolve(process.cwd(), ".edith", "lancedb")
       await fs.mkdir(path.dirname(dbPath), { recursive: true })
 
       this.db = await lancedb.connect(dbPath)
@@ -360,6 +361,17 @@ export class MemoryStore {
       const cached = this.getCachedEmbedding(cacheKey)
       if (cached) {
         return cached
+      }
+    }
+
+    // Phase 9: Try local embedder first when enabled (offline-capable)
+    if (config.LOCAL_EMBEDDER_ENABLED && localEmbedder.isAvailable()) {
+      const localResult = await localEmbedder.embed(text)
+      if (localResult) {
+        if (cacheKey) {
+          this.setCachedEmbedding(cacheKey, localResult)
+        }
+        return localResult
       }
     }
 

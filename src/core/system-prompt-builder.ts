@@ -23,6 +23,8 @@ import path from "node:path"
 import { createLogger } from "../logger.js"
 import { skillLoader } from "../skills/loader.js"
 import { getBootstrapLoader, type SessionMode } from "./bootstrap.js"
+import { userPreferenceEngine } from "../memory/user-preference.js"
+import { personalityEngine } from "./personality-engine.js"
 
 const log = createLogger("core.system-prompt-builder")
 
@@ -53,10 +55,12 @@ export interface BuildPromptOptions {
   includeTooling?: boolean
   availableTools?: string[]
   extraContext?: string
+  /** User ID for per-user personality injection (Phase 10). */
+  userId?: string
 }
 
 function buildWorkspaceInfoSection(sessionMode: SessionMode): string {
-  const workspaceDir = process.env.ORION_WORKSPACE ?? path.resolve(process.cwd(), "workspace")
+  const workspaceDir = process.env.EDITH_WORKSPACE ?? path.resolve(process.cwd(), "workspace")
   return `# Workspace\nDirectory: ${workspaceDir}\nSession mode: ${sessionMode}`
 }
 
@@ -92,6 +96,7 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
     includeTooling = true,
     availableTools,
     extraContext,
+    userId,
   } = options
 
   const resolvedSessionMode = mode ?? sessionMode
@@ -140,6 +145,19 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
     sections.push(extraContext.trim())
   }
 
+  // Phase 10: Inject per-user personality fragment (after SOUL.md, before date)
+  if (userId) {
+    try {
+      const snapshot = await userPreferenceEngine.getSnapshot(userId)
+      const personaFragment = personalityEngine.buildPersonaFragment(snapshot)
+      if (personaFragment.trim().length > 0) {
+        sections.push(personaFragment)
+      }
+    } catch (err) {
+      log.warn("personality fragment injection failed, continuing", { userId, err })
+    }
+  }
+
   sections.push(buildDateTimeSection())
   sections.push(buildSandboxInfoSection())
   sections.push(buildRuntimeInfoSection())
@@ -153,6 +171,7 @@ export async function buildSystemPrompt(options: BuildPromptOptions = {}): Promi
     bootstrapWarnings: bootstrapWarnings.length,
     identitySource: identity.source,
     skillsIncluded: includeSkills,
+    personalityInjected: Boolean(userId),
   })
 
   return sections

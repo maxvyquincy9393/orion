@@ -1,3 +1,23 @@
+/**
+ * @file profiler.ts
+ * @description UserProfiler — extracts and stores facts and opinions from user messages.
+ *
+ * ARCHITECTURE:
+ *   This is Layer 2 (Episodic) of the personalization stack:
+ *     Layer 1 (Operational): UserPreferenceEngine — sliders, tone preset, title word
+ *     Layer 2 (Episodic):    UserProfiler (this module) — facts, opinions, topics
+ *
+ *   Facts: objective data (name, timezone, job) with confidence ≥ 0.7
+ *   Opinions: inferred beliefs (prefers X, dislikes Y) with evidence snippets
+ *   Topics: recently discussed subjects for dynamic context injection
+ *
+ *   Flow: message-pipeline.ts Stage 9 (fire-and-forget) → extractFromMessage()
+ *         → updateProfile() → stored in UserProfile Prisma model
+ *         → formatForContext() → injected into system prompt by PersonaEngine
+ *
+ * @module memory/profiler
+ */
+
 import { prisma } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"

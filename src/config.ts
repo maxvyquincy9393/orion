@@ -143,6 +143,35 @@ const ConfigSchema = z.object({
   ANDROID_ADB_PORT: intFromEnv.default(5037),
   // Phase 8: Channel-specific security admin token (derived from ADMIN_TOKEN if exists)
   ADMIN_TOKEN: z.string().default(""),
+  // Phase 9: Offline / Self-Hosted Mode
+  // OfflineCoordinator health check intervals
+  OFFLINE_HEALTH_CHECK_INTERVAL_MS: intFromEnv.default(30_000),
+  OFFLINE_HEALTH_CHECK_INTERVAL_OFFLINE_MS: intFromEnv.default(60_000),
+  // Local embeddings via @xenova/transformers
+  LOCAL_EMBEDDER_ENABLED: boolFromEnv.default(false),
+  LOCAL_EMBEDDER_MODEL: z.string().default("Xenova/all-MiniLM-L6-v2"),
+  LOCAL_EMBEDDER_CACHE_DIR: z.string().default("./models/embeddings"),
+  // Kokoro.js offline TTS
+  KOKORO_TTS_ENABLED: boolFromEnv.default(false),
+  KOKORO_TTS_DTYPE: z.enum(["fp32", "fp16", "q8", "q4"]).default("q8"),
+  KOKORO_TTS_VOICE: z.string().default("af_heart"),
+  // nodejs-whisper offline STT
+  WHISPER_CPP_ENABLED: boolFromEnv.default(false),
+  WHISPER_CPP_MODEL: z.string().default("base"),
+  // Phase 10: Personalization
+  // UserPreferenceEngine inference
+  PERSONALIZATION_ENABLED: boolFromEnv.default(true),
+  PREFERENCE_INFERENCE_INTERVAL_MS: intFromEnv.default(5 * 60 * 1000), // every 5 min
+  PREFERENCE_ALPHA: floatFromEnv.default(0.15),  // learning rate for slider updates
+  // PersonalityEngine
+  DEFAULT_TONE_PRESET: z.enum(["jarvis", "friday", "cortana", "hal", "custom"]).default("jarvis"),
+  DEFAULT_TITLE_WORD: z.string().default("Sir"),
+  // HabitModel
+  HABIT_MODEL_ENABLED: boolFromEnv.default(true),
+  HABIT_MODEL_UPDATE_INTERVAL_MS: intFromEnv.default(60 * 60 * 1000), // every 1h
+  // Speaker ID (Resemblyzer Python sidecar)
+  SPEAKER_ID_ENABLED: boolFromEnv.default(false),
+  SPEAKER_ID_CONFIDENCE_THRESHOLD: floatFromEnv.default(0.75),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)

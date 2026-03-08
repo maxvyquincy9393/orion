@@ -307,3 +307,90 @@ model HyperEdgeMembership {
 
   @@id([hyperEdgeId, nodeId])
 }
+
+/**
+ * Phase 10 — Per-user preference sliders and CIPHER-inferred behavioral prefs.
+ *
+ * Stores both explicit (user-configured) and implicit (CIPHER-inferred) preferences.
+ * personalityEngine reads this to build the per-user system prompt fragment.
+ *
+ * Slider ranges:
+ *   formality    1 (casual) ↔ 5 (formal)
+ *   verbosity    1 (brief)  ↔ 5 (detailed)
+ *   humor        0 (none)   ↔ 3 (frequent)
+ *   proactivity  1 (quiet)  ↔ 5 (very proactive)
+ */
+model UserPreference {
+  userId              String   @id
+  // Behavioral sliders
+  formality           Float    @default(3)
+  verbosity           Float    @default(2)
+  humor               Float    @default(1)
+  proactivity         Float    @default(3)
+  // Language and address
+  language            String   @default("auto")
+  titleWord           String   @default("Sir")
+  // Tone preset
+  tonePreset          String   @default("jarvis")
+  // CIPHER-inferred behavioral preferences (JSON array of BehavioralPref)
+  behavioralPrefs     Json     @default("[]")
+  // Custom personality traits (string[])
+  customTraits        Json     @default("[]")
+  // History of slider values for temporal evolution tracking (JSON array)
+  preferenceHistory   Json     @default("{}")
+  // Inference metadata
+  inferenceConfidence Float    @default(0)
+  lastInferredAt      DateTime?
+  // Timestamps
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([lastInferredAt])
+}
+
+/**
+ * Phase 10C — Preference signals captured for feedback learning.
+ *
+ * Each row is one signal event (explicit, barge-in, edit, or implicit).
+ * UserPreferenceEngine processes pending signals in the background
+ * to update preference sliders.
+ */
+model PreferenceSignal {
+  id         String   @id @default(cuid())
+  userId     String
+  // Signal type: 'explicit' | 'barge-in' | 'edit' | 'implicit'
+  signalType String
+  // Dimension affected: 'verbosity' | 'formality' | 'humor' | 'language' | 'general'
+  dimension  String
+  // Raw signal value: +1 (increase) / -1 (decrease) / 0 (confirm)
+  value      Float
+  // Confidence of this single signal (0–1)
+  confidence Float    @default(0.5)
+  // Optional context for CIPHER-style inference
+  context    Json?
+  // Whether this signal has been processed into a preference update
+  processed  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, processed])
+  @@index([userId, createdAt])
+}
+
+/**
+ * Phase 10B — User activity records for HabitModel.
+ *
+ * Stores message timestamps for each user so HabitModel can infer
+ * active/quiet hours patterns without keeping full message content.
+ * Records are automatically decayed and pruned.
+ */
+model ActivityRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  hour      Int      // 0-23 hour of day when activity was recorded
+  dayOfWeek Int      // 0=Sunday … 6=Saturday
+  weight    Float    @default(1.0)  // Decays over time
+  timestamp DateTime @default(now())
+
+  @@index([userId, timestamp])
+  @@index([userId, hour])
+}
