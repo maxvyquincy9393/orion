@@ -16,6 +16,7 @@
 
 import { createLogger } from "../logger.js"
 import { edithMetrics } from "../observability/metrics.js"
+import { sentry } from "../observability/sentry.js"
 import { performShutdown } from "./shutdown.js"
 
 const log = createLogger("core.error-boundaries")
@@ -32,12 +33,16 @@ export function registerErrorBoundaries(): void {
   if (registered) return
   registered = true
 
+  // Initialize Sentry (no-op if SENTRY_DSN not set or @sentry/node not installed)
+  void sentry.init()
+
   process.on("unhandledRejection", (reason: unknown) => {
     log.error("unhandled promise rejection — continuing", {
       reason: reason instanceof Error ? reason.message : String(reason),
       stack: reason instanceof Error ? reason.stack : undefined,
     })
     edithMetrics.errorsTotal.inc({ source: "unhandled_rejection" })
+    sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)))
   })
 
   process.on("uncaughtException", (err: Error) => {
@@ -46,6 +51,7 @@ export function registerErrorBoundaries(): void {
       stack: err.stack,
     })
     edithMetrics.errorsTotal.inc({ source: "uncaught_exception" })
+    sentry.captureException(err)
     void performShutdown()
   })
 
