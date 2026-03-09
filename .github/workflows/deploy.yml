@@ -55,3 +55,41 @@ jobs:
           sleep 15
           curl --fail --retry 3 --retry-delay 5 https://edith-staging.fly.dev/health \
             || (echo "Health check failed" && exit 1)
+
+  deploy-k8s:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: k8s-production
+    # Only run when KUBECONFIG secret is set
+    if: vars.K8S_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Helm upgrade / install
+        run: |
+          helm upgrade --install edith ./k8s/helm \
+            -f k8s/helm/values.prod.yaml \
+            --set image.tag=${{ github.sha }} \
+            --set image.repository=ghcr.io/${{ github.repository }}/edith \
+            --namespace edith \
+            --create-namespace \
+            --wait \
+            --timeout 5m
+
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/edith -n edith --timeout=3m

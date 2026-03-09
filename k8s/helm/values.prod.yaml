@@ -1,0 +1,56 @@
+# Production overrides for the EDITH Helm chart.
+# Apply with: helm upgrade --install edith ./k8s/helm -f k8s/helm/values.prod.yaml
+
+replicaCount: 2
+
+image:
+  pullPolicy: Always
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 65
+  targetMemoryUtilizationPercentage: 75
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: edith.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: edith-tls
+      hosts:
+        - edith.example.com
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "4"
+    memory: 4Gi
+
+persistence:
+  enabled: true
+  storageClass: "standard"
+  size: 20Gi
+
+env:
+  NODE_ENV: production
+  LOG_LEVEL: warn
+
+secretRef:
+  enabled: true
+  name: edith-secrets

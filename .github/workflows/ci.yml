@@ -121,12 +121,55 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run coverage
+      # vitest exits 1 when any threshold is not met — this step fails the job.
+      # Thresholds (vitest.config.ts): lines 70%, functions 70%, branches 60%, statements 70%
+      - name: Run coverage (enforces thresholds — job fails if below)
         env:
           CI: "true"
-        run: |
-          pnpm test -- --coverage
-          # Thresholds enforced in vitest.config.ts (lines/functions: 60%, branches: 50%)
+        run: pnpm test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          path: coverage/
+          retention-days: 14
+
+      - name: Post coverage summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summaryPath = 'coverage/coverage-summary.json';
+            if (!fs.existsSync(summaryPath)) {
+              console.log('No coverage summary found.');
+              return;
+            }
+            const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+            const total = summary.total;
+            const fmt = (v) => `${v.pct.toFixed(1)}%`;
+            const icon = (v) => v.pct >= 70 ? '✅' : '❌';
+            const body = [
+              '## Coverage Report',
+              '',
+              `| Metric | Coverage | Threshold |`,
+              `|--------|----------|-----------|`,
+              `| Lines | ${fmt(total.lines)} ${icon(total.lines)} | 70% |`,
+              `| Functions | ${fmt(total.functions)} ${icon(total.functions)} | 70% |`,
+              `| Branches | ${fmt(total.branches)} ${icon(total.branches)} | 60% |`,
+              `| Statements | ${fmt(total.statements)} ${icon(total.statements)} | 70% |`,
+            ].join('\n');
+            if (context.eventName === 'pull_request') {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            }
+            await core.summary.addRaw(body).write();
 
   circular-deps:
     name: circular-dep-check (ubuntu-latest, node 22)

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: edith
+description: EDITH — persistent AI companion (Helm chart)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ai
+  - assistant
+  - edith
+maintainers:
+  - name: EDITH Team
+home: https://github.com/your-org/edith
+sources:
+  - https://github.com/your-org/edith

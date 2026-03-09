@@ -1,0 +1,125 @@
+# Default values for the EDITH Helm chart.
+# Override in values.prod.yaml or with `--set key=value` at deploy time.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/your-org/edith
+  pullPolicy: IfNotPresent
+  # Overridden by CI with the exact git-sha tag
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+service:
+  type: ClusterIP
+  port: 3000
+  metricsPort: 9090
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+  hosts:
+    - host: edith.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # tls:
+  #   - secretName: edith-tls
+  #     hosts:
+  #       - edith.example.com
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Pod disruption budget — keep at least 1 pod available during rolling updates
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 20
+  periodSeconds: 30
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3
+
+# Persistent volume for SQLite database + workspace files
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  mountPath: /app/data
+
+# Config values injected as env vars (non-secret).
+# Secrets are injected via secretRef (see below).
+env:
+  NODE_ENV: production
+  DATABASE_URL: "file:/app/data/edith.db"
+  LOG_LEVEL: info
+  GATEWAY_PORT: "3000"
+  METRICS_PORT: "9090"
+
+# Reference to a pre-existing Kubernetes secret containing sensitive env vars:
+# ANTHROPIC_API_KEY, OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, etc.
+secretRef:
+  enabled: false
+  name: edith-secrets
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
