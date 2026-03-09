@@ -263,15 +263,6 @@ class SecretStore {
     return secretChanges
   }
 
-  /** Snapshot the current process.env (string values only). */
-  private captureSnapshot(): Record<string, string> {
-    const snap: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) {
-      if (typeof v === "string") snap[k] = v
-    }
-    return snap
-  }
-
   /**
    * Parse the .env file and return its contents as a flat record.
    * Returns an empty object if the file is absent or unreadable.

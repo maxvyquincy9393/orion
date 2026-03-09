@@ -159,24 +159,8 @@ const SOM_INJECTION_SCRIPT = `(() => {
   return counter;
 })()`
 
-export interface BrowserInteractableElement {
-  id: string
-  tag: string
-  text: string
-  role: string
-  ariaLabel: string
-  placeholder: string
-  href: string
-  isVisible: boolean
-}
-
-export interface BrowserObservation {
-  title: string
-  url: string
-  content: string
-  elements: BrowserInteractableElement[]
-  timestamp: number
-}
+export type { BrowserInteractableElement, BrowserObservation } from "../../browser/browser-types.js"
+import type { BrowserInteractableElement, BrowserObservation } from "../../browser/browser-types.js"
 
 async function getPlaywright() {
   try {

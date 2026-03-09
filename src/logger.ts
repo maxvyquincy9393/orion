@@ -11,8 +11,6 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import config from "./config.js"
-
 type LogLevel = "debug" | "info" | "warn" | "error"
 
 const LOG_LEVELS: Record<LogLevel, number> = {
@@ -22,7 +20,10 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 }
 
-const currentLevel = LOG_LEVELS[config.LOG_LEVEL] ?? LOG_LEVELS.info
+// Read directly from env to avoid a logger ↔ config circular import.
+const _rawLevel = (process.env.LOG_LEVEL ?? "info").toLowerCase() as LogLevel
+const currentLevel = LOG_LEVELS[_rawLevel] ?? LOG_LEVELS.info
+const LOG_RETAIN_DAYS = Math.max(1, parseInt(process.env.LOG_RETAIN_DAYS ?? "7", 10) || 7)
 
 /**
  * Formats a Date into the log filename format `edith-YYYY-MM-DD.log`.
@@ -92,7 +93,7 @@ class LogStream {
       )
       this.initialized = true
       // Prune old logs on startup
-      pruneOldLogs(logsDir, new Date(), config.LOG_RETAIN_DAYS)
+      pruneOldLogs(logsDir, new Date(), LOG_RETAIN_DAYS)
       // Schedule the first midnight rotation
       this.scheduleMidnightRotation()
     } catch (error) {
@@ -122,7 +123,7 @@ class LogStream {
       const filename = buildLogFilename(new Date())
       this.stream = fs.createWriteStream(path.join(logsDir, filename), { flags: "a" })
       this.initialized = true
-      pruneOldLogs(logsDir, new Date(), config.LOG_RETAIN_DAYS)
+      pruneOldLogs(logsDir, new Date(), LOG_RETAIN_DAYS)
     } catch (error) {
       console.error(`[Logger] Failed to rotate log stream: ${error}`)
       this.initialized = false

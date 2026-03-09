@@ -27,7 +27,7 @@
 
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
-import type { BrowserObservation, BrowserInteractableElement } from "../agents/tools/browser.js"
+import type { BrowserObservation, BrowserInteractableElement } from "./browser-types.js"
 
 const log = createLogger("browser.smart-form-filler")
 

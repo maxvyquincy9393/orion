@@ -3,9 +3,24 @@ import { getHistory } from "../database/index.js"
 import { prisma } from "../database/index.js"
 import { edithMetrics } from "../observability/metrics.js"
 import config from "../config.js"
-import type { RedisSessionStore } from "./redis-session-store.js"
+import { sessionSummarizer, setStoreAdapter } from "../memory/session-summarizer.js"
+import type { Message, Session } from "./session-types.js"
+
+export type { Message, Session }
 
 const log = createLogger("sessions.store")
+
+/**
+ * Minimal interface for a Redis-backed session store.
+ * Defined locally to avoid a circular import with redis-session-store.ts, which
+ * itself imports the `Message` and `Session` types from session-types.ts.
+ */
+interface RedisBackend {
+  connect(): Promise<void>
+  isConnected(): boolean
+  getSessionHistory(userId: string, channel: string, limit: number): Promise<Message[]>
+  addMessage(userId: string, channel: string, message: Message): Promise<void>
+}
 
 /**
  * Maximum number of concurrent in-memory sessions.
@@ -14,20 +29,6 @@ const log = createLogger("sessions.store")
  */
 const MAX_SESSIONS = 500
 
-export interface Message {
-  role: "user" | "assistant" | "system"
-  content: string
-  timestamp: number
-}
-
-export interface Session {
-  key: string
-  userId: string
-  channel: string
-  createdAt: number
-  lastActivityAt: number
-}
-
 function makeSessionKey(userId: string, channel: string): string {
   return `${userId}:${channel}`
 }
@@ -35,7 +36,7 @@ function makeSessionKey(userId: string, channel: string): string {
 class SessionStore {
   private sessions = new Map<string, Session>()
   private histories = new Map<string, Message[]>()
-  private redisBackend: RedisSessionStore | null = null
+  private redisBackend: RedisBackend | null = null
 
   /** Initialize Redis backend if REDIS_URL is configured. */
   async initRedis(): Promise<void> {
@@ -191,7 +192,6 @@ class SessionStore {
 
   private async maybeCompressAsync(userId: string, channel: string): Promise<void> {
     try {
-      const { sessionSummarizer } = await import("../memory/session-summarizer.js")
       await sessionSummarizer.maybeCompress(userId, channel)
     } catch (error) {
       log.debug("Session summarizer unavailable", { userId, channel, error })
@@ -295,3 +295,7 @@ class SessionStore {
 }
 
 export const sessionStore = new SessionStore()
+
+// Register this store as the provider for SessionSummarizer so that
+// session-summarizer.ts does not need to import from this module.
+setStoreAdapter(sessionStore)

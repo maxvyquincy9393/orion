@@ -34,7 +34,9 @@ import config from "../config.js"
 import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { sanitizeUserId, clamp, parseJsonSafe } from "../utils/index.js"
-import type { SearchResult } from "./store.js"
+
+/** Minimal shape of a memory search result — mirrors store.SearchResult. */
+type SearchResult = { id: string; content: string; metadata: Record<string, unknown>; score: number }
 
 const log = createLogger("memory.memrl")
 

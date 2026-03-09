@@ -15,7 +15,7 @@
  */
 
 import { createLogger } from "../logger.js"
-import type { Session, Message } from "./session-store.js"
+import type { Session, Message } from "./session-types.js"
 
 const log = createLogger("sessions.redis")
 

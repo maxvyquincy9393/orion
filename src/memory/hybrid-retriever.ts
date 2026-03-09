@@ -18,7 +18,9 @@
 import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { clamp, sanitizeUserId as sanitizeVectorUserId } from "../utils/index.js"
-import type { SearchResult } from "./store.js"
+
+/** Mirrors store.SearchResult — defined locally to avoid a circular import with store.ts. */
+type SearchResult = { id: string; content: string; metadata: Record<string, unknown>; score: number }
 
 const log = createLogger("memory.hybrid-retriever")
 

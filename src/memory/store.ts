@@ -549,7 +549,7 @@ export class MemoryStore {
     try {
       const retrievalLimit = Math.max(3, Math.min(8, Math.floor(limit / 2)))
       const [fused, adaptiveMemories] = await Promise.all([
-        hiMeS.buildFusedContext(userId, query),
+        hiMeS.buildFusedContext(userId, query, (text) => this.embed(text)),
         this.search(userId, query, retrievalLimit),
       ])
 

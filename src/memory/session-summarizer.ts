@@ -4,22 +4,50 @@
  *              message when the session exceeds a configurable threshold, keeping context windows lean.
  *
  * ARCHITECTURE / INTEGRATION:
- *   - Reads session history from SessionStore (sessions/session-store.ts).
+ *   - Reads session history via a StoreAdapter that is registered by session-store.ts at startup.
+ *     This breaks the circular import: session-store → (static) → session-summarizer,
+ *     while session-summarizer has zero imports from sessions/.
  *   - Calls LLM orchestrator (engines/orchestrator.ts) with TaskType 'fast' to produce the summary.
  *   - Saves the compressed summary back to the database via saveMessage (database/index.ts).
- *   - Invoked from message-pipeline.ts as a fire-and-forget side effect after each response.
+ *   - Invoked from message-pipeline.ts and session-store.ts after each addMessage().
  *   - Singleton exported as `sessionSummarizer`.
  */
 
 import { saveMessage } from "../database/index.js"
 import { orchestrator } from "../engines/orchestrator.js"
 import { createLogger } from "../logger.js"
-import { sessionStore, type Message as SessionMessage } from "../sessions/session-store.js"
 
 const log = createLogger("memory.session-summarizer")
 
 const TRIGGER_COUNT = 30
 const COMPRESS_COUNT = 20
+
+/** Shape of a session message consumed by this module. */
+interface SessionMessage {
+  role: "user" | "assistant" | "system"
+  content: string
+  timestamp: number
+}
+
+/**
+ * Minimal interface that SessionSummarizer needs from the session store.
+ * session-store.ts registers its concrete instance via setStoreAdapter().
+ */
+export interface StoreAdapter {
+  getSessionHistory(userId: string, channel: string, limit: number): Promise<SessionMessage[]>
+  replaceSessionHistory(userId: string, channel: string, messages: SessionMessage[]): void
+}
+
+let _storeAdapter: StoreAdapter | null = null
+
+/**
+ * Register the session store implementation.
+ * Called by session-store.ts immediately after creating the sessionStore singleton —
+ * no circular import is needed because no import of session-store.ts appears in this file.
+ */
+export function setStoreAdapter(store: StoreAdapter): void {
+  _storeAdapter = store
+}
 
 function formatHistory(messages: SessionMessage[]): string {
   return messages
@@ -30,7 +58,11 @@ function formatHistory(messages: SessionMessage[]): string {
 export class SessionSummarizer {
   async maybeCompress(userId: string, channel: string): Promise<void> {
     try {
-      const history = await sessionStore.getSessionHistory(userId, channel, 500)
+      const store = _storeAdapter
+      if (!store) {
+        return
+      }
+      const history = await store.getSessionHistory(userId, channel, 500)
       if (history.length < TRIGGER_COUNT) {
         return
       }
@@ -43,7 +75,11 @@ export class SessionSummarizer {
 
   async compress(userId: string, channel: string, keepLast: number): Promise<string> {
     try {
-      const history = await sessionStore.getSessionHistory(userId, channel, 500)
+      const store = _storeAdapter
+      if (!store) {
+        return ""
+      }
+      const history = await store.getSessionHistory(userId, channel, 500)
       if (history.length <= keepLast + 1) {
         return ""
       }
@@ -71,7 +107,7 @@ export class SessionSummarizer {
       }
 
       const remaining = history.slice(compressCount)
-      sessionStore.replaceSessionHistory(userId, channel, [compressedMessage, ...remaining])
+      store.replaceSessionHistory(userId, channel, [compressedMessage, ...remaining])
 
       log.info("Session compressed", {
         userId,
@@ -115,3 +151,4 @@ export class SessionSummarizer {
 }
 
 export const sessionSummarizer = new SessionSummarizer()
+

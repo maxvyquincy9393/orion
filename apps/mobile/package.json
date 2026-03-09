@@ -17,7 +17,7 @@
     "expo-av": "~13.10.0",
     "expo-background-task": "~0.1.0",
     "expo-constants": "~16.0.2",
-    "expo-device": "~6.0.3",
+    "expo-device": "~6.0.2",
     "expo-linking": "~6.3.1",
     "expo-notifications": "~0.27.0",
     "expo-secure-store": "~14.0.0",

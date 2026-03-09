@@ -36,9 +36,10 @@ vi.mock("../../pairing/device-registry.js", () => ({
   },
 }))
 
-// The session summarizer is dynamically imported inside addMessage — silence it
+// The session summarizer is imported by session-store.ts — silence it
 vi.mock("../../memory/session-summarizer.js", () => ({
   sessionSummarizer: { maybeCompress: vi.fn().mockResolvedValue(undefined) },
+  setStoreAdapter: vi.fn(),
 }))
 
 // ---------------------------------------------------------------------------

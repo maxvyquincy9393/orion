@@ -5,7 +5,6 @@ import { createLogger } from "../logger.js"
 import { sessionStore } from "../sessions/session-store.js"
 import { causalGraph } from "./causal-graph.js"
 import { hybridRetriever } from "./hybrid-retriever.js"
-import { memory } from "./store.js"
 import { profiler } from "./profiler.js"
 import { detectQueryComplexity, temporalIndex } from "./temporal-index.js"
 import config from "../config.js"
@@ -53,6 +52,7 @@ export class HiMeSCoordinator {
   async getShortTermContext(
     userId: string,
     query: string,
+    embedFn?: (text: string) => Promise<number[]>,
   ): Promise<{
     recentMessages: ContextMessage[]
     preFetchedDocs: Array<{ content: string; relevanceScore: number }>
@@ -60,7 +60,7 @@ export class HiMeSCoordinator {
     try {
       const [recentMessages, preFetchedDocs] = await Promise.all([
         this.getRecentSessionMessages(userId),
-        this.preFetchDocs(userId, query),
+        this.preFetchDocs(userId, query, embedFn),
       ])
 
       return {
@@ -149,10 +149,11 @@ export class HiMeSCoordinator {
   async buildFusedContext(
     userId: string,
     query: string,
+    embedFn?: (text: string) => Promise<number[]>,
   ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
     try {
       const [shortTerm, longTerm, profileContext, causalContext] = await Promise.all([
-        this.getShortTermContext(userId, query),
+        this.getShortTermContext(userId, query, embedFn),
         this.getLongTermContext(userId, query),
         profiler.formatForContext(userId),
         causalGraph.formatForContext(userId),
@@ -233,8 +234,13 @@ export class HiMeSCoordinator {
   private async preFetchDocs(
     userId: string,
     query: string,
+    embedFn?: (text: string) => Promise<number[]>,
   ): Promise<Array<{ content: string; relevanceScore: number }>> {
     if (!config.HYBRID_SEARCH_ENABLED) {
+      return this.preFetchDocsLegacy(userId, query)
+    }
+
+    if (!embedFn) {
       return this.preFetchDocsLegacy(userId, query)
     }
 
@@ -242,7 +248,7 @@ export class HiMeSCoordinator {
       const results = await hybridRetriever.retrieve(
         userId,
         query,
-        (text) => memory.embed(text),
+        (text) => embedFn(text),
         8, // topK
       )
 

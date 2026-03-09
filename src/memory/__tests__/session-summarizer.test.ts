@@ -18,13 +18,6 @@ const {
   generateMock: vi.fn().mockResolvedValue("\u2022 Discussed task\n\u2022 Action item noted"),
 }))
 
-vi.mock("../../sessions/session-store.js", () => ({
-  sessionStore: {
-    getSessionHistory: getSessionHistoryMock,
-    replaceSessionHistory: replaceSessionHistoryMock,
-  },
-}))
-
 vi.mock("../../database/index.js", () => ({
   saveMessage: saveMessageMock,
 }))
@@ -33,14 +26,14 @@ vi.mock("../../engines/orchestrator.js", () => ({
   orchestrator: { generate: generateMock },
 }))
 
-import { SessionSummarizer } from "../session-summarizer.js"
+import { SessionSummarizer, setStoreAdapter } from "../session-summarizer.js"
 
 function makeMessages(count: number) {
   return Array.from({ length: count }, (_, i) => ({
     role: i % 2 === 0 ? "user" : "assistant",
     content: `Message ${i + 1} content that is meaningful.`,
     timestamp: Date.now() - (count - i) * 1000,
-  }))
+  })) as Array<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>
 }
 
 describe("SessionSummarizer", () => {
@@ -51,6 +44,11 @@ describe("SessionSummarizer", () => {
     vi.clearAllMocks()
     generateMock.mockResolvedValue("• Key point\n• Action noted")
     saveMessageMock.mockResolvedValue(undefined)
+    // Inject mock store adapter (no module-level import of session-store needed)
+    setStoreAdapter({
+      getSessionHistory: getSessionHistoryMock,
+      replaceSessionHistory: replaceSessionHistoryMock,
+    })
   })
 
   // ── maybeCompress() ──────────────────────────────────────────────────────

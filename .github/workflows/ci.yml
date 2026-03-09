@@ -127,3 +127,61 @@ jobs:
         run: |
           pnpm test -- --coverage
           # Thresholds enforced in vitest.config.ts (lines/functions: 60%, branches: 50%)
+
+  circular-deps:
+    name: circular-dep-check (ubuntu-latest, node 22)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check for circular dependencies
+        run: pnpm check:circular
+
+  monorepo-consistency:
+    name: monorepo-consistency (ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify no standalone workspace lockfiles
+        shell: bash
+        run: |
+          if find apps extensions packages -name "pnpm-lock.yaml" 2>/dev/null | grep -q .; then
+            echo "::error::Standalone pnpm-lock.yaml found inside a workspace package."
+            echo "Always run 'pnpm install' from the repo root, not from subdirectories."
+            find apps extensions packages -name "pnpm-lock.yaml"
+            exit 1
+          fi
+          echo "No standalone lockfiles found — workspace is consistent."
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Root install must succeed with frozen lockfile
+        run: pnpm install --frozen-lockfile
