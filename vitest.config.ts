@@ -32,7 +32,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts", "apps/mobile/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "apps/mobile/**/*.test.ts", "extensions/**/*.test.ts", "packages/**/*.test.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "json-summary"],
