@@ -314,7 +314,12 @@ const ConfigSchema = z.object({
   /** Number of days to retain AuditRecord rows before deletion. */
   AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
   /** Run prisma migrate deploy on startup to ensure DB schema is up-to-date. */
-  RUN_MIGRATIONS_ON_STARTUP: z.coerce.boolean().default(true),
+  // z.coerce.boolean() coerces any non-empty string (including "false") to true.
+  // z.preprocess handles "false"/"0"/"no" strings correctly.
+  RUN_MIGRATIONS_ON_STARTUP: z.preprocess(
+    (v) => typeof v === "string" && (v === "false" || v === "0" || v === "no") ? false : true,
+    z.boolean().default(true),
+  ),
   /** Heap usage ratio (0-1) above which session eviction is triggered. */
   MEMORY_WARN_THRESHOLD: z.coerce.number().min(0.1).max(1).default(0.8),
   /** Heap usage ratio (0-1) above which graceful shutdown is triggered. */

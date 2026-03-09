@@ -1,0 +1,16 @@
+# EDITH Permissions Configuration
+# Controls what actions EDITH can perform without explicit user approval.
+# See permissions/README.md for full documentation.
+
+version: "1"
+
+defaults:
+  proactive_message: allow        # allow proactive messages by default
+  tool_use: confirm               # ask before running tools
+  file_read: allow
+  file_write: confirm
+  external_http: confirm
+  calendar_read: allow
+  calendar_write: confirm
+
+users: {}                         # per-user overrides (keyed by userId)

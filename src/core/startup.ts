@@ -148,6 +148,10 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
 
   await ensureWorkspaceStructure(workspaceDir)
 
+  // Migrations acquire a write lock — must run BEFORE prisma.$connect() to
+  // avoid "database is locked" on SQLite (single-writer constraint).
+  await runMigrationsIfEnabled()
+
   await prisma
     .$connect()
     .then(() => log.info("database connected"))
@@ -155,9 +159,6 @@ export async function initialize(workspaceDir: string): Promise<StartupResult> {
 
   // Apply production-grade SQLite pragmas (WAL mode, busy timeout, etc.)
   await applyPragmas(prisma)
-
-  // Run pending DB migrations before any service initializes
-  await runMigrationsIfEnabled()
 
   // Restore persisted sessions so they survive restarts
   await sessionStore.restoreFromDb()

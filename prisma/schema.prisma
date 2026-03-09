@@ -1,12 +1,11 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  // For development with SQLite: DATABASE_URL=file:./edith.db   provider = "sqlite"
-  // For production with PostgreSQL: DATABASE_URL=postgresql://user:pass@host:5432/edith
-  provider = "postgresql"
+  // Development (default): DATABASE_URL=file:./edith.db
+  // Production PostgreSQL: DATABASE_URL=postgresql://user:pass@host:5432/edith  provider="postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 

@@ -51,7 +51,9 @@ export async function applyPragmas(prisma: PrismaClient): Promise<void> {
   let applied = 0
   for (const pragma of PRAGMAS) {
     try {
-      await prisma.$executeRawUnsafe(pragma)
+      // $queryRawUnsafe handles both result-returning pragmas (e.g. journal_mode)
+      // and non-returning ones — $executeRawUnsafe rejects result-bearing rows.
+      await prisma.$queryRawUnsafe(pragma)
       applied++
     } catch (err) {
       log.warn("pragma failed (non-fatal)", { pragma, err: String(err) })
