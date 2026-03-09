@@ -1,0 +1,22 @@
+name: Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Target URL (default: staging)"
+        default: "https://edith-staging.fly.dev"
+
+jobs:
+  k6-load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run k6 load test
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: scripts/load-test.js
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          AUTH_TOKEN: ${{ secrets.STAGING_AUTH_TOKEN }}
