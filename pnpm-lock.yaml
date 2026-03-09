@@ -20,6 +20,9 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.78.0
         version: 0.78.0(zod@4.3.6)
+      '@clack/prompts':
+        specifier: ^1.1.0
+        version: 1.1.0
       '@fastify/static':
         specifier: ^9.0.0
         version: 9.0.0
@@ -80,9 +83,6 @@ importers:
       kokoro-js:
         specifier: ^1.2.1
         version: 1.2.1
-      msedge-tts:
-        specifier: ^2.0.4
-        version: 2.0.4
       node-cron:
         specifier: ^4.2.1
         version: 4.2.1
@@ -115,7 +115,7 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.3.0)(jiti@2.6.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
       dpdm:
-        specifier: ^3.14.0
+        specifier: ^3.15.1
         version: 3.15.1
       minimatch:
         specifier: ^10.2.4
@@ -142,6 +142,9 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.3.0)(jiti@2.6.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)
     optionalDependencies:
+      msedge-tts:
+        specifier: ^2.0.4
+        version: 2.0.4
       playwright:
         specifier: ^1.58.2
         version: 1.58.2
@@ -1034,6 +1037,12 @@ packages:
 
   '@cacheable/utils@2.3.4':
     resolution: {integrity: sha512-knwKUJEYgIfwShABS1BX6JyJJTglAFcEU7EXqzTdiGCXur4voqkiJkdgZIQtWNFhynzDWERcTYv/sETMu3uJWA==}
+
+  '@clack/core@1.1.0':
+    resolution: {integrity: sha512-SVcm4Dqm2ukn64/8Gub2wnlA5nS2iWJyCkdNHcvNHPIeBTGojpdJ+9cZKwLfmqy7irD4N5qLteSilJlE0WLAtA==}
+
+  '@clack/prompts@1.1.0':
+    resolution: {integrity: sha512-pkqbPGtohJAvm4Dphs2M8xE29ggupihHdy1x84HNojZuMtFsHiUlRvqD24tM2+XmI+61LlfNceM3Wr7U5QES5g==}
 
   '@develar/schema-utils@2.6.5':
     resolution: {integrity: sha512-0cp4PsWQ/9avqTVMCtZ+GirikIA36ikvjtHweU4/j8yLtgObI0+JUPhYFScgwlteveGB1rt3Cm8UhN04XayDig==}
@@ -8309,6 +8318,15 @@ snapshots:
       hashery: 1.5.0
       keyv: 5.6.0
 
+  '@clack/core@1.1.0':
+    dependencies:
+      sisteransi: 1.0.5
+
+  '@clack/prompts@1.1.0':
+    dependencies:
+      '@clack/core': 1.1.0
+      sisteransi: 1.0.5
+
   '@develar/schema-utils@2.6.5':
     dependencies:
       ajv: 6.14.0
@@ -10712,6 +10730,7 @@ snapshots:
     dependencies:
       base64-js: 1.5.1
       ieee754: 1.2.1
+    optional: true
 
   builder-util-runtime@9.2.4:
     dependencies:
@@ -12812,6 +12831,7 @@ snapshots:
   isomorphic-ws@5.0.0(ws@8.19.0):
     dependencies:
       ws: 8.19.0
+    optional: true
 
   istanbul-lib-coverage@3.2.2: {}
 
@@ -13546,6 +13566,7 @@ snapshots:
       - bufferutil
       - debug
       - utf-8-validate
+    optional: true
 
   music-metadata@11.12.1:
     dependencies:
@@ -14946,6 +14967,7 @@ snapshots:
     dependencies:
       inherits: 2.0.4
       readable-stream: 3.6.2
+    optional: true
 
   stream-buffers@2.2.0: {}
 

@@ -9,14 +9,13 @@
 import crypto from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
-import readline from "node:readline/promises"
-import { stdin as input, stdout as output } from "node:process"
 import { pathToFileURL } from "node:url"
 
 import dotenv from "dotenv"
 import { execa } from "execa"
 
-import { printBanner, colors, spinner } from "./banner.js"
+import { colors } from "./banner.js"
+import { createClackPrompter, WizardCancelledError, type WizardPrompter } from "./wizard-prompter.js"
 
 type ChannelChoice = "telegram" | "discord" | "whatsapp" | "webchat"
 type ProviderChoice = "groq" | "openrouter" | "anthropic" | "openai" | "gemini" | "ollama"
@@ -51,9 +50,16 @@ interface QuickstartPlan {
 }
 
 interface NextStepCommands {
+  status: string
+  dashboard: string
   doctor: string
   all: string
   onboard: string
+}
+
+interface DatabaseBootstrapResult {
+  ok: boolean
+  lines: string[]
 }
 
 const DEFAULT_ONBOARD_COMPUTER_USE_CONFIG = {
@@ -79,10 +85,10 @@ const DEFAULT_ONBOARD_COMPUTER_USE_CONFIG = {
 } as const
 
 const CHANNEL_CHOICES: ReadonlyArray<{ key: ChannelChoice; label: string; description: string }> = [
-  { key: "telegram", label: "Telegram (recommended)", description: "Fastest path for phone testing via Bot API" },
+  { key: "webchat", label: "WebChat (recommended)", description: "Closest to OpenClaw dashboard-first setup; no chat token required" },
+  { key: "telegram", label: "Telegram", description: "Fastest phone-based bot test via Bot API" },
   { key: "discord", label: "Discord", description: "Good for DMs or one allowlisted server channel" },
-  { key: "whatsapp", label: "WhatsApp (Cloud API)", description: "Phone-native test via Meta WhatsApp Cloud API + webhook" },
-  { key: "webchat", label: "WebChat (local browser)", description: "No external token needed; local-only testing" },
+  { key: "whatsapp", label: "WhatsApp", description: "Choose QR scan for quick pairing or Cloud API for Meta-hosted setup" },
 ]
 
 const PROVIDER_CHOICES: ReadonlyArray<{ key: ProviderChoice; label: string; description: string }> = [
@@ -100,24 +106,21 @@ const WHATSAPP_MODE_CHOICES: ReadonlyArray<{ key: WhatsAppSetupMode; label: stri
 ]
 
 function printHelp(): void {
-  console.log("EDITH Onboarding (OpenClaw-inspired)")
-  console.log("====================================")
+  console.log("EDITH Setup Wizard")
+  console.log("==================")
   console.log("")
   console.log("Usage:")
-  console.log("  pnpm quickstart   # beginner-friendly quickstart wizard (recommended)")
-  console.log("  pnpm onboard -- [--channel telegram|discord|whatsapp|webchat] [--provider groq|openrouter|anthropic|openai|gemini|ollama] [--whatsapp-mode scan|cloud]")
-  console.log("  pnpm wa:scan      # one-command WhatsApp QR setup (OpenClaw-style)")
-  console.log("  pnpm run setup    # compatibility alias (avoid bare `pnpm setup`, it conflicts with pnpm built-in)")
+  console.log("  edith onboard                     # interactive setup (recommended)")
+  console.log("  edith onboard --channel telegram   # preselect a channel")
+  console.log("  edith onboard --provider groq      # preselect a provider")
+  console.log("  edith wa scan                      # WhatsApp QR scan shortcut")
   console.log("")
   console.log("Options:")
-  console.log("  --flow quickstart   Only supported flow (default)")
-  console.log("  --channel <name>    Preselect a channel")
-  console.log("  --provider <name>   Preselect an AI provider")
-  console.log("  --print-only        Do not write .env; print the planned changes")
-  console.log("  --write             Force writing .env without print-only")
-  console.log("  --yes               Non-interactive mode: use defaults, skip optional prompts, and skip final confirmation")
-  console.log("  --non-interactive   Alias for --yes (OpenClaw-style automation flag)")
-  console.log("  --wizard            Compatibility no-op (reserved for setup parity)")
+  console.log("  --channel <name>    Preselect channel: telegram | discord | whatsapp | webchat")
+  console.log("  --provider <name>   Preselect provider: groq | openrouter | anthropic | openai | gemini | ollama")
+  console.log("  --whatsapp-mode <m> scan (QR) or cloud (Meta API)")
+  console.log("  --print-only        Show planned .env changes without writing")
+  console.log("  --yes               Non-interactive: use defaults, skip optional prompts")
   console.log("  --help, -h          Show this help")
 }
 
@@ -391,6 +394,8 @@ function defaultNextStepCommands(env: NodeJS.ProcessEnv = process.env): NextStep
 
   if (usingGlobalWrapper) {
     return {
+      status: "edith status",
+      dashboard: "edith dashboard --open",
       doctor: "edith doctor",
       all: "edith all",
       onboard: "edith onboard",
@@ -398,6 +403,8 @@ function defaultNextStepCommands(env: NodeJS.ProcessEnv = process.env): NextStep
   }
 
   return {
+    status: "pnpm doctor",
+    dashboard: "pnpm gateway",
     doctor: "pnpm doctor",
     all: "pnpm all",
     onboard: "pnpm onboard",
@@ -407,16 +414,16 @@ function defaultNextStepCommands(env: NodeJS.ProcessEnv = process.env): NextStep
 function buildNextSteps(plan: QuickstartPlan, commands: NextStepCommands = defaultNextStepCommands()): string[] {
   const lines: string[] = []
 
-  lines.push(colors.accent("âœ… Setup complete!"))
+  lines.push(colors.accent("Setup complete."))
   lines.push("")
-  lines.push("Start EDITH:")
-  lines.push(`  \`${commands.all}\`              # start all channels`)
-  lines.push("")
-  lines.push("Check status:")
-  lines.push(`  \`${commands.doctor}\`           # health check`)
-  lines.push(`  \`pnpm typecheck\`        # TypeScript check`)
+  lines.push("Recommended next steps:")
+  lines.push(`  \`${commands.status}\`            # verify the active profile is healthy`)
+  lines.push(`  \`${commands.dashboard}\`         # start the dashboard / gateway first`)
+  lines.push(`  \`${commands.all}\`               # start the full app once status is clean`)
   lines.push("")
   lines.push("Useful commands:")
+  lines.push(`  \`${commands.doctor}\`            # detailed health check`)
+  lines.push(`  \`pnpm typecheck\`        # TypeScript check`)
   lines.push(`  \`${commands.onboard}\`         # re-run wizard anytime`)
   lines.push(`  \`pnpm dev -- --mode text\`    # text-only CLI mode`)
   lines.push(`  \`pnpm dev -- --mode gateway\` # HTTP gateway only`)
@@ -428,7 +435,7 @@ function buildNextSteps(plan: QuickstartPlan, commands: NextStepCommands = defau
     if (!plan.updates.TELEGRAM_CHAT_ID) {
       lines.push(`  2. Copy /id result into TELEGRAM_CHAT_ID and rerun \`${commands.onboard}\``)
     }
-    lines.push("  â†’ docs/channels/telegram.md")
+    lines.push("  -> docs/channels/telegram.md")
   } else if (plan.channel === "discord") {
     lines.push("")
     lines.push("Discord setup:")
@@ -437,7 +444,7 @@ function buildNextSteps(plan: QuickstartPlan, commands: NextStepCommands = defau
     if (!plan.updates.DISCORD_CHANNEL_ID) {
       lines.push(`  3. Add !id result to DISCORD_CHANNEL_ID and rerun \`${commands.onboard}\``)
     }
-    lines.push("  â†’ docs/channels/discord.md")
+    lines.push("  -> docs/channels/discord.md")
   } else if (plan.channel === "whatsapp") {
     const isCloudMode = (plan.updates.WHATSAPP_MODE ?? "").trim().toLowerCase() === "cloud"
     lines.push("")
@@ -448,12 +455,14 @@ function buildNextSteps(plan: QuickstartPlan, commands: NextStepCommands = defau
       lines.push("  3. Set verify token = WHATSAPP_CLOUD_VERIFY_TOKEN")
     } else {
       lines.push(`  1. Scan the QR code when it appears in terminal (WHATSAPP_MODE=baileys)`)
-      lines.push("  2. WhatsApp â†’ Linked Devices â†’ Link a Device")
+      lines.push("  2. WhatsApp -> Linked Devices -> Link a Device")
     }
-    lines.push("  â†’ docs/channels/whatsapp.md")
+    lines.push("  -> docs/channels/whatsapp.md")
   } else {
     lines.push("")
-    lines.push("WebChat: open http://127.0.0.1:8080 after starting EDITH")
+    lines.push("WebChat:")
+    lines.push("  1. Start the dashboard / gateway")
+    lines.push("  2. Open http://127.0.0.1:8080 in your browser")
     lines.push(`  Add more channels later with \`${commands.onboard}\``)
   }
 
@@ -463,298 +472,214 @@ function buildNextSteps(plan: QuickstartPlan, commands: NextStepCommands = defau
   return lines
 }
 
-async function askChoice<T extends string>(
-  rl: readline.Interface,
-  prompt: string,
-  choices: ReadonlyArray<{ key: T; label: string; description: string }>,
-): Promise<T> {
-  console.log("")
-  console.log(colors.label(prompt))
-  choices.forEach((choice, index) => {
-    console.log(`  ${colors.accent(String(index + 1))}. ${colors.label(choice.label)}`)
-    console.log(`     ${colors.dim(choice.description)}`)
-  })
-
-  while (true) {
-    const raw = (await rl.question(`Select [1-${choices.length}] (default 1): `)).trim()
-    if (!raw) {
-      return choices[0].key
-    }
-    const index = Number.parseInt(raw, 10)
-    if (Number.isFinite(index) && index >= 1 && index <= choices.length) {
-      return choices[index - 1].key
-    }
-    const byKey = choices.find((choice) => choice.key === raw.toLowerCase())
-    if (byKey) {
-      return byKey.key
-    }
-    console.log("Invalid selection, try again.")
-  }
-}
-
-async function askInput(
-  rl: readline.Interface,
-  label: string,
-  opts: {
-    current?: string | null
-    placeholder?: string
-    optional?: boolean
-    defaultValue?: string
-  } = {},
-): Promise<string | null> {
-  const suffixParts: string[] = []
-  if (opts.current) {
-    suffixParts.push(`current=${redactSecretValue(label, opts.current)}`)
-  }
-  if (opts.optional) {
-    suffixParts.push("optional")
-  }
-  if (opts.placeholder) {
-    suffixParts.push(opts.placeholder)
-  }
-  const suffix = suffixParts.length > 0 ? ` (${suffixParts.join(", ")})` : ""
-
-  const prompt = `${colors.label(label)}${colors.dim(suffix)}: `
-  const raw = (await rl.question(prompt)).trim()
-
-  if (!raw) {
-    if (opts.defaultValue !== undefined) {
-      return opts.defaultValue
-    }
-    return opts.optional ? null : null
-  }
-
-  return raw
-}
-
-async function askYesNo(
-  rl: readline.Interface,
-  prompt: string,
-  defaultYes = true,
-): Promise<boolean> {
-  const raw = (await rl.question(`${prompt} (${defaultYes ? "Y/n" : "y/N"}): `)).trim().toLowerCase()
-  if (!raw) {
-    return defaultYes
-  }
-  if (["y", "yes"].includes(raw)) {
-    return true
-  }
-  if (["n", "no"].includes(raw)) {
-    return false
-  }
-  return defaultYes
-}
-
-function buildQuickstartBanner(): void {
-  printBanner({ subtitle: "Setup Wizard" })
-  console.log("This wizard helps you:")
-  console.log(`- choose a test channel (${colors.accent("Telegram")} / ${colors.accent("Discord")} / ${colors.accent("WhatsApp")} / ${colors.accent("WebChat")})`)
-  console.log(`- for WhatsApp: choose ${colors.accent("Scan QR")} (quick test) or ${colors.accent("Cloud API")} (official)`)
-  console.log("- choose a model provider")
-  console.log("- write the minimum .env config for a phone-first quick test")
-}
-
 async function collectQuickstartPlan(
   args: OnboardArgs,
   envValues: Record<string, string>,
+  prompter: WizardPrompter,
 ): Promise<QuickstartPlan> {
   const nonInteractive = args.yes
-  const rl = nonInteractive ? null : readline.createInterface({ input, output })
-  try {
-    buildQuickstartBanner()
-    if (nonInteractive) {
-      console.log("")
-      console.log("Non-interactive mode enabled (`--yes` / `--non-interactive`): using defaults and skipping optional prompts.")
-    }
 
-    const choose = async <T extends string>(
-      selected: T | null,
-      prompt: string,
-      choices: ReadonlyArray<{ key: T; label: string; description: string }>,
-    ): Promise<T> => {
-      if (selected) {
-        return selected
-      }
-      if (nonInteractive) {
-        return choices[0].key
-      }
-      return askChoice(rl!, prompt, choices)
-    }
-
-    const askInputMaybe = async (
-      label: string,
-      opts: {
-        current?: string | null
-        placeholder?: string
-        optional?: boolean
-        defaultValue?: string
-      } = {},
-    ): Promise<string | null> => {
-      if (nonInteractive) {
-        return opts.defaultValue ?? null
-      }
-      return askInput(rl!, label, opts)
-    }
-
-    const askYesNoMaybe = async (prompt: string, defaultYes = true): Promise<boolean> => {
-      if (nonInteractive) {
-        return defaultYes
-      }
-      return askYesNo(rl!, prompt, defaultYes)
-    }
-
-    const channel = await choose(args.channel, "Choose your first test channel", CHANNEL_CHOICES)
-    const provider = await choose(args.provider, "Choose your primary model provider", PROVIDER_CHOICES)
-
-    const updates: Record<string, string> = {}
-
-    const providerKey = providerEnvKey(provider)
-    if (provider === "ollama") {
-      const baseUrl = await askInputMaybe("OLLAMA_BASE_URL", {
-        current: envValues.OLLAMA_BASE_URL ?? null,
-        placeholder: "default=http://localhost:11434",
-        defaultValue: envValues.OLLAMA_BASE_URL || "http://localhost:11434",
-      })
-      if (baseUrl) {
-        updates[providerKey] = baseUrl
-      }
-    } else {
-      const apiKey = await askInputMaybe(providerKey, {
-        current: envValues[providerKey] ?? null,
-        optional: true,
-        placeholder: "leave blank to keep current / set later",
-      })
-      if (apiKey) {
-        updates[providerKey] = apiKey
-      }
-    }
-
-    if (channel === "telegram") {
-      const botToken = await askInputMaybe("TELEGRAM_BOT_TOKEN", {
-        current: envValues.TELEGRAM_BOT_TOKEN ?? null,
-        optional: true,
-        placeholder: "from @BotFather (leave blank to set later)",
-      })
-      const chatId = await askInputMaybe("TELEGRAM_CHAT_ID", {
-        current: envValues.TELEGRAM_CHAT_ID ?? null,
-        optional: true,
-        placeholder: "allowlist chat id (optional now, use /id later)",
-      })
-      if (botToken) {
-        updates.TELEGRAM_BOT_TOKEN = botToken
-      }
-      if (chatId) {
-        updates.TELEGRAM_CHAT_ID = chatId
-      }
-    } else if (channel === "discord") {
-      const botToken = await askInputMaybe("DISCORD_BOT_TOKEN", {
-        current: envValues.DISCORD_BOT_TOKEN ?? null,
-        optional: true,
-        placeholder: "Discord Developer Portal token (leave blank to set later)",
-      })
-      const channelId = await askInputMaybe("DISCORD_CHANNEL_ID", {
-        current: envValues.DISCORD_CHANNEL_ID ?? null,
-        optional: true,
-        placeholder: "allowlist channel id (optional; DMs work without it)",
-      })
-      if (botToken) {
-        updates.DISCORD_BOT_TOKEN = botToken
-      }
-      if (channelId) {
-        updates.DISCORD_CHANNEL_ID = channelId
-      }
-    } else if (channel === "whatsapp") {
-      updates.WHATSAPP_ENABLED = "true"
-      const whatsAppMode = await choose(args.whatsappMode, "Choose WhatsApp setup mode", WHATSAPP_MODE_CHOICES)
-
-      if (whatsAppMode === "scan") {
-        updates.WHATSAPP_MODE = "baileys"
-      } else {
-        const accessToken = await askInputMaybe("WHATSAPP_CLOUD_ACCESS_TOKEN", {
-          current: envValues.WHATSAPP_CLOUD_ACCESS_TOKEN ?? null,
-          optional: true,
-          placeholder: "Meta permanent/long-lived access token (leave blank to set later)",
-        })
-        const phoneNumberId = await askInputMaybe("WHATSAPP_CLOUD_PHONE_NUMBER_ID", {
-          current: envValues.WHATSAPP_CLOUD_PHONE_NUMBER_ID ?? null,
-          optional: true,
-          placeholder: "from Meta WhatsApp Cloud API dashboard",
-        })
-        const verifyTokenDefault =
-          envValues.WHATSAPP_CLOUD_VERIFY_TOKEN
-          || crypto.randomUUID().replaceAll("-", "")
-        const verifyToken = await askInputMaybe("WHATSAPP_CLOUD_VERIFY_TOKEN", {
-          current: envValues.WHATSAPP_CLOUD_VERIFY_TOKEN ?? null,
-          placeholder: "used by Meta webhook verification (auto-generated if blank)",
-          defaultValue: verifyTokenDefault,
-        })
-        const allowlist = await askInputMaybe("WHATSAPP_CLOUD_ALLOWED_WA_IDS", {
-          current: envValues.WHATSAPP_CLOUD_ALLOWED_WA_IDS ?? null,
-          optional: true,
-          placeholder: "optional allowlist (comma/newline wa_id), use /id later",
-        })
-        const apiVersion = await askInputMaybe("WHATSAPP_CLOUD_API_VERSION", {
-          current: envValues.WHATSAPP_CLOUD_API_VERSION ?? null,
-          optional: true,
-          placeholder: "default=v20.0",
-          defaultValue: envValues.WHATSAPP_CLOUD_API_VERSION || "v20.0",
-        })
-
-        updates.WHATSAPP_MODE = "cloud"
-        if (accessToken) {
-          updates.WHATSAPP_CLOUD_ACCESS_TOKEN = accessToken
-        }
-        if (phoneNumberId) {
-          updates.WHATSAPP_CLOUD_PHONE_NUMBER_ID = phoneNumberId
-        }
-        if (verifyToken) {
-          updates.WHATSAPP_CLOUD_VERIFY_TOKEN = verifyToken
-        }
-        if (allowlist) {
-          updates.WHATSAPP_CLOUD_ALLOWED_WA_IDS = allowlist
-        }
-        if (apiVersion) {
-          updates.WHATSAPP_CLOUD_API_VERSION = apiVersion
-        }
-      }
-    }
-
-    const setAutoStartGateway = await askYesNoMaybe(
-      "Set AUTO_START_GATEWAY=true for `pnpm dev`",
-      channel === "whatsapp" && updates.WHATSAPP_MODE === "cloud",
+  if (!nonInteractive) {
+    await prompter.note(
+      [
+        "This wizard will configure:",
+        `  • your first test channel  (WebChat / Telegram / Discord / WhatsApp)`,
+        `  • your model provider  (Groq, OpenRouter, Anthropic, OpenAI, Gemini, Ollama…)`,
+        "  • the minimum API keys needed to start EDITH",
+      ].join("\n"),
+      "What we'll configure",
     )
-    if (setAutoStartGateway) {
-      updates.AUTO_START_GATEWAY = "true"
-    }
-
-    const enableComputerUse = await askYesNoMaybe(
-      "Enable computer use defaults in edith.json",
-      true,
-    )
-
-    return { channel, provider, updates, computerUseEnabled: enableComputerUse }
-  } finally {
-    rl?.close()
+  } else {
+    console.log("Non-interactive mode (--yes): using defaults and skipping optional prompts.")
   }
+
+  const choose = async <T extends string>(
+    selected: T | null,
+    message: string,
+    choices: ReadonlyArray<{ key: T; label: string; description: string }>,
+  ): Promise<T> => {
+    if (selected) return selected
+    if (nonInteractive) return choices[0].key
+    return prompter.select({
+      message,
+      options: choices.map((c) => ({ value: c.key, label: c.label, hint: c.description })),
+      initialValue: choices[0].key,
+    })
+  }
+
+  const askInputMaybe = async (
+    label: string,
+    opts: {
+      current?: string | null
+      placeholder?: string
+      optional?: boolean
+      defaultValue?: string
+    } = {},
+  ): Promise<string | null> => {
+    if (nonInteractive) return opts.defaultValue ?? null
+    const result = await prompter.text({
+      message: label,
+      placeholder: opts.placeholder ?? (opts.optional ? "leave blank to skip" : undefined),
+      initialValue: opts.current ?? opts.defaultValue ?? undefined,
+    })
+    return result.trim() || null
+  }
+
+  const askYesNoMaybe = async (message: string, defaultYes = true): Promise<boolean> => {
+    if (nonInteractive) return defaultYes
+    return prompter.confirm({ message, initialValue: defaultYes })
+  }
+
+  const channel = await choose(args.channel, "Choose your first test channel", CHANNEL_CHOICES)
+  const provider = await choose(args.provider, "Choose your primary model provider", PROVIDER_CHOICES)
+
+  const updates: Record<string, string> = {}
+
+  const providerKey = providerEnvKey(provider)
+  if (provider === "ollama") {
+    const baseUrl = await askInputMaybe("OLLAMA_BASE_URL", {
+      current: envValues.OLLAMA_BASE_URL ?? null,
+      placeholder: "default=http://localhost:11434",
+      defaultValue: envValues.OLLAMA_BASE_URL || "http://localhost:11434",
+    })
+    if (baseUrl) {
+      updates[providerKey] = baseUrl
+    }
+  } else {
+    const apiKey = await askInputMaybe(providerKey, {
+      current: envValues[providerKey] ?? null,
+      optional: true,
+      placeholder: "leave blank to keep current / set later",
+    })
+    if (apiKey) {
+      updates[providerKey] = apiKey
+    }
+  }
+
+  if (channel === "telegram") {
+    const botToken = await askInputMaybe("TELEGRAM_BOT_TOKEN", {
+      current: envValues.TELEGRAM_BOT_TOKEN ?? null,
+      optional: true,
+      placeholder: "from @BotFather (leave blank to set later)",
+    })
+    const chatId = await askInputMaybe("TELEGRAM_CHAT_ID", {
+      current: envValues.TELEGRAM_CHAT_ID ?? null,
+      optional: true,
+      placeholder: "allowlist chat id (optional now, use /id later)",
+    })
+    if (botToken) {
+      updates.TELEGRAM_BOT_TOKEN = botToken
+    }
+    if (chatId) {
+      updates.TELEGRAM_CHAT_ID = chatId
+    }
+  } else if (channel === "discord") {
+    const botToken = await askInputMaybe("DISCORD_BOT_TOKEN", {
+      current: envValues.DISCORD_BOT_TOKEN ?? null,
+      optional: true,
+      placeholder: "Discord Developer Portal token (leave blank to set later)",
+    })
+    const channelId = await askInputMaybe("DISCORD_CHANNEL_ID", {
+      current: envValues.DISCORD_CHANNEL_ID ?? null,
+      optional: true,
+      placeholder: "allowlist channel id (optional; DMs work without it)",
+    })
+    if (botToken) {
+      updates.DISCORD_BOT_TOKEN = botToken
+    }
+    if (channelId) {
+      updates.DISCORD_CHANNEL_ID = channelId
+    }
+  } else if (channel === "whatsapp") {
+    updates.WHATSAPP_ENABLED = "true"
+    const whatsAppMode = await choose(args.whatsappMode, "Choose WhatsApp setup mode", WHATSAPP_MODE_CHOICES)
+
+    if (whatsAppMode === "scan") {
+      updates.WHATSAPP_MODE = "baileys"
+    } else {
+      const accessToken = await askInputMaybe("WHATSAPP_CLOUD_ACCESS_TOKEN", {
+        current: envValues.WHATSAPP_CLOUD_ACCESS_TOKEN ?? null,
+        optional: true,
+        placeholder: "Meta permanent/long-lived access token (leave blank to set later)",
+      })
+      const phoneNumberId = await askInputMaybe("WHATSAPP_CLOUD_PHONE_NUMBER_ID", {
+        current: envValues.WHATSAPP_CLOUD_PHONE_NUMBER_ID ?? null,
+        optional: true,
+        placeholder: "from Meta WhatsApp Cloud API dashboard",
+      })
+      const verifyTokenDefault =
+        envValues.WHATSAPP_CLOUD_VERIFY_TOKEN
+        || crypto.randomUUID().replaceAll("-", "")
+      const verifyToken = await askInputMaybe("WHATSAPP_CLOUD_VERIFY_TOKEN", {
+        current: envValues.WHATSAPP_CLOUD_VERIFY_TOKEN ?? null,
+        placeholder: "used by Meta webhook verification (auto-generated if blank)",
+        defaultValue: verifyTokenDefault,
+      })
+      const allowlist = await askInputMaybe("WHATSAPP_CLOUD_ALLOWED_WA_IDS", {
+        current: envValues.WHATSAPP_CLOUD_ALLOWED_WA_IDS ?? null,
+        optional: true,
+        placeholder: "optional allowlist (comma/newline wa_id), use /id later",
+      })
+      const apiVersion = await askInputMaybe("WHATSAPP_CLOUD_API_VERSION", {
+        current: envValues.WHATSAPP_CLOUD_API_VERSION ?? null,
+        optional: true,
+        placeholder: "default=v20.0",
+        defaultValue: envValues.WHATSAPP_CLOUD_API_VERSION || "v20.0",
+      })
+
+      updates.WHATSAPP_MODE = "cloud"
+      if (accessToken) {
+        updates.WHATSAPP_CLOUD_ACCESS_TOKEN = accessToken
+      }
+      if (phoneNumberId) {
+        updates.WHATSAPP_CLOUD_PHONE_NUMBER_ID = phoneNumberId
+      }
+      if (verifyToken) {
+        updates.WHATSAPP_CLOUD_VERIFY_TOKEN = verifyToken
+      }
+      if (allowlist) {
+        updates.WHATSAPP_CLOUD_ALLOWED_WA_IDS = allowlist
+      }
+      if (apiVersion) {
+        updates.WHATSAPP_CLOUD_API_VERSION = apiVersion
+      }
+    }
+  }
+
+  const setAutoStartGateway = await askYesNoMaybe(
+    "Set AUTO_START_GATEWAY=true for `pnpm dev`",
+    channel === "webchat" || (channel === "whatsapp" && updates.WHATSAPP_MODE === "cloud"),
+  )
+  if (setAutoStartGateway) {
+    updates.AUTO_START_GATEWAY = "true"
+  }
+
+  const enableComputerUse = await askYesNoMaybe(
+    "Enable computer use defaults in edith.json",
+    true,
+  )
+
+  return { channel, provider, updates, computerUseEnabled: enableComputerUse }
 }
 
-function printPlannedChanges(plan: QuickstartPlan, envPath: string, templateSource: EnvTemplate["source"]): void {
-  console.log("")
-  console.log(colors.label("Quickstart plan"))
-  console.log(colors.dim("â•".repeat(40)))
-  console.log(`Channel:  ${colors.accent(plan.channel)}`)
-  console.log(`Provider: ${colors.accent(plan.provider)}`)
-  console.log(`Computer use: ${plan.computerUseEnabled ? colors.success("enabled") : colors.dim("disabled")}`)
-  console.log(`Target env: ${colors.dim(envPath)} ${colors.dim(`(base: ${templateSource})`)}`)
-  console.log("")
+function formatPlannedChangesNote(plan: QuickstartPlan, envPath: string, templateSource: EnvTemplate["source"]): string {
+  const lines: string[] = [
+    `Channel:  ${colors.accent(plan.channel)}`,
+    `Provider: ${colors.accent(plan.provider)}`,
+    `Computer use: ${plan.computerUseEnabled ? colors.success("enabled") : colors.dim("disabled")}`,
+    `Target env: ${colors.dim(envPath)} ${colors.dim(`(base: ${templateSource})`)}`,
+  ]
   if (Object.keys(plan.updates).length === 0) {
-    console.log(colors.dim("No env changes collected (you can still run the next steps and set values later)."))
-    return
+    lines.push("")
+    lines.push(colors.dim("No env changes collected — set values later."))
+  } else {
+    lines.push("")
+    lines.push("Env updates:")
+    for (const [key, value] of Object.entries(plan.updates)) {
+      lines.push(`  ${colors.label(key)}=${colors.dim(redactSecretValue(key, value))}`)
+    }
   }
-  console.log("Env updates:")
-  for (const [key, value] of Object.entries(plan.updates)) {
-    console.log(`  ${colors.label(key)}=${colors.dim(redactSecretValue(key, value))}`)
-  }
+  return lines.join("\n")
 }
 
 async function writeEnvFile(cwd: string, template: EnvTemplate, updates: Record<string, string>): Promise<string> {
@@ -765,81 +690,238 @@ async function writeEnvFile(cwd: string, template: EnvTemplate, updates: Record<
   return envPath
 }
 
+function isUsingGlobalWrapper(env: NodeJS.ProcessEnv = process.env): boolean {
+  return [env.EDITH_ENV_FILE, env.EDITH_WORKSPACE, env.EDITH_STATE_DIR]
+    .some((value) => typeof value === "string" && value.trim().length > 0)
+}
+
+function parseFileDatabaseUrl(databaseUrl: string): string | null {
+  const raw = databaseUrl.trim()
+  if (!raw.toLowerCase().startsWith("file:")) {
+    return null
+  }
+  const filePath = raw.slice("file:".length)
+  if (!filePath) {
+    return null
+  }
+  if (filePath.startsWith("./") || filePath.startsWith(".\\")) {
+    return path.resolve(process.cwd(), filePath)
+  }
+  return filePath
+}
+
+function buildDatabaseRecoveryHint(databaseUrl: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  const filePath = parseFileDatabaseUrl(databaseUrl)
+  if (!filePath) {
+    return []
+  }
+
+  const repairCommand = isUsingGlobalWrapper(env)
+    ? "edith status --fix --migrate"
+    : "pnpm exec prisma migrate deploy"
+
+  return [
+    "If this is only a local test profile, the quickest recovery is:",
+    `- Stop EDITH and back up or remove: ${filePath}`,
+    `- Re-run: \`${repairCommand}\``,
+  ]
+}
+
+function normalizeDatabaseBootstrapOutput(error: unknown): string {
+  const stderr = typeof (error as { stderr?: unknown })?.stderr === "string" ? (error as { stderr: string }).stderr : ""
+  const stdout = typeof (error as { stdout?: unknown })?.stdout === "string" ? (error as { stdout: string }).stdout : ""
+  const fallback = error instanceof Error ? error.message : String(error)
+  return (stderr || stdout || fallback).trim()
+}
+
+function shouldFallbackToDbPush(output: string): boolean {
+  return /Schema engine error/i.test(output) || /no such table:\s*MemoryNode/i.test(output) || /\bP3009\b|\bP3018\b/i.test(output)
+}
+
+async function bootstrapDatabase(
+  cwd: string,
+  envPath: string,
+  currentEnv: Record<string, string>,
+  updates: Record<string, string>,
+): Promise<DatabaseBootstrapResult> {
+  const writtenEnv = readEnvValueMap(await fs.readFile(envPath, "utf-8").catch(() => ""))
+  const databaseUrl = (writtenEnv.DATABASE_URL ?? updates.DATABASE_URL ?? currentEnv.DATABASE_URL ?? "").trim()
+  if (!databaseUrl) {
+    return {
+      ok: true,
+      lines: ["DATABASE_URL is not set yet, so database bootstrap was skipped."],
+    }
+  }
+
+  const sqliteDbPath = parseFileDatabaseUrl(databaseUrl)
+  if (sqliteDbPath) {
+    await fs.mkdir(path.dirname(sqliteDbPath), { recursive: true })
+    try {
+      await fs.access(sqliteDbPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        await fs.writeFile(sqliteDbPath, "", "utf-8")
+      } else {
+        throw error
+      }
+    }
+  }
+
+  try {
+    await execa("pnpm", ["exec", "prisma", "migrate", "deploy"], {
+      stdio: "pipe",
+      cwd,
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+        PRISMA_HIDE_UPDATE_MESSAGE: "1",
+      },
+    })
+    return {
+      ok: true,
+      lines: ["Database ready (migrations applied or already up to date)."],
+    }
+  } catch (error) {
+    const output = normalizeDatabaseBootstrapOutput(error)
+    if (shouldFallbackToDbPush(output)) {
+      try {
+        await execa("pnpm", ["exec", "prisma", "db", "push", "--skip-generate"], {
+          stdio: "pipe",
+          cwd,
+          env: {
+            ...process.env,
+            DATABASE_URL: databaseUrl,
+            PRISMA_HIDE_UPDATE_MESSAGE: "1",
+          },
+        })
+        return {
+          ok: true,
+          lines: ["Database ready (schema synced with Prisma db push for this local profile)."],
+        }
+      } catch (pushError) {
+        const pushOutput = normalizeDatabaseBootstrapOutput(pushError)
+        return {
+          ok: false,
+          lines: [
+            "Database init did not complete cleanly.",
+            "Both `prisma migrate deploy` and the local SQLite fallback `prisma db push` failed.",
+            "",
+            "Prisma said:",
+            pushOutput || output,
+            "",
+            ...buildDatabaseRecoveryHint(databaseUrl),
+          ],
+        }
+      }
+    }
+
+    const lines = [
+      "Database init did not complete cleanly.",
+      "Onboarding now uses `prisma migrate deploy` so setup matches runtime behavior.",
+    ]
+
+    if (output) {
+      lines.push("")
+      lines.push("Prisma said:")
+      lines.push(output)
+    }
+
+    const recoveryHint = buildDatabaseRecoveryHint(databaseUrl)
+    if (recoveryHint.length > 0) {
+      lines.push("")
+      lines.push(...recoveryHint)
+    }
+
+    return { ok: false, lines }
+  }
+}
+
+async function requireRiskAcknowledgement(prompter: WizardPrompter): Promise<void> {
+  await prompter.note(
+    [
+      "EDITH can:",
+      "  • read and write files in your project",
+      "  • run commands via computer-use agents",
+      "  • send messages through configured channels",
+      "",
+      "API keys written to .env are stored unencrypted on disk.",
+      "Keep your .env out of version control (.gitignore is already set).",
+    ].join("\n"),
+    "Before you begin",
+  )
+  const ok = await prompter.confirm({ message: "I understand. Continue?", initialValue: true })
+  if (!ok) throw new WizardCancelledError("risk not accepted")
+}
+
 async function runOnboarding(argv: string[]): Promise<void> {
   const args = parseOnboardArgs(argv)
   if (args.flow !== "quickstart") {
     throw new Error(`Unsupported flow: ${args.flow}`)
   }
 
+  const prompter = createClackPrompter()
+  await prompter.intro("EDITH Setup Wizard")
+
   const cwd = process.cwd()
+  const commands = defaultNextStepCommands()
   const template = await loadEnvTemplate(cwd)
   const { envPath } = resolveOnboardEnvPaths(cwd)
   const currentEnv = readEnvValueMap(template.content)
-  const plan = await collectQuickstartPlan(args, currentEnv)
 
-  printPlannedChanges(plan, envPath, template.source)
-
-  if (args.writeMode === "print") {
-    console.log("")
-    console.log("Print-only mode: .env was not modified.")
-  } else {
-    let shouldWrite = args.yes
-    if (!shouldWrite) {
-      const rl = readline.createInterface({ input, output })
-      try {
-        shouldWrite = await askYesNo(rl, "Write these changes to .env now?", true)
-      } finally {
-        rl.close()
-      }
+  try {
+    if (!args.yes) {
+      await requireRiskAcknowledgement(prompter)
     }
 
-    if (shouldWrite) {
-      spinner.start("Writing configuration...")
-      await writeEnvFile(cwd, template, plan.updates)
-      const configPath = await writeComputerUseConfig(cwd, plan.computerUseEnabled)
-      spinner.stop("Configuration saved", "ok")
-      console.log(`  ${colors.dim(envPath)}`)
-      console.log(`  ${colors.dim(configPath)}`)
+    const plan = await collectQuickstartPlan(args, currentEnv, prompter)
+    const changesSummary = formatPlannedChangesNote(plan, envPath, template.source)
 
-      // â”€â”€ Database setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-      console.log("")
-      spinner.start("Setting up database...")
-      try {
-        // Re-read the just-written .env so DATABASE_URL from the file takes
-        // precedence over any conflicting system-level env var (e.g. a stale
-        // postgresql:// URL that may exist in the user's shell environment).
-        const writtenEnv = readEnvValueMap(await fs.readFile(envPath, "utf-8").catch(() => ""))
-        const dbUrl = writtenEnv.DATABASE_URL ?? plan.updates.DATABASE_URL ?? currentEnv.DATABASE_URL
-        await execa("pnpm", ["exec", "prisma", "db", "push", "--skip-generate"], {
-          stdio: "pipe",
-          cwd,
-          env: {
-            ...process.env,
-            ...(dbUrl ? { DATABASE_URL: dbUrl } : {}),
-          },
-        })
-        spinner.stop("Database ready", "ok")
-      } catch {
-        spinner.stop("Database setup failed â€” run `pnpm db:push` manually", "error")
-      }
-
-      // â”€â”€ Auto health check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-      console.log("")
-      console.log(colors.label("Running health check..."))
-      try {
-        await execa("pnpm", ["doctor"], { stdio: "inherit", cwd })
-      } catch {
-        console.log(colors.dim("  Some checks failed â€” see above. Re-run `pnpm doctor` anytime."))
-      }
+    if (args.writeMode === "print") {
+      await prompter.note(changesSummary, "Planned changes (print-only, not written)")
     } else {
-      console.log("")
-      console.log(colors.dim("Skipped writing .env"))
-    }
-  }
+      await prompter.note(changesSummary, "Planned changes")
 
-  console.log("")
-  for (const line of buildNextSteps(plan)) {
-    console.log(line)
+      let shouldWrite = args.yes
+      if (!shouldWrite) {
+        shouldWrite = await prompter.confirm({ message: "Write these changes to .env now?", initialValue: true })
+      }
+
+      if (shouldWrite) {
+        const writeProg = prompter.progress("Writing configuration...")
+        await writeEnvFile(cwd, template, plan.updates)
+        const configPath = await writeComputerUseConfig(cwd, plan.computerUseEnabled)
+        writeProg.stop(`Configuration saved — ${envPath}  ${colors.dim(configPath)}`)
+
+        const dbProg = prompter.progress("Setting up database...")
+        const databaseBootstrap = await bootstrapDatabase(cwd, envPath, currentEnv, plan.updates)
+        if (!databaseBootstrap.ok) {
+          dbProg.stop("Database setup failed")
+          await prompter.note(databaseBootstrap.lines.join("\n"), "Database error")
+          process.exitCode = 1
+          return
+        }
+        dbProg.stop("Database ready")
+
+        const healthProg = prompter.progress("Running health check...")
+        try {
+          await execa("pnpm", ["doctor"], { stdio: "pipe", cwd })
+          healthProg.stop("Health check passed")
+        } catch {
+          healthProg.stop("Some health checks failed — run `edith doctor` to see details")
+        }
+      } else {
+        console.log(colors.dim("  Skipped writing .env"))
+      }
+    }
+
+    const nextStepsNote = buildNextSteps(plan, commands).slice(2).join("\n")
+    await prompter.note(nextStepsNote, "Next steps")
+    await prompter.outro("All done! Run `edith status` to verify.")
+  } catch (error) {
+    if (error instanceof WizardCancelledError) {
+      process.exit(0)
+    }
+    throw error
   }
 }
 
