@@ -1,12 +1,44 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: edith
+      POSTGRES_PASSWORD: edith
+      POSTGRES_DB: edith
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edith"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "6379:6379"
+
   edith:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: edith
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./prisma:/app/prisma          # SQLite database persistence
       - ./.edith:/app/.edith          # backups + outbox.json
       - ./.env:/app/.env:ro           # secrets (read-only mount)
       - ./workspace:/app/workspace    # SOUL.md, USER.md, AGENTS.md
@@ -16,10 +48,14 @@ services:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=file:/app/prisma/edith.db
+      - DATABASE_URL=postgresql://edith:edith@postgres:5432/edith
+      - REDIS_URL=redis://redis:6379
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:18789/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+volumes:
+  pgdata:

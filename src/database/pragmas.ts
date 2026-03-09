@@ -42,6 +42,12 @@ const PRAGMAS: readonly string[] = [
  * @param prisma - Connected PrismaClient instance
  */
 export async function applyPragmas(prisma: PrismaClient): Promise<void> {
+  const url = process.env.DATABASE_URL ?? ""
+  if (!url.startsWith("file:") && !url.includes("sqlite")) {
+    log.info("non-SQLite provider detected — skipping SQLite pragmas")
+    return
+  }
+
   let applied = 0
   for (const pragma of PRAGMAS) {
     try {

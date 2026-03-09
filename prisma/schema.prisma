@@ -1,13 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
-  // Default: SQLite for development. For production PostgreSQL:
-  //   1. Change provider to "postgresql"
-  //   2. Set DATABASE_URL="postgresql://user:pass@host:5432/edith"
-  //   3. Run: pnpm prisma migrate deploy
-  provider = "sqlite"
+  // For development with SQLite: DATABASE_URL=file:./edith.db   provider = "sqlite"
+  // For production with PostgreSQL: DATABASE_URL=postgresql://user:pass@host:5432/edith
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
