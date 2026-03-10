@@ -7,6 +7,7 @@ import config from "../config.js"
 import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { memory } from "../memory/store.js"
+import { auditConfig } from "../security/config-audit.js"
 
 const log = createLogger("cli.doctor")
 
@@ -111,6 +112,16 @@ async function runChecks(): Promise<CheckResult[]> {
 
   if (config.WHATSAPP_ENABLED) {
     results.push({ level: "ok", label: "WhatsApp", detail: "Enabled" })
+  }
+
+  // Config security audit
+  const audit = auditConfig()
+  for (const finding of audit.findings) {
+    const level: Level = finding.severity === "error" ? "error" : finding.severity === "warning" ? "warn" : "ok"
+    results.push({ level, label: "Config Audit", detail: finding.message })
+  }
+  if (audit.passed && audit.findings.length === 0) {
+    results.push({ level: "ok", label: "Config Audit", detail: "All checks passed" })
   }
 
   return results

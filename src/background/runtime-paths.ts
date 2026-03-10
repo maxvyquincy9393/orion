@@ -10,9 +10,6 @@
 
 import { homedir, platform } from "node:os"
 import { join } from "node:path"
-import { createLogger } from "../logger.js"
-
-const log = createLogger("daemon.runtime-paths")
 
 /** All resolved runtime directories for an EDITH installation. */
 export interface RuntimePaths {
