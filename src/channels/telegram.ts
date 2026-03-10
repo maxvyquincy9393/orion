@@ -202,6 +202,14 @@ export class TelegramChannel implements BaseChannel {
     return this.running && this.connected
   }
 
+  /**
+   * Process a single Telegram update received via webhook.
+   * Called by the gateway webhook route instead of the long-polling loop.
+   */
+  async handleWebhookUpdate(update: TelegramUpdate): Promise<void> {
+    await this.handleUpdate(update)
+  }
+
   async send(userId: string, message: string): Promise<boolean> {
     if (!this.isConnected()) {
       return false

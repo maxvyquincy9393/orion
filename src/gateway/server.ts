@@ -24,6 +24,7 @@ import websocketPlugin from "@fastify/websocket"
 import { daemon } from "../background/daemon.js"
 import { channelManager } from "../channels/manager.js"
 import { whatsAppChannel } from "../channels/whatsapp.js"
+import { telegramChannel } from "../channels/telegram.js"
 import config from "../config.js"
 import { handleIncomingUserMessage, estimateTokensFromText } from "../core/incoming-message-service.js"
 import { orchestrator } from "../engines/orchestrator.js"
@@ -636,6 +637,29 @@ export class GatewayServer {
             processed: ingest.processed,
             ignored: ingest.ignored,
           })
+        },
+      )
+
+      // ── Telegram Webhook ─────────────────────────────────────────
+      app.post<{ Body?: unknown }>(
+        "/webhooks/telegram",
+        async (req, reply) => {
+          if (!config.TELEGRAM_BOT_TOKEN.trim()) {
+            return reply.code(503).send({ error: "Telegram is not configured" })
+          }
+
+          const body = req.body
+          if (!body || typeof body !== "object") {
+            return reply.code(400).send({ error: "Invalid update payload" })
+          }
+
+          try {
+            await telegramChannel.handleWebhookUpdate(body as Record<string, unknown>)
+            return reply.code(200).send({ ok: true })
+          } catch (error) {
+            logger.error("telegram webhook processing failed", { error })
+            return reply.code(200).send({ ok: true })
+          }
         },
       )
 
