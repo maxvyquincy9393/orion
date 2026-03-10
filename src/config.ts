@@ -192,6 +192,12 @@ const ConfigSchema = z.object({
   TOGETHER_API_KEY: z.string().default(""),
   FIREWORKS_API_KEY: z.string().default(""),
   COHERE_API_KEY: z.string().default(""),
+
+  // Extension tokens
+  GITHUB_TOKEN: z.string().default(""),
+  NOTION_TOKEN: z.string().default(""),
+  HA_URL: z.string().default(""),
+  HA_TOKEN: z.string().default(""),
 })
 
 const parsed = ConfigSchema.safeParse(process.env)
