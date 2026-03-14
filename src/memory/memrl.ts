@@ -1,28 +1,10 @@
-/**
- * MemRL — Memory Reinforcement Learning via Intent-Experience-Utility triplets.
+﻿/**
+ * @file memrl.ts
+ * @description MemRL  Memory Reinforcement Learning via IEU (Intent-Experience-Utility) triplets.
  *
- * Implements the two-phase retrieval + Bellman Q-update architecture from:
- * arXiv 2601.03192 (MemRL: Self-Evolving Memory via Episodic RL)
- *
- * Phase A (retrieval): Semantic similarity filter — candidates from vector search
- * Phase B (ranking): Q-value reranking — high-utility memories surface first
- *
- * After every agent response, updateFromFeedback() is called to update Q-values:
- *   Q_new = Q_old + α * (r + γ * max_Q_next - Q_old)    [Bellman equation]
- *
- * Over time, memories that reliably lead to good outcomes get higher Q-values
- * and are retrieved more often. The agent learns what to remember.
- *
- * CRITICAL: updateFromFeedback() must be called after EVERY response.
- * If it is not called, the agent does not learn. This is wired in message-pipeline.ts
- * Stage 11. Do not bypass the pipeline.
- *
- * Memory format: Intent-Experience-Utility triplets
- *   intent: What was the user trying to achieve?
- *   experience: What did the agent do, and what happened?
- *   utility: Q-value [-1.0, 1.0] — learned from outcomes over time
- *
- * @module memory/memrl
+ * ARCHITECTURE / INTEGRATION:
+ *   Implements Bellman Q-update for adaptive memory utility scoring.
+ *   Utility scores influence retrieval ranking in store.ts.
  */
 
 import fs from "node:fs/promises"
@@ -34,13 +16,16 @@ import config from "../config.js"
 import { prisma } from "../database/index.js"
 import { createLogger } from "../logger.js"
 import { sanitizeUserId, clamp, parseJsonSafe } from "../utils/index.js"
-import type { SearchResult } from "./store.js"
+import { lanceFilter } from "./lance-filter.js"
+
+/** Minimal shape of a memory search result â€” mirrors store.SearchResult. */
+type SearchResult = { id: string; content: string; metadata: Record<string, unknown>; score: number }
 
 const log = createLogger("memory.memrl")
 
 /**
  * IEU Triplet structure for enhanced memory representation
- * Based on Mem-α paper: each memory has intent, experience, and utility components
+ * Based on Mem-Î± paper: each memory has intent, experience, and utility components
  */
 interface IEUTriplet {
   /** The user's original intent/query that led to this memory */
@@ -206,15 +191,15 @@ export class MemRLUpdater {
   /**
    * Update memory utility based on task feedback using Bellman equation
    * 
-   * Q(s,a) = Q(s,a) + α * [r + γ * max(Q(s',a')) - Q(s,a)]
+   * Q(s,a) = Q(s,a) + Î± * [r + Î³ * max(Q(s',a')) - Q(s,a)]
    * 
    * Where:
    * - s = current state (memory context)
    * - a = action (retrieving this memory)
    * - r = reward from feedback
    * - s' = next state (follow-up context)
-   * - α = learning rate
-   * - γ = discount factor
+   * - Î± = learning rate
+   * - Î³ = discount factor
    */
   async updateFromFeedback(feedback: TaskFeedback): Promise<void> {
     if (!Array.isArray(feedback.memoryIds) || feedback.memoryIds.length === 0) {
@@ -300,7 +285,7 @@ export class MemRLUpdater {
 
         nextMaxQ = clamp(nextMaxQ, -1, 1)
 
-        // Bellman update: Q = Q + α * (r + γ * maxQ' - Q)
+        // Bellman update: Q = Q + Î± * (r + Î³ * maxQ' - Q)
         const bellmanUpdate = currentQ + this.qAlpha * (effectiveReward + this.gamma * nextMaxQ - currentQ)
         const newQValue = clamp(bellmanUpdate, -1, 1)
 
@@ -390,7 +375,7 @@ export class MemRLUpdater {
       // Phase 1: Vector similarity search
       const rawRows = await table
         .vectorSearch(queryVector)
-        .where(`userId = '${sanitizedUserId}'`)
+        .where(lanceFilter.eq("userId", sanitizedUserId))
         .limit(candidateLimit)
         .toArray() as LanceSearchRow[]
 

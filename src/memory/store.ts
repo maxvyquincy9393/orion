@@ -1,19 +1,10 @@
-/**
- * store.ts — Primary memory store and context builder.
+﻿/**
+ * @file store.ts
+ * @description Primary memory store  LanceDB vector store, context builder, and MemRL integration.
  *
- * Manages the LanceDB vector store for semantic memory retrieval and
- * coordinates with the following subsystems:
- *   - MemRL (memrl.ts)         — utility-aware two-phase retrieval
- *   - HiMeS (himes.ts)         — hierarchical memory session builder
- *   - ProMem (promem.ts)       — memory compression via LLM extraction
- *   - TemporalIndex            — time-based memory decay
- *
- * Embedding priority (auto-selected):
- *   Ollama (nomic-embed-text) → OpenAI (text-embedding-3-small) → hash-based fallback
- *
- * Vector dimension: 768 (nomic-embed-text / text-embedding-3-small compatible)
- *
- * @module memory/store
+ * ARCHITECTURE / INTEGRATION:
+ *   Central hub for all memory persistence: embed, save, search, and buildContext.
+ *   Used throughout the codebase via the exported `memory` singleton.
  */
 
 import { randomUUID } from "node:crypto"
@@ -27,6 +18,7 @@ import { getHistory, saveMessage } from "../database/index.js"
 import { validateMemoryEntries, type MemoryEntry } from "../security/memory-validator.js"
 import { createLogger } from "../logger.js"
 import { sanitizeUserId, parseJsonSafe } from "../utils/index.js"
+import { lanceFilter } from "./lance-filter.js"
 import { hiMeS } from "./himes.js"
 import { memrlUpdater, type TaskFeedback } from "./memrl.js"
 import { proMem } from "./promem.js"
@@ -36,6 +28,9 @@ import { localEmbedder } from "./local-embedder.js"
 const log = createLogger("memory.store")
 
 const VECTOR_DIMENSION = 768
+
+/** Maximum allowed content length for a single memory entry (50 000 chars â‰ˆ ~12 500 tokens). */
+const MAX_MEMORY_CONTENT_LENGTH = 50_000
 const LEGACY_VECTOR_DIMENSION = 1536
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text"
@@ -400,6 +395,11 @@ export class MemoryStore {
     return fallback
   }
 
+  /** Returns true when the LanceDB vector store has been successfully initialized. */
+  isInitialized(): boolean {
+    return this.initialized
+  }
+
   getFallbackEmbeddingCount(): number {
     return this.hashFallbackCount
   }
@@ -411,6 +411,28 @@ export class MemoryStore {
   ): Promise<string | null> {
     if (!this.table) {
       log.warn("memory table not initialized")
+      return null
+    }
+
+    // Write-time content validation
+    if (!content || content.trim().length === 0) {
+      log.warn("memory save rejected: empty content", { userId })
+      return null
+    }
+
+    if (content.length > MAX_MEMORY_CONTENT_LENGTH) {
+      log.warn("memory save rejected: content exceeds max length", {
+        userId,
+        length: content.length,
+        maxLength: MAX_MEMORY_CONTENT_LENGTH,
+      })
+      return null
+    }
+
+    // Validate entries before embedding
+    const entries = validateMemoryEntries([{ content, metadata }])
+    if (entries.clean.length === 0) {
+      log.warn("memory save rejected: failed validation", { userId })
       return null
     }
 
@@ -455,7 +477,7 @@ export class MemoryStore {
 
     const results = await this.table
       .vectorSearch(queryVector)
-      .where(`userId = '${sanitizedUserId}'`)
+      .where(lanceFilter.eq("userId", sanitizedUserId))
       .limit(limit * 2)
       .toArray()
 
@@ -524,7 +546,7 @@ export class MemoryStore {
     try {
       const retrievalLimit = Math.max(3, Math.min(8, Math.floor(limit / 2)))
       const [fused, adaptiveMemories] = await Promise.all([
-        hiMeS.buildFusedContext(userId, query),
+        hiMeS.buildFusedContext(userId, query, (text) => this.embed(text)),
         this.search(userId, query, retrievalLimit),
       ])
 
@@ -578,8 +600,7 @@ export class MemoryStore {
     }
 
     try {
-      const sanitizedId = id.replace(/'/g, "")
-      await this.table.delete(`id = '${sanitizedId}'`)
+      await this.table.delete(lanceFilter.eq("id", id))
       log.debug("memory entry deleted", { id })
       return true
     } catch (error) {
@@ -595,7 +616,7 @@ export class MemoryStore {
 
     try {
       const sanitizedUserId = sanitizeUserId(userId)
-      await this.table.delete(`userId = '${sanitizedUserId}'`)
+      await this.table.delete(lanceFilter.eq("userId", sanitizedUserId))
       log.info("memory cleared for user", { userId })
     } catch (error) {
       log.error("failed to clear memory", error)

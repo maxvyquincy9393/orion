@@ -27,6 +27,8 @@
  * @module core/message-pipeline
  */
 
+import { randomUUID } from "node:crypto";
+
 import config from "../config.js";
 import { saveMessage } from "../database/index.js";
 import { orchestrator } from "../engines/orchestrator.js";
@@ -88,6 +90,8 @@ export interface PipelineResult {
   retrievedMemoryIds: string[];
   /** Estimated provisional reward before user follow-up is known. */
   provisionalReward: number;
+  /** Trace identifier for correlating log entries across this pipeline execution. */
+  traceId: string;
 }
 
 export interface PipelineOptions {
@@ -101,11 +105,12 @@ export interface PipelineOptions {
   streamChannel?: BaseChannel;
 }
 
-function blockedResult(): PipelineResult {
+function blockedResult(traceId: string): PipelineResult {
   return {
     response: BLOCKED_RESPONSE,
     retrievedMemoryIds: [],
     provisionalReward: 0,
+    traceId,
   };
 }
 
@@ -464,12 +469,13 @@ async function processMessageInternal(
   options: PipelineOptions,
 ): Promise<PipelineResult> {
   const { channel, sessionMode = "dm" } = options;
+  const traceId = randomUUID();
 
   // Stage 1: Input safety
   const inputSafety = await filterPromptWithAffordance(rawText, userId);
   if (!inputSafety.safe && inputSafety.affordance?.shouldBlock) {
-    log.warn("message blocked by affordance checker", { userId, channel });
-    return blockedResult();
+    log.warn("message blocked by affordance checker", { traceId, userId, channel });
+    return blockedResult(traceId);
   }
   const safeText = inputSafety.sanitized;
 
@@ -484,11 +490,12 @@ async function processMessageInternal(
   // Stage 1.5: Token budget enforcement
   const budgetCheck = await tokenBudget.checkBudget(userId);
   if (!budgetCheck.allowed) {
-    log.warn("token budget exceeded", { userId, channel, remaining: budgetCheck.remaining });
+    log.warn("token budget exceeded", { traceId, userId, channel, remaining: budgetCheck.remaining });
     return {
       response: budgetCheck.message ?? "Token budget exceeded.",
       retrievedMemoryIds: [],
       provisionalReward: 0,
+      traceId,
     };
   }
 
@@ -627,6 +634,7 @@ async function processMessageInternal(
     response,
     retrievedMemoryIds,
     provisionalReward: computeProvisionalReward(retrievedMemoryIds),
+    traceId,
   };
 }
 
@@ -676,6 +684,7 @@ export async function processMessage(
           "Maaf, permintaanmu membutuhkan waktu terlalu lama. Coba lagi.",
         retrievedMemoryIds: [],
         provisionalReward: 0,
+        traceId: randomUUID(),
       };
     }
     throw err;

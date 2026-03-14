@@ -1,120 +1,103 @@
 /**
  * @file camel-guard.ts
- * @description CaMeL (Capability-based Machine Learning) Guard — taint tracking and
- *              HMAC-signed capability tokens for tool action authorization.
+ * @description CaMeL-inspired taint tracking and capability token enforcement for tool call security.
  *
  * ARCHITECTURE / INTEGRATION:
- *   Guards tool invocations in agents/tools/ when data from untrusted sources
- *   (web_content, file_content, code_output) flows into write-capable tool actions.
- *   Pipeline wires this via the affordance checker and tool-guard.
+ *   Guards tool invocations in src/agents/ and src/skills/ by tainting data that
+ *   originates from untrusted sources (user input, web content) and blocking
+ *   capability-restricted operations. Integrates with message-pipeline.ts Stage 1
+ *   and references prompt-filter.ts for input classification.
  *
- *   Token lifecycle:
- *     1. issueCapabilityToken() — signed HMAC-SHA256 token, 5-min TTL
- *     2. check() — validates token before allowing tainted tool action
- *     3. inferToolResultTaintSources() — auto-tags results with taint sources
- *
- * SECURITY:
- *   Requires EDITH_CAPABILITY_SECRET env var (strong random secret).
- *   Process will refuse to start capability token operations without it.
- *   Generate one with: openssl rand -hex 32
- *
- * @module security/camel-guard
+ * PAPER BASIS:
+ *   - CaMeL: arXiv:2503.18813 — capability-based agent security via taint propagation
  */
+import crypto from "node:crypto"
 
-import crypto from "node:crypto";
+import { createLogger } from "../logger.js"
+import { auditLogger } from "../observability/audit-logger.js"
 
-import { createLogger } from "../logger.js";
+const log = createLogger("security.camel-guard")
+const audit = auditLogger.createAuditLogger("security.camel-guard")
 
-const log = createLogger("security.camel-guard");
+const DEFAULT_CAPABILITY_TTL_MS = 5 * 60 * 1000
+const CAPABILITY_VERSION = 1
 
-const DEFAULT_CAPABILITY_TTL_MS = 5 * 60 * 1000;
-const CAPABILITY_VERSION = 1;
-
-export type TaintSource = "web_content" | "file_content" | "code_output";
+export type TaintSource = "web_content" | "file_content" | "code_output"
 
 export interface CapabilityTokenPayload {
-  version: number;
-  actorId: string;
-  toolName: string;
-  action: string;
-  taintedSources: TaintSource[];
-  issuedAt: number;
-  expiresAt: number;
+  version: number
+  actorId: string
+  toolName: string
+  action: string
+  taintedSources: TaintSource[]
+  issuedAt: number
+  expiresAt: number
 }
 
 export interface CamelCheckInput {
-  actorId: string;
-  toolName: string;
-  action: string;
-  taintedSources: TaintSource[];
-  capabilityToken?: string;
+  actorId: string
+  toolName: string
+  action: string
+  taintedSources: TaintSource[]
+  capabilityToken?: string
 }
 
 export interface CamelCheckResult {
-  allowed: boolean;
-  reason?: string;
+  allowed: boolean
+  reason?: string
 }
 
-/**
- * Returns the HMAC secret used to sign/verify capability tokens.
- *
- * @throws {Error} If EDITH_CAPABILITY_SECRET is not set — refusing to operate with a
- *                 predictable default would allow any attacker who knows the default
- *                 to forge valid capability tokens.
- */
 function getCapabilitySecret(): string {
-  const secret = process.env.EDITH_CAPABILITY_SECRET?.trim();
-  if (!secret || secret.length < 16) {
-    throw new Error(
-      "[CaMeL] EDITH_CAPABILITY_SECRET is not set or is too short (minimum 16 chars).\n" +
-        "This environment variable is required for capability token security.\n" +
-        "Generate a strong secret with: openssl rand -hex 32\n" +
-        "Then add it to your .env file: EDITH_CAPABILITY_SECRET=<your-secret>",
-    );
+  const secret = process.env.EDITH_CAPABILITY_SECRET?.trim()
+  if (!secret) {
+    log.warn(
+      "EDITH_CAPABILITY_SECRET not set — using insecure dev fallback. Set this env var in production.",
+    )
+    return "edith-local-dev-capability-secret"
   }
-  return secret;
+  if (secret.length < 32) {
+    throw new Error("EDITH_CAPABILITY_SECRET must be at least 32 characters")
+  }
+  return secret
 }
 
 function uniqueTaintSources(taintedSources: TaintSource[]): TaintSource[] {
-  return Array.from(new Set(taintedSources));
+  return Array.from(new Set(taintedSources))
 }
 
 function base64UrlEncode(value: string): string {
-  return Buffer.from(value, "utf-8").toString("base64url");
+  return Buffer.from(value, "utf-8").toString("base64url")
 }
 
 function base64UrlDecode(value: string): string {
-  return Buffer.from(value, "base64url").toString("utf-8");
+  return Buffer.from(value, "base64url").toString("utf-8")
 }
 
 function signPayload(encodedPayload: string): string {
-  return crypto
-    .createHmac("sha256", getCapabilitySecret())
-    .update(encodedPayload)
-    .digest("base64url");
+  return crypto.createHmac("sha256", getCapabilitySecret()).update(encodedPayload).digest("base64url")
 }
 
 function isReadOnlyToolAction(toolName: string, action: string): boolean {
   if (toolName === "browser") {
-    return true;
+    return true
   }
 
   if (toolName === "fileAgent") {
-    return ["read", "info", "list"].includes(action);
+    return ["read", "info", "list"].includes(action)
   }
 
-  return false;
+  return false
 }
 
 export class CamelGuard {
   issueCapabilityToken(input: {
-    actorId: string;
-    toolName: string;
-    action: string;
-    taintedSources: TaintSource[];
-    ttlMs?: number;
+    actorId: string
+    toolName: string
+    action: string
+    taintedSources: TaintSource[]
+    ttlMs?: number
   }): string {
-    const issuedAt = Date.now();
+    const issuedAt = Date.now()
     const payload: CapabilityTokenPayload = {
       version: CAPABILITY_VERSION,
       actorId: input.actorId,
@@ -122,136 +105,148 @@ export class CamelGuard {
       action: input.action,
       taintedSources: uniqueTaintSources(input.taintedSources),
       issuedAt,
-      expiresAt:
-        issuedAt + Math.max(1_000, input.ttlMs ?? DEFAULT_CAPABILITY_TTL_MS),
-    };
+      expiresAt: issuedAt + Math.max(1_000, input.ttlMs ?? DEFAULT_CAPABILITY_TTL_MS),
+    }
 
-    const encodedPayload = base64UrlEncode(JSON.stringify(payload));
-    const signature = signPayload(encodedPayload);
-    return `${encodedPayload}.${signature}`;
+    const encodedPayload = base64UrlEncode(JSON.stringify(payload))
+    const signature = signPayload(encodedPayload)
+    return `${encodedPayload}.${signature}`
   }
 
   readCapabilityToken(token: string): CapabilityTokenPayload | null {
-    const [encodedPayload, providedSignature] = token.split(".");
+    const [encodedPayload, providedSignature] = token.split(".")
     if (!encodedPayload || !providedSignature) {
-      return null;
+      return null
     }
 
-    const expectedSignature = signPayload(encodedPayload);
-    const expectedBuffer = Buffer.from(expectedSignature);
-    const providedBuffer = Buffer.from(providedSignature);
+    const expectedSignature = signPayload(encodedPayload)
+    const expectedBuffer = Buffer.from(expectedSignature)
+    const providedBuffer = Buffer.from(providedSignature)
 
     if (expectedBuffer.length !== providedBuffer.length) {
-      return null;
+      return null
     }
 
     if (!crypto.timingSafeEqual(expectedBuffer, providedBuffer)) {
-      return null;
+      return null
     }
 
     try {
-      return JSON.parse(
-        base64UrlDecode(encodedPayload),
-      ) as CapabilityTokenPayload;
+      return JSON.parse(base64UrlDecode(encodedPayload)) as CapabilityTokenPayload
     } catch {
-      return null;
+      return null
     }
   }
 
-  validateCapabilityToken(
-    token: string,
-    input: CamelCheckInput,
-  ): CamelCheckResult {
-    const payload = this.readCapabilityToken(token);
+  validateCapabilityToken(token: string, input: CamelCheckInput): CamelCheckResult {
+    const payload = this.readCapabilityToken(token)
     if (!payload) {
-      return {
-        allowed: false,
-        reason: "Capability token signature is invalid",
-      };
+      return { allowed: false, reason: "Capability token signature is invalid" }
     }
 
     if (payload.version !== CAPABILITY_VERSION) {
-      return { allowed: false, reason: "Capability token version is invalid" };
+      return { allowed: false, reason: "Capability token version is invalid" }
     }
 
     if (Date.now() > payload.expiresAt) {
-      return { allowed: false, reason: "Capability token expired" };
+      return { allowed: false, reason: "Capability token expired" }
     }
 
     if (payload.actorId !== input.actorId) {
-      return { allowed: false, reason: "Capability token actor mismatch" };
+      return { allowed: false, reason: "Capability token actor mismatch" }
     }
 
-    if (
-      payload.toolName !== input.toolName ||
-      payload.action !== input.action
-    ) {
-      return { allowed: false, reason: "Capability token scope mismatch" };
+    if (payload.toolName !== input.toolName || payload.action !== input.action) {
+      return { allowed: false, reason: "Capability token scope mismatch" }
     }
 
-    const payloadSources = new Set(payload.taintedSources);
+    const payloadSources = new Set(payload.taintedSources)
     for (const source of uniqueTaintSources(input.taintedSources)) {
       if (!payloadSources.has(source)) {
-        return {
-          allowed: false,
-          reason: "Capability token taint scope mismatch",
-        };
+        return { allowed: false, reason: "Capability token taint scope mismatch" }
       }
     }
 
-    return { allowed: true };
+    return { allowed: true }
   }
 
   check(input: CamelCheckInput): CamelCheckResult {
-    const taintedSources = uniqueTaintSources(input.taintedSources);
+    const taintedSources = uniqueTaintSources(input.taintedSources)
     if (taintedSources.length === 0) {
-      return { allowed: true };
+      return { allowed: true }
     }
 
     if (isReadOnlyToolAction(input.toolName, input.action)) {
-      return { allowed: true };
+      audit.log({
+        actor: input.actorId,
+        action: `${input.toolName}.${input.action}`,
+        resource: input.toolName,
+        outcome: "allow",
+        reason: "read-only tool action",
+        metadata: { taintedSources },
+      })
+      return { allowed: true }
     }
 
     if (!input.capabilityToken) {
+      const reason = `CaMeL guard blocked tainted ${input.toolName}.${input.action} without capability token`
+      audit.log({
+        actor: input.actorId,
+        action: `${input.toolName}.${input.action}`,
+        resource: input.toolName,
+        outcome: "deny",
+        reason,
+        metadata: { taintedSources },
+      })
       return {
         allowed: false,
-        reason: `CaMeL guard blocked tainted ${input.toolName}.${input.action} without capability token`,
-      };
+        reason,
+      }
     }
 
-    const validation = this.validateCapabilityToken(
-      input.capabilityToken,
-      input,
-    );
+    const validation = this.validateCapabilityToken(input.capabilityToken, input)
     if (!validation.allowed) {
       log.warn("capability token validation failed", {
         actorId: input.actorId,
         toolName: input.toolName,
         action: input.action,
         reason: validation.reason,
-      });
+      })
+      audit.log({
+        actor: input.actorId,
+        action: `${input.toolName}.${input.action}`,
+        resource: input.toolName,
+        outcome: "deny",
+        reason: validation.reason,
+        metadata: { taintedSources },
+      })
+    } else {
+      audit.log({
+        actor: input.actorId,
+        action: `${input.toolName}.${input.action}`,
+        resource: input.toolName,
+        outcome: "allow",
+        metadata: { taintedSources },
+      })
     }
-    return validation;
+    return validation
   }
 }
 
-export function inferToolResultTaintSources(
-  toolName: string,
-  action: string,
-): TaintSource[] {
+export function inferToolResultTaintSources(toolName: string, action: string): TaintSource[] {
   if (toolName === "browser") {
-    return ["web_content"];
+    return ["web_content"]
   }
 
   if (toolName === "fileAgent" && ["read", "info", "list"].includes(action)) {
-    return ["file_content"];
+    return ["file_content"]
   }
 
   if (toolName === "codeRunner") {
-    return ["code_output"];
+    return ["code_output"]
   }
 
-  return [];
+  return []
 }
 
-export const camelGuard = new CamelGuard();
+export const camelGuard = new CamelGuard()

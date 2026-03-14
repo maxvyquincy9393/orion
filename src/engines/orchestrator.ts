@@ -15,6 +15,9 @@
  * @module engines/orchestrator
  */
 
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import path from "node:path"
+
 import config from "../config.js"
 import { createLogger } from "../logger.js"
 import { anthropicEngine } from "./anthropic.js"
@@ -33,6 +36,18 @@ const CIRCUIT_FAILURE_THRESHOLD = 5
 const CIRCUIT_COOLDOWN_MS = 60_000
 const ENGINE_RETRY_MAX_ATTEMPTS = 2
 const ENGINE_RETRY_BASE_DELAY_MS = 1_000
+
+/** Per-task-type circuit breaker thresholds. Latency-sensitive tasks trip faster. */
+const CIRCUIT_THRESHOLDS: Record<TaskType, number> = {
+  fast: 3,
+  reasoning: 7,
+  code: 5,
+  multimodal: 5,
+  local: 10,
+}
+
+/** File path for persisting circuit breaker state across restarts. */
+const CIRCUIT_STATE_FILE_PATH = path.resolve(".edith", "engines", "circuit-breaker-state.json")
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504])
 
 const DEFAULT_ENGINE_CANDIDATES: readonly Engine[] = [
@@ -87,6 +102,11 @@ export class Orchestrator {
 
   getAvailableEngines(): string[] {
     return [...this.engines.keys()]
+  }
+
+  /** Returns the number of currently registered (available) engines. */
+  getAvailableEngineCount(): number {
+    return this.engines.size
   }
 
   /** Get all available engine instances for external access (e.g. model catalog). */
@@ -344,14 +364,16 @@ export class Orchestrator {
         }
 
         const backoffMs = ENGINE_RETRY_BASE_DELAY_MS * (2 ** (attempt - 1))
+        const jitter = Math.random() * backoffMs * 0.1
+        const delayMs = backoffMs + jitter
         log.warn("transient engine failure, retrying with backoff", {
           engine: engine.name,
           attempt,
           maxAttempts: ENGINE_RETRY_MAX_ATTEMPTS,
-          backoffMs,
+          backoffMs: delayMs,
           error,
         })
-        await this.sleep(backoffMs)
+        await this.sleep(delayMs)
       }
     }
 
@@ -404,7 +426,11 @@ export class Orchestrator {
     this.circuits.delete(engineName)
   }
 
-  private markEngineFailure(engineName: string, now = Date.now()): void {
+  private markEngineFailure(engineName: string, now = Date.now(), taskType?: TaskType): void {
+    const threshold = taskType
+      ? (CIRCUIT_THRESHOLDS[taskType] ?? CIRCUIT_FAILURE_THRESHOLD)
+      : CIRCUIT_FAILURE_THRESHOLD
+
     const previous = this.circuits.get(engineName) ?? {
       consecutiveFailures: 0,
       openUntil: 0,
@@ -413,19 +439,62 @@ export class Orchestrator {
     const nextFailures = previous.consecutiveFailures + 1
     const nextState: CircuitState = {
       consecutiveFailures: nextFailures,
-      openUntil: nextFailures >= CIRCUIT_FAILURE_THRESHOLD
+      openUntil: nextFailures >= threshold
         ? (now + CIRCUIT_COOLDOWN_MS)
         : previous.openUntil,
     }
 
     this.circuits.set(engineName, nextState)
 
-    if (nextFailures === CIRCUIT_FAILURE_THRESHOLD) {
+    if (nextFailures === threshold) {
       log.warn("engine circuit opened", {
         engine: engineName,
         failures: nextFailures,
+        threshold,
         cooldownMs: CIRCUIT_COOLDOWN_MS,
       })
+    }
+  }
+
+  /** Persist circuit breaker state to disk for recovery across restarts. */
+  async saveCircuitState(): Promise<void> {
+    try {
+      const state: Record<string, CircuitState> = {}
+      for (const [key, value] of this.circuits) {
+        state[key] = value
+      }
+      await mkdir(path.dirname(CIRCUIT_STATE_FILE_PATH), { recursive: true })
+      await writeFile(CIRCUIT_STATE_FILE_PATH, JSON.stringify(state, null, 2), "utf-8")
+      log.debug("circuit breaker state saved", { entries: this.circuits.size })
+    } catch (err) {
+      log.warn("failed to save circuit breaker state", { err })
+    }
+  }
+
+  /** Load circuit breaker state from disk (graceful degradation if missing/corrupt). */
+  async loadCircuitState(): Promise<void> {
+    try {
+      const raw = await readFile(CIRCUIT_STATE_FILE_PATH, "utf-8")
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      let loaded = 0
+      for (const [key, value] of Object.entries(parsed)) {
+        if (
+          value && typeof value === "object" && !Array.isArray(value)
+          && typeof (value as Record<string, unknown>).consecutiveFailures === "number"
+          && typeof (value as Record<string, unknown>).openUntil === "number"
+        ) {
+          this.circuits.set(key, value as CircuitState)
+          loaded++
+        }
+      }
+      log.info("circuit breaker state loaded", { entries: loaded })
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === "ENOENT") {
+        log.info("no previous circuit breaker state found")
+      } else {
+        log.warn("failed to load circuit breaker state", { err })
+      }
     }
   }
 
